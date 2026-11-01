@@ -41,3 +41,5 @@ jobs:
           key: oracle-${{ hashFiles('test/oracle/setup.sh', 'test/oracle/suites.ts', 'test/oracle/fuzz.ts') }}
           restore-keys: oracle-
       - run: HELIX_DIR="$RUNNER_TEMP/helix" bun test
+      - run: bun x playwright-core install --with-deps chromium-headless-shell
+      - run: HELIX_DIR="$RUNNER_TEMP/helix" bun run browser

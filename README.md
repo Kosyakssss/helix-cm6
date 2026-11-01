@@ -15,7 +15,6 @@ This is the engine from [helix-motions](https://github.com/Kosyakssss/helix-moti
 
 Not ready to install yet:
 
-- The view layer has no browser differential yet (see `docs/testing.md`).
 - Loader hooks for the wasm modules, package exports and an npm release come next.
 - The tree-sitter build has only the markdown grammars.
 
@@ -26,10 +25,11 @@ Not ready to install yet:
 - `src/view/`, `src/codemirror.ts`: the view layer for a CodeMirror 6 editor (keys, IME, cursors, panels). `helix({ config })` returns its extension; `config` is the text of a Helix `config.toml`.
 - `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
 - `test/oracle/`: the comparison with real Helix.
+- `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium.
 
 ## Tests
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md).
+`bun test` compares the headless engine with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
 
 ## Helix forks
 
