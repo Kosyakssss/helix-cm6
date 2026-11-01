@@ -26,7 +26,7 @@ export function executeCommand(cx: Context, command: MappableCommand, arg?: stri
     case "static": {
       const fn = STATIC_COMMANDS[command.name];
       if (fn) fn(cx, arg);
-      else if (UNSUPPORTED.includes(command.name)) cx.editor.setStatus(`${command.name} is not available in Obsidian`);
+      else if (UNSUPPORTED.includes(command.name)) cx.editor.setStatus(`${command.name} is not available`);
       else cx.editor.setError(`no such command: '${command.name}'`);
       return;
     }

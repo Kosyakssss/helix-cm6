@@ -1,13 +1,12 @@
 import type { TransactionSpec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { helix } from "../../src/codemirror";
+import { helix, helixEditor } from "../../src/codemirror";
 import { commitHistoryNow } from "../../src/commands/jumps";
 import { plain, print } from "../../src/core/markup";
-import { compilePattern } from "../../src/core/regex";
 import { helixField, helixOwned, setHelix, toNative } from "../../src/state";
 
 const { text, selection } = print(new URLSearchParams(location.search).get("markup") ?? "");
-const view = new EditorView({ parent: document.body, doc: "\n", extensions: helix() });
+const view = new EditorView({ parent: document.body, doc: "\n", extensions: helix({ syntax: false }) });
 const next = { ...view.state.field(helixField), selection };
 view.dispatch({
   changes: { from: 0, to: 1, insert: text },
@@ -28,12 +27,7 @@ commitHistoryNow({
 view.focus();
 
 function regexLoaded(): boolean {
-  try {
-    compilePattern("a", false);
-    return true;
-  } catch {
-    return false;
-  }
+  return view.state.facet(helixEditor)?.regex != null;
 }
 
 function state() {

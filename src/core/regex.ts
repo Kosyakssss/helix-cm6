@@ -12,14 +12,9 @@ export interface Pattern {
   isMatch(doc: Text, from: number, to: number): boolean;
 }
 
-let engine: RustRegexEngine | null = null;
-const dropped = new FinalizationRegistry<number>((regex) => engine?.drop(regex));
+const dropped = new FinalizationRegistry<{ engine: RustRegexEngine; regex: number }>(({ engine, regex }) => engine.drop(regex));
 
-export function setRegexEngine(next: RustRegexEngine | null): void {
-  engine = next;
-}
-
-export function compilePattern(pattern: string, caseInsensitive: boolean): Pattern {
+export function compilePattern(engine: RustRegexEngine | null, pattern: string, caseInsensitive: boolean): Pattern {
   const rust = engine;
   if (!rust) throw new Error("the regex engine is still loading");
   const regex = rust.compile(pattern, caseInsensitive);
@@ -29,6 +24,6 @@ export function compilePattern(pattern: string, caseInsensitive: boolean): Patte
     findAll: (doc, from, to) => rust.findAll(regex, doc, from, to),
     isMatch: (doc, from, to) => rust.isMatch(regex, doc, from, to),
   };
-  dropped.register(compiled, regex);
+  dropped.register(compiled, { engine: rust, regex });
   return compiled;
 }

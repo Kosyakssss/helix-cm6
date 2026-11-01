@@ -2,7 +2,6 @@ import type { Completion } from "../core/prompt";
 import type { Context } from "../core/editor";
 import { nextGraphemeBoundary } from "../graphemes";
 import { parseUndoKind } from "../history";
-import { Selection } from "../selection";
 import { refill } from "../core/textwrap";
 import { OPTIONS } from "../core/options";
 import { apply, changeSetOf, docOf, selOf, setSel } from "./util";
@@ -145,8 +144,6 @@ function sortCommand(cx: Context, args: Args): void {
   commitHistoryNow(cx.host);
 }
 
-let gotoPreview: Selection | null = null;
-
 function gotoLineNumber(cx: Context, args: Args, event: PromptEvent): void {
   const update = () => {
     const n = Number(args.positional[0]);
@@ -154,13 +151,13 @@ function gotoLineNumber(cx: Context, args: Args, event: PromptEvent): void {
       cx.editor.setError("'goto': invalid line number");
       return false;
     }
-    if (gotoPreview === null) gotoPreview = selOf(cx);
+    if (cx.editor.gotoPreview === null) cx.editor.gotoPreview = selOf(cx);
     gotoLineWithoutJumplist(cx, n, "move");
     return true;
   };
   if (event === "abort" || (event === "update" && args.positional.length === 0)) {
-    if (gotoPreview) setSel(cx, gotoPreview);
-    gotoPreview = null;
+    if (cx.editor.gotoPreview) setSel(cx, cx.editor.gotoPreview);
+    cx.editor.gotoPreview = null;
     return;
   }
   if (event === "update") {
@@ -168,8 +165,8 @@ function gotoLineNumber(cx: Context, args: Args, event: PromptEvent): void {
     return;
   }
   if (!update()) return;
-  const last = gotoPreview!;
-  gotoPreview = null;
+  const last = cx.editor.gotoPreview!;
+  cx.editor.gotoPreview = null;
   jumplistFor(cx).push({ docId: cx.host.id, selection: last });
 }
 
@@ -387,11 +384,6 @@ export function executeCommandLine(cx: Context, input: string, event: PromptEven
 const PATH_COMMANDS = new Set(["open", "vsplit", "hsplit", "read", "move", "move!", "write", "write!"]);
 const OPTION_COMMANDS = new Set(["set-option", "toggle-option", "get-option"]);
 
-export let pathCompleter: ((prefix: string) => string[]) | null = null;
-
-export function setPathCompleter(fn: ((prefix: string) => string[]) | null): void {
-  pathCompleter = fn;
-}
 
 function quoteCompletion(token: Token, candidate: string): Completion {
   if (token.quote === null) {
@@ -401,7 +393,7 @@ function quoteCompletion(token: Token, candidate: string): Completion {
   return { start: token.contentStart, text: candidate.split(token.quote).join(token.quote + token.quote), label: candidate };
 }
 
-export function completeCommandLine(input: string): Completion[] {
+export function completeCommandLine(input: string, pathCompleter: ((prefix: string) => string[]) | null): Completion[] {
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);

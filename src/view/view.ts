@@ -424,6 +424,18 @@ function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTM
   setProps(dom, { "--hx-autoinfo-lift": `${lift}px`, "--hx-autoinfo-room": `${Math.max(0, panelRect.top - lift - (editorRect ?? view.dom.getBoundingClientRect()).top - 16)}px` });
 }
 
+export function uiRefresher(editor: HelixEditor): (host: Host) => void {
+  const last = new WeakMap<EditorView, string>();
+  return (host) => {
+    const view = host.view;
+    if (!view) return;
+    const next = uiSignature(editor, host);
+    if (last.get(view) === next) return;
+    last.set(view, next);
+    view.dispatch({});
+  };
+}
+
 export function uiSignature(editor: HelixEditor, host: Host): string {
   const p = editor.activePrompt;
   const auto = editor.autoinfo;

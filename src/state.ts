@@ -2,10 +2,11 @@ import {
   Annotation,
   EditorSelection,
   EditorState,
+  Facet,
   StateEffect,
   StateField,
   type Text,
-  Transaction,
+  type Transaction,
 } from "@codemirror/state";
 import { Range, Selection } from "./selection";
 import { makeHistoryField } from "./history";
@@ -82,10 +83,12 @@ export function toNative(value: HelixState, doc: Text): EditorSelection {
   return EditorSelection.create(ranges, value.selection.primaryIndex);
 }
 
+export const dropSelectionChange = Facet.define<(tr: Transaction) => boolean>();
+
 export const syncNativeSelection = EditorState.transactionFilter.of((tr) => {
   if (tr.annotation(helixOwned)) return tr;
   if (!tr.docChanged && !tr.selection) return tr;
-  if (isMarkupSnap(tr)) return [];
+  if (tr.startState.facet(dropSelectionChange).some((drop) => drop(tr))) return [];
   const value = derive(tr.startState.field(helixField), tr);
   const native = toNative(value, tr.newDoc);
   if (native.eq(tr.newSelection)) return tr;
@@ -99,19 +102,5 @@ export const syncNativeSelection = EditorState.transactionFilter.of((tr) => {
     },
   ];
 });
-
-function isMarkupSnap(tr: Transaction): boolean {
-  if (tr.docChanged || !tr.selection || tr.scrollIntoView || tr.effects.length > 0) return false;
-  if (tr.annotation(Transaction.userEvent) !== undefined) return false;
-  if (tr.startState.field(helixField).mode === "insert") return false;
-  const before = tr.startState.selection.ranges;
-  const after = tr.newSelection.ranges;
-  if (before.length !== after.length) return false;
-  const doc = tr.startState.doc;
-  return before.every((r, i) => {
-    const n = after[i]!;
-    return doc.lineAt(r.anchor).number === doc.lineAt(n.anchor).number && doc.lineAt(r.head).number === doc.lineAt(n.head).number;
-  });
-}
 
 export const historyField = makeHistoryField((state) => state.field(helixField).selection);

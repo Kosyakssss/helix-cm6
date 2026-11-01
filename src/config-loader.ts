@@ -140,7 +140,7 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
       case "line-number":
         if (value === "absolute" || value === "relative") config.lineNumber = value;
         else warnings.push(`editor.line-number: expected "absolute" or "relative"`);
-        if (value === "relative") warnings.push("editor.line-number: relative numbers are not drawn; Obsidian shows absolute line numbers");
+        if (value === "relative") warnings.push("editor.line-number: relative numbers are not drawn");
         break;
       case "gutters": {
         const layout = Array.isArray(value) ? value : (value as Record<string, unknown> | null)?.layout;
@@ -190,7 +190,7 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
         break;
       }
       case "whitespace":
-        warnings.push("editor.whitespace: not drawn; Obsidian shows its own indentation guides");
+        warnings.push("editor.whitespace: not drawn");
         break;
       case "statusline": {
         const s = value as Record<string, unknown>;

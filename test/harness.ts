@@ -10,10 +10,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createLoader, SyntaxSessions } from "../src/syntax/languages";
 import { RustRegexEngine } from "../src/core/rx";
-import { setRegexEngine } from "../src/core/regex";
 
 const root = resolve(import.meta.dir, "..");
-setRegexEngine(await RustRegexEngine.load(readFileSync(resolve(root, "regex/regex.wasm"))));
+const regexEngine = await RustRegexEngine.load(readFileSync(resolve(root, "regex/regex.wasm")));
 const syntaxSessions = new SyntaxSessions(await createLoader(readFileSync(resolve(root, "tree-sitter/tree-sitter.wasm"))));
 
 export interface RunResult {
@@ -27,7 +26,9 @@ export interface RunResult {
 }
 
 export function makeEditor(config?: Partial<Config>) {
-  return new HelixEditor(buildKeymaps(), { ...defaultConfig(), ...config });
+  const editor = new HelixEditor(buildKeymaps(), { ...defaultConfig(), ...config });
+  editor.regex = regexEngine;
+  return editor;
 }
 
 export function makeHost(markup: string) {

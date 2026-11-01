@@ -381,7 +381,7 @@ export function regexPrompt(
 function compile(editor: Context["editor"], input: string): Pattern | Error {
   const insensitive = editor.config.search.smartCase ? ![...input].some((c) => isUppercase(c)) : false;
   try {
-    return compilePattern(input, insensitive);
+    return compilePattern(editor.regex, input, insensitive);
   } catch (err) {
     return err as Error;
   }
@@ -445,7 +445,7 @@ function searchNextOrPrev(cx: Context, movement: "move" | "extend", direction: "
   const insensitive = cx.editor.config.search.smartCase ? ![...query].some((c) => isUppercase(c)) : false;
   let re: Pattern;
   try {
-    re = compilePattern(query, insensitive);
+    re = compilePattern(cx.editor.regex, query, insensitive);
   } catch {
     cx.editor.setError(`Invalid regex: ${query}`);
     return;

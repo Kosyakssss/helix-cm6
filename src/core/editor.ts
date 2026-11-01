@@ -12,6 +12,7 @@ import { getOption, setOption, toggleOption } from "./options";
 import { runComments, type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
 import type { Selection } from "../selection";
+import type { RustRegexEngine } from "./rx";
 
 export type OnKeyCallback = (cx: Context, key: string) => void;
 export type OnKeyKind = "pseudoPending" | "fallback";
@@ -107,6 +108,9 @@ export class HelixEditor {
   jumpLabels = new Map<string, JumpLabel[]>();
   commentTokens: ((host: Host, pos: number) => CommentTokens) | null = null;
   syntax: ((host: Host) => Syntax | null) | null = null;
+  regex: RustRegexEngine | null = null;
+  pathCompleter: ((prefix: string) => string[]) | null = null;
+  gotoPreview: Selection | null = null;
   onConfigChanged: (() => void) | null = null;
   replayKeyHook: ((host: Host, key: string) => boolean) | null = null;
   onNextKeyCleanup: (() => void)[] = [];
@@ -198,7 +202,7 @@ export class HelixEditor {
 
   workspaceCommand(cx: Context, name: string, args: string[] = []): void {
     if (this.workspace) this.workspace.run(cx, name, args);
-    else this.setStatus(`${name} needs Obsidian`);
+    else this.setStatus(`${name} is not available in this editor`);
   }
 
   scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", sync: boolean): void {
@@ -253,7 +257,7 @@ export class HelixEditor {
     this.prompt(cx, {
       label: ":",
       history: ":",
-      complete: completeCommandLine,
+      complete: (input) => completeCommandLine(input, this.pathCompleter),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
       onCancel: () => executeCommandLine(fresh(), "", "abort"),
@@ -268,6 +272,13 @@ export class HelixEditor {
     }
     if (this.macroRecording && this.macroReplaying.length === 0) {
       this.macroRecording.keys.push(key);
+    }
+    if (this.activePrompt && this.activePrompt.host.id !== host.id) {
+      const other = this.activePrompt;
+      other.handleKey("esc");
+      if (this.activePrompt === other) this.activePrompt = null;
+      this.ui.promptChanged?.(other.host, this.activePrompt);
+      this.ui.render?.(other.host);
     }
     if (this.activePrompt) {
       const prompt = this.activePrompt;

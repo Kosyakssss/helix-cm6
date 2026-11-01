@@ -119,7 +119,7 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
   return fails;
 }
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
 const shardCount = Math.min(jobs, cases.length);
 const shards = Array.from({ length: shardCount }, (_, s) => cases.filter((_, i) => i % shardCount === s));
 const fails = (await Promise.all(shards.map((shard) => runShard(browser, shard))).finally(() => browser.close())).flat();
