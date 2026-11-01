@@ -144,7 +144,6 @@ export function moveVisualVertically(
     pos = moved.head;
     goal = moved.goalColumn;
   }
-  if (pos === range.cursor(doc)) return range;
   const line = doc.lineAt(pos);
   if (behaviour === "extend" && line.number === doc.lines && line.length === 0) return range;
   return range.putCursor(doc, pos, behaviour === "extend").withGoal(goal);
