@@ -87,6 +87,25 @@ await focus("a");
 const moved = await page.evaluate(() => (window as unknown as { helixMoveToLineEnd(n: string): number[] | null }).helixMoveToLineEnd("a"));
 if (!moved || moved[1] !== moved[2]) fails.push(`programmatic cursor move to the line end: got ${JSON.stringify(moved)}`);
 
+await focus("b");
+const doc = () => page.evaluate(() => (window as unknown as { helixDoc(n: string): string }).helixDoc("b"));
+const before = await doc();
+await page.keyboard.type("%d");
+const deleted = await doc();
+await page.keyboard.press("Meta+z");
+const undone = await doc();
+if (deleted !== "" || undone !== before) fails.push(`configured Meta-z undoes: got ${JSON.stringify([before, deleted, undone])}`);
+await page.keyboard.press("Meta+b");
+const unbound = await page.evaluate(() => (window as unknown as { helixLastKeydown(): unknown }).helixLastKeydown());
+if (JSON.stringify(unbound) !== JSON.stringify({ key: "b", meta: true, prevented: false })) fails.push(`unbound Meta-b reaches the page untouched: got ${JSON.stringify(unbound)}`);
+if ((await doc()) !== undone) fails.push("unbound Meta-b changed the text");
+const cdp = await context.newCDPSession(page);
+const metaShiftZ = { key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 12 };
+await cdp.send("Input.dispatchKeyEvent", { ...metaShiftZ, type: "rawKeyDown" });
+await cdp.send("Input.dispatchKeyEvent", { ...metaShiftZ, type: "keyUp" });
+const redone = await doc();
+if (redone !== "") fails.push(`Meta+Shift+z reported with a lowercase key runs the configured Meta-Z redo: got ${JSON.stringify(redone)}`);
+
 await browser.close();
 if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));
 console.log(fails.join("\n"));

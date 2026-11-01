@@ -240,6 +240,7 @@ export function keyFromDom(e: DomKeyLike, literal: boolean, physical = true): st
     } else if ((physical && nonAscii) || macOptionChar || (e.ctrlKey && !/^[\x20-\x7e]$/.test(e.key))) {
       code = physicalChar(e.code, e.shiftKey) ?? code;
     }
+    if (e.shiftKey && (e.ctrlKey || e.altKey || e.metaKey) && /^[a-z]$/.test(code)) code = code.toUpperCase();
   } else {
     return null;
   }
