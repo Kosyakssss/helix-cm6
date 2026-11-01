@@ -1,0 +1,32 @@
+import type { Text } from "@codemirror/state";
+export type CharCategory = "whitespace" | "eol" | "word" | "punctuation" | "unknown";
+export declare function charIsLineEnding(ch: string): boolean;
+export declare function isWhitespace(ch: string): boolean;
+export declare function charIsWhitespace(ch: string): boolean;
+export declare function isAlphanumeric(ch: string): boolean;
+export declare function charIsWord(ch: string): boolean;
+export declare function charIsPunctuation(ch: string): boolean;
+export declare function isLowercase(ch: string): boolean;
+export declare function isUppercase(ch: string): boolean;
+export declare function categorizeChar(ch: string): CharCategory;
+export declare function textString(doc: Text): string;
+export declare function charAt(doc: Text, pos: number): string | null;
+export declare function charBefore(doc: Text, pos: number): string | null;
+export declare function nextCharPos(doc: Text, pos: number): number;
+export declare function prevCharPos(doc: Text, pos: number): number;
+export declare class CharCursor {
+    readonly doc: Text;
+    pos: number;
+    constructor(doc: Text, pos: number);
+    next(): string | null;
+    prev(): string | null;
+}
+export declare function lineIndex(doc: Text, pos: number): number;
+export declare function lineCount(doc: Text): number;
+export declare function lineStart(doc: Text, idx: number): number;
+export declare function lineEnd(doc: Text, idx: number): number;
+export declare function lineEndInclusive(doc: Text, idx: number): number;
+export declare function lineIsEmpty(doc: Text, idx: number): boolean;
+export declare function lineText(doc: Text, idx: number): string;
+export declare function lineWithEnding(doc: Text, idx: number): string;
+export declare function charCount(s: string): number;

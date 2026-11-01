@@ -15,6 +15,10 @@ Helix for CodeMirror 6, ported from Helix's source. Read `CONTRIBUTING.md` and `
 - Plain CodeMirror 6 and DOM. No imports from an app (`obsidian` or other).
 - `@codemirror/*` are peer dependencies. The only runtime dependency is `smol-toml`. Ask before you add one.
 - Tree-sitter and regex are our own wasm builds (`tree-sitter/build.sh`, `regex/build.sh`). CI checks that they rebuild byte for byte.
+- `src/index.ts` is the public API. Apps and helix-motions import only from it. Add an export there instead of a deep import.
+- `dist/` is committed so a git install needs no build. Run `bun run build` and commit `dist/` with each source change. CI checks that it matches.
+- No module-level state. State lives on `HelixEditor`, in editor state, or in the extension that `helix()` returns, so one page can have many editors.
+- No app workarounds in the engine. Use a hook, such as the `dropSelectionChange` facet, and let the app supply it.
 
 ## Code that runs inside Obsidian
 
@@ -29,7 +33,7 @@ helix-motions bundles this code into its `main.js`, so it must stay safe there. 
 
 - If the request is to diagnose, find the root cause and report it. Do not fix until asked.
 - Discuss large changes and API choices before you make them.
-- An engine change gets a case in `test/oracle/suites.ts`. Run `bun run check`, `bun run lint` and `bun test`.
+- An engine change gets a case in `test/oracle/suites.ts`. Run `bun run check`, `bun run lint`, `bun test`, `bun run browser` and `bun run views`.
 - A change that the oracle cannot see (keys, IME, drawing) needs a test in a real editor. See `docs/testing.md`.
 - If Helix itself has a bug, find or file a short upstream issue, and write down what the port does.
 

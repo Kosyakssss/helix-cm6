@@ -1,0 +1,12 @@
+import { Text } from "@codemirror/state";
+import { Selection, type Direction } from "../selection";
+import type { Syntax } from "./syntax";
+export declare function expandSelection(syntax: Syntax, selection: Selection): Selection;
+export declare function shrinkSelection(syntax: Syntax, selection: Selection): Selection;
+export declare function selectNextSibling(syntax: Syntax, selection: Selection): Selection;
+export declare function selectPrevSibling(syntax: Syntax, selection: Selection): Selection;
+export declare function selectAllSiblings(syntax: Syntax, selection: Selection): Selection;
+export declare function selectAllChildren(syntax: Syntax, selection: Selection): Selection;
+export declare function moveParentNodeEnd(syntax: Syntax, doc: Text, selection: Selection, dir: Direction, movement: "move" | "extend"): Selection;
+export declare function findMatchingBracket(syntax: Syntax, doc: Text, pos: number): number | null;
+export declare function findMatchingBracketFuzzy(syntax: Syntax, doc: Text, pos: number): number | null;

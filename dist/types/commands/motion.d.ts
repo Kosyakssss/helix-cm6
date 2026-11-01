@@ -1,0 +1,15 @@
+import type { Text, TransactionSpec } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
+import type { Context } from "../core/editor";
+import { type Movement } from "../movement";
+import { Range, type Direction } from "../selection";
+export type CommandFn = (cx: Context, arg?: string) => void;
+export declare function applyMotion(cx: Context, motion: (cx: Context) => void): void;
+export declare function repeatLastMotion(cx: Context): void;
+export declare function moveVisualSelection(cx: Context, view: EditorView, behaviour: Movement, move: (range: Range) => Range, extra?: TransactionSpec): void;
+export declare const motionCommands: Record<string, CommandFn>;
+export declare function gotoLine(cx: Context, movement: Movement): void;
+export declare function gotoLineWithoutJumplist(cx: Context, count: number, movement: Movement): void;
+export declare function findNthChar(n: number, doc: Text, matches: (ch: string) => boolean, pos: number, dir: Direction): number | null;
+export declare function findChar(cx: Context, dir: Direction, inclusive: boolean, extend: boolean): void;
+export declare function keyCharOf(key: string): string | null;

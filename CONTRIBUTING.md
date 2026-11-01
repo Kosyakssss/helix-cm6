@@ -10,6 +10,7 @@ This is a port. Behaviour follows Helix master at commit `ba40e54742`. If Helix 
 bun install
 bun run check            # TypeScript
 bun run lint             # ESLint
+bun run build            # dist/, committed; CI checks that it matches the source
 sh tree-sitter/build.sh  # rebuild tree-sitter.wasm (downloads wasi-sdk once)
 sh regex/build.sh        # rebuild regex.wasm (needs rustup; installs Rust 1.99.1 with the wasm target)
 ```
@@ -23,4 +24,4 @@ See `docs/testing.md` for details.
 
 ## Pull requests
 
-Add a case to `test/oracle/suites.ts` for engine changes. Keep `bun run check`, `bun run lint` and `bun test` passing.
+Add a case to `test/oracle/suites.ts` for engine changes. Run `bun run build` and commit `dist/` with the change. Keep `bun run check`, `bun run lint`, `bun test`, `bun run browser` and `bun run views` passing.

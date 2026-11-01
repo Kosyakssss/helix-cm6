@@ -1,0 +1,140 @@
+interface Exports {
+    memory: WebAssembly.Memory;
+    _initialize(): void;
+    hm_malloc(size: number): number;
+    hm_free(ptr: number): void;
+    hm_language(which: number): number;
+    hm_symbol_name(language: number, symbol: number): number;
+    hm_parse(language: number, text: number, length: number, ranges: number, count: number, oldTree: number): number;
+    hm_tree_edit(tree: number, start: number, oldEnd: number, newEnd: number): void;
+    hm_injection_matches(query: number, node: number, modes: number, content: number, language: number, shebang: number, buffer: number, capacity: number): number;
+    hm_tree_delete(tree: number): void;
+    hm_tree_root(tree: number, out: number): void;
+    hm_node_start(node: number): number;
+    hm_node_end(node: number): number;
+    hm_node_symbol(node: number): number;
+    hm_node_is_named(node: number): number;
+    hm_node_child_count(node: number): number;
+    hm_node_child(node: number, index: number, out: number): void;
+    hm_node_parent(node: number, out: number): void;
+    hm_node_next_sibling(node: number, out: number): void;
+    hm_node_prev_sibling(node: number, out: number): void;
+    hm_node_descendant(node: number, start: number, end: number, named: number, out: number): void;
+    hm_cursor_new(node: number): number;
+    hm_cursor_delete(cursor: number): void;
+    hm_cursor_node(cursor: number, out: number): void;
+    hm_cursor_parent(cursor: number): number;
+    hm_cursor_first_child(cursor: number): number;
+    hm_cursor_next_sibling(cursor: number): number;
+    hm_cursor_prev_sibling(cursor: number): number;
+    hm_cursor_first_child_for_byte(cursor: number, goal: number): number;
+    hm_query_new(language: number, source: number, length: number): number;
+    hm_query_capture_count(query: number): number;
+    hm_query_pattern_count(query: number): number;
+    hm_query_capture_name(query: number, index: number, length: number): number;
+    hm_query_string(query: number, index: number, length: number): number;
+    hm_query_predicates(query: number, pattern: number, length: number): number;
+}
+export declare class Runtime {
+    readonly x: Exports;
+    private readonly scratch;
+    private words;
+    private bytes;
+    private constructor();
+    static load(binary: Uint8Array): Promise<Runtime>;
+    u32(): Uint32Array;
+    u8(): Uint8Array;
+    get inPtr(): number;
+    get outPtr(): number;
+    get lenPtr(): number;
+    writeNode(ptr: number, node: Node): void;
+    readNode(ptr: number): Node | null;
+    string(ptr: number, length: number): string;
+    cString(ptr: number): string;
+    alloc(data: Uint8Array): number;
+    nodeCall(node: Node, f: (inPtr: number, outPtr: number) => void): Node | null;
+    nodeValue(node: Node, f: (inPtr: number) => number): number;
+}
+export declare class Language {
+    readonly rt: Runtime;
+    readonly ptr: number;
+    private readonly names;
+    constructor(rt: Runtime, ptr: number);
+    symbolName(symbol: number): string;
+}
+export declare class Node {
+    readonly rt: Runtime;
+    readonly raw: Uint32Array;
+    constructor(rt: Runtime, raw: Uint32Array);
+    get startByte(): number;
+    get endByte(): number;
+    get symbol(): number;
+    get isNamed(): boolean;
+    get childCount(): number;
+    child(index: number): Node | null;
+    get children(): Node[];
+    get parent(): Node | null;
+    get nextSibling(): Node | null;
+    get previousSibling(): Node | null;
+    descendantForByteRange(start: number, end: number): Node | null;
+    namedDescendantForByteRange(start: number, end: number): Node | null;
+    equals(other: Node): boolean;
+}
+export interface ByteRange {
+    start: number;
+    end: number;
+}
+export declare class Tree {
+    readonly rt: Runtime;
+    readonly ptr: number;
+    constructor(rt: Runtime, ptr: number);
+    edit(start: number, oldEnd: number, newEnd: number): void;
+    get rootNode(): Node;
+    walk(): TreeCursor;
+    delete(): void;
+}
+export declare class TreeCursor {
+    readonly rt: Runtime;
+    private ptr;
+    constructor(rt: Runtime, node: Node);
+    get currentNode(): Node;
+    gotoParent(): boolean;
+    gotoFirstChild(): boolean;
+    gotoNextSibling(): boolean;
+    gotoPreviousSibling(): boolean;
+    gotoFirstChildForByte(goal: number): boolean;
+    delete(): void;
+}
+export declare class Parser {
+    readonly rt: Runtime;
+    constructor(rt: Runtime);
+    parse(language: Language, text: number, length: number, ranges: ByteRange[] | null, oldTree?: Tree | null): Tree | null;
+}
+export declare class Query {
+    readonly rt: Runtime;
+    readonly ptr: number;
+    readonly captureNames: string[];
+    private readonly properties;
+    constructor(rt: Runtime, language: Language, source: string);
+    patternProperties(): Record<string, string | null>[];
+}
+export interface InjectionMatch {
+    pattern: number;
+    start: number;
+    end: number;
+    languageRange: [number, number] | null;
+    shebang: boolean;
+    excluded: [number, number][];
+}
+export declare class InjectionQuery {
+    readonly rt: Runtime;
+    readonly query: Query;
+    private readonly modes;
+    private readonly ids;
+    private buffer;
+    private capacity;
+    constructor(rt: Runtime, query: Query);
+    properties(pattern: number): Record<string, string | null>;
+    matches(node: Node): InjectionMatch[];
+}
+export {};

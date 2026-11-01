@@ -1,0 +1,11 @@
+import type { Text } from "@codemirror/state";
+export declare function nextBoundaryIn(s: string, i: number): number;
+export declare function prevBoundaryIn(s: string, i: number): number;
+export declare function segmentGraphemes(s: string): string[];
+export declare function nextGraphemeBoundary(doc: Text, pos: number): number;
+export declare function prevGraphemeBoundary(doc: Text, pos: number): number;
+export declare function nthNextGraphemeBoundary(doc: Text, pos: number, n: number): number;
+export declare function nthPrevGraphemeBoundary(doc: Text, pos: number, n: number): number;
+export declare function isGraphemeBoundary(doc: Text, pos: number): boolean;
+export declare function ensureGraphemeBoundaryNext(doc: Text, pos: number): number;
+export declare function ensureGraphemeBoundaryPrev(doc: Text, pos: number): number;

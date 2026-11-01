@@ -1,0 +1,14 @@
+import type { Context } from "../core/editor";
+import { charIsLineEnding } from "../core/text";
+import { type CommandFn } from "./motion";
+import { lineEndCharIndex, setModeOnly } from "./util";
+export declare function insertMode(cx: Context): void;
+export declare function appendMode(cx: Context): void;
+export declare function openLines(cx: Context, open: "below" | "above"): void;
+export declare function yankJoinedTo(cx: Context, separator: string, register: string): void;
+export type PastePos = "before" | "after" | "cursor";
+export declare function pasteImpl(cx: Context, values: string[], action: PastePos, count: number): void;
+export declare function paste(cx: Context, register: string, pos: PastePos, count: number): void;
+export declare function replaceSelectionsWithRegister(cx: Context, register: string, count: number): void;
+export declare const editCommands: Record<string, CommandFn>;
+export { charIsLineEnding, setModeOnly, lineEndCharIndex };
