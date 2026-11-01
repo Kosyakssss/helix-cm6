@@ -36,7 +36,7 @@ const NAME_OF_CHAR: Record<string, string> = { " ": "space", "-": "minus", "<": 
 
 export function parseKey(input: string): KeyEvent {
   const tokens = input.split("-");
-  let last = tokens.pop();
+  const last = tokens.pop();
   if (last === undefined) throw new Error("Missing key code");
   if (last === "" && input.endsWith("-")) {
     if (input === "-") return { code: "-", ctrl: false, alt: false, shift: false, meta: false };

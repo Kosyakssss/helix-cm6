@@ -1,31 +1,32 @@
 {
-  "name": "helix-motions",
+  "name": "helix-cm6",
+  "version": "0.0.0",
   "private": true,
+  "description": "Helix for CodeMirror 6: a port of Helix, checked against real Helix",
+  "license": "MPL-2.0",
   "type": "module",
   "scripts": {
-    "build": "bun build.ts --out test-vault/.obsidian/plugins/helix-motions",
-    "dev": "bun build.ts --out test-vault/.obsidian/plugins/helix-motions --watch",
     "check": "tsc --noEmit -p .",
     "test": "bun test",
     "diff": "bun test/oracle/diff.ts",
     "lint": "eslint src"
   },
-  "devDependencies": {
-    "@codemirror/commands": "^6",
-    "@codemirror/state": "^6",
-    "@codemirror/view": "^6",
-    "@eslint/js": "^10.0.1",
-    "@types/bun": "latest",
-    "@types/node": "^26",
-    "eslint": "^10.13.0",
-    "eslint-import-resolver-node": "^0.4.0",
-    "eslint-plugin-obsidianmd": "^0.4.2",
-    "obsidian": "^1.14.4",
-    "smol-toml": "^1.9.1",
-    "typescript": "^7",
-    "typescript-eslint": "^8.72.0"
+  "dependencies": {
+    "smol-toml": "1.9.1"
   },
-  "overrides": {
-    "moment": "2.31.0"
+  "peerDependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15"
+  },
+  "devDependencies": {
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.15",
+    "@eslint/js": "10.0.1",
+    "@types/bun": "1.4.3",
+    "eslint": "10.13.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.0"
   }
 }
