@@ -1,4 +1,4 @@
-import type { Extension, TransactionSpec } from "@codemirror/state";
+import { EditorState, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
 import { HelixEditor } from "./core/editor";
 import type { Host } from "./core/host";
@@ -89,5 +89,5 @@ export function helix(options: HelixOptions = {}): Extension {
     onViewOpen: () => undefined,
     onViewClose: () => undefined,
   });
-  return [extension, drawSelection(), nativeUndo];
+  return [extension, drawSelection(), EditorState.allowMultipleSelections.of(true), nativeUndo];
 }
