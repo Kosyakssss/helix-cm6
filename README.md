@@ -15,7 +15,7 @@ This is the engine from [helix-motions](https://github.com/Kosyakssss/helix-moti
 
 Not ready to install yet:
 
-- A view layer for a plain CodeMirror 6 editor (keys, IME, cursors, panels) is in progress.
+- The view layer has no browser differential yet (see `docs/testing.md`).
 - Loader hooks for the wasm modules, package exports and an npm release come next.
 - The tree-sitter build has only the markdown grammars.
 
@@ -23,6 +23,7 @@ Not ready to install yet:
 
 - `src/core/`: the `Host` interface (`HeadlessHost` runs the engine with no view), the `Workspace` interface for things the app must supply (files, pickers, buffers), text, regex and options.
 - `src/commands/`, `src/keymap/`, `src/syntax/`: Helix's commands, keymap and syntax tree.
+- `src/view/`, `src/codemirror.ts`: the view layer for a CodeMirror 6 editor (keys, IME, cursors, panels). `helix({ config })` returns its extension; `config` is the text of a Helix `config.toml`.
 - `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
 - `test/oracle/`: the comparison with real Helix.
 
