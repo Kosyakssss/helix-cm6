@@ -144,7 +144,6 @@ export function helixExtension(env: ViewEnv): Extension {
   const { editor } = env;
 
   const onKey = (event: KeyboardEvent, view: EditorView): boolean => {
-    if (event.metaKey) return false;
     const host = env.hostFor(view);
     const value = view.state.field(helixField, false);
     if (!value) return false;
@@ -155,7 +154,7 @@ export function helixExtension(env: ViewEnv): Extension {
     const literal = literalWanted(editor, mode);
     let key = keyFromDom(event, literal, env.physicalKeys());
     if (key === null) {
-      if (!dead) return false;
+      if (!dead || event.metaKey) return false;
       event.preventDefault();
       event.stopPropagation();
       return true;
@@ -164,6 +163,7 @@ export function helixExtension(env: ViewEnv): Extension {
       const physical = keyFromDom(event, false);
       if (physical && physical !== key && pendingNode(editor, "insert").map.has(physical)) key = physical;
     }
+    if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key))) return false;
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k),

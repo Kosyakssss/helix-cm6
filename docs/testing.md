@@ -14,5 +14,5 @@
 The oracle checks the engine, not a view: keys, IME and drawing need tests in a real editor. helix-motions runs the same Helix cases as real key events in Obsidian (`test/e2e/differential.ts`).
 
 - `bun run browser [filter]`: opens each hand suite case in a plain CodeMirror 6 editor with `helix()` in headless Chromium, types the keys as CDP key events and compares text, selections, primary selection and mode with Helix. It needs the oracle (or a filled cache) and Chromium: `bun x playwright-core install chromium-headless-shell`. `BROWSER_JOBS` sets the number of pages (a positive integer, default 8). Oracle errors fail the run.
-- `bun run views`: two editors that share one `helix()` extension: prompts, messages and jump labels show in the focused editor, and a key in one editor cancels a prompt open in the other. It also checks that a selection set by the app stays.
+- `bun run views`: two editors that share one `helix()` extension: prompts, messages and jump labels show in the focused editor, and a key in one editor cancels a prompt open in the other. It also checks that a selection set by the app stays, that a Meta key bound in the config runs its command, and that an unbound Meta key goes to the browser.
 - Both scripts use Playwright's Chromium. To use another Chromium build, set `CHROMIUM_PATH` to its executable.

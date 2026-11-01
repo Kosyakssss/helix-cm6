@@ -233,6 +233,8 @@ function keyFromDom(e, literal, physical = true) {
     } else if (physical && nonAscii || macOptionChar || e.ctrlKey && !/^[\x20-\x7e]$/.test(e.key)) {
       code = physicalChar(e.code, e.shiftKey) ?? code;
     }
+    if (e.shiftKey && (e.ctrlKey || e.altKey || e.metaKey) && /^[a-z]$/.test(code))
+      code = code.toUpperCase();
   } else {
     return null;
   }
@@ -9940,8 +9942,6 @@ var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace
 function helixExtension(env) {
   const { editor } = env;
   const onKey = (event, view) => {
-    if (event.metaKey)
-      return false;
     const host = env.hostFor(view);
     const value = view.state.field(helixField, false);
     if (!value)
@@ -9955,7 +9955,7 @@ function helixExtension(env) {
     const literal = literalWanted(editor, mode);
     let key = keyFromDom(event, literal, env.physicalKeys());
     if (key === null) {
-      if (!dead)
+      if (!dead || event.metaKey)
         return false;
       event.preventDefault();
       event.stopPropagation();
@@ -9966,6 +9966,8 @@ function helixExtension(env) {
       if (physical && physical !== key && pendingNode(editor, "insert").map.has(physical))
         key = physical;
     }
+    if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key)))
+      return false;
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k)
