@@ -1,0 +1,23 @@
+theme = "default"
+
+[editor]
+scrolloff = 3
+line-number = "relative"
+
+[editor.cursor-shape]
+insert = "bar"
+normal = "block"
+select = "underline"
+
+[editor.auto-pairs]
+"(" = ")"
+"{" = "}"
+"[" = "]"
+'"' = '"'
+
+[keys.normal]
+C-s = ":write"
+"ret" = ["move_line_down", "goto_first_nonwhitespace"]
+
+[keys.insert]
+j = { k = "normal_mode" }

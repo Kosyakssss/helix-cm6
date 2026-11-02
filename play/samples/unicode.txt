@@ -1,0 +1,31 @@
+Wide characters (two cells each):
+日本語のテキスト 中文文本 한국어 텍스트
+ｆｕｌｌｗｉｄｔｈ　ｌａｔｉｎ and ＡＢＣ
+
+Emoji:
+single 😀 then text
+zwj family 👩‍👩‍👧‍👦 then text
+skin tone 👋🏽 then text
+flags 🇬🇪 🇯🇵 🇺🇳 then text
+keycap 1️⃣ and heart ❤️ with variation selector
+
+Combining marks:
+e + acute = é (two code points)
+precomposed é (one code point)
+stacked a̐̈́̃ͅ marks
+Hindi नमस्ते and Thai สวัสดี
+
+Right to left:
+Arabic مرحبا بالعالم inside left-to-right text
+Hebrew שלום עולם and numbers 123
+
+Georgian:
+ქართული ანბანი და ტექსტი
+
+Zero width:
+zero​width​space between words
+soft­hyphen inside a word
+word joiner⁠here
+
+Surrogate pairs:
+𝔘𝔫𝔦𝔠𝔬𝔡𝔢 math letters and 𐐷 deseret

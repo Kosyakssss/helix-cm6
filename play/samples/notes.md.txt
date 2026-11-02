@@ -1,0 +1,48 @@
+# Field notes
+
+A short note to try motions on. Words, *emphasis*, **strong text**, `inline code`, and a [link](https://example.com).
+
+## Lists
+
+- First item
+- Second item with a longer line that wraps when the window is narrow enough to show soft wrapping in action
+  - Nested item
+  - Another nested item
+- Third item
+
+1. Ordered one
+2. Ordered two
+3. Ordered three
+
+- [ ] An open task
+- [x] A done task
+
+## Quote
+
+> Helix is a modal editor. Select first, then act.
+> The selection is the cursor.
+
+## Code
+
+```rust
+fn main() {
+    let words = ["select", "then", "act"];
+    for w in words.iter() {
+        println!("{w}");
+    }
+}
+```
+
+## Table
+
+| Key | Command | Note |
+| --- | ------- | ---- |
+| w | move_next_word_start | selects the word |
+| x | extend_line_below | whole lines |
+| mi( | select inside parens | text object |
+
+## Paragraphs
+
+The first paragraph has two sentences. It ends here.
+
+The second paragraph follows an empty line, so { and } jump between them.

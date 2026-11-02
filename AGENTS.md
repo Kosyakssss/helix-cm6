@@ -22,7 +22,7 @@ Helix for CodeMirror 6, ported from Helix's source. Read `CONTRIBUTING.md` and `
 
 ## Code that runs inside Obsidian
 
-helix-motions bundles this code into its `main.js`, so it must stay safe there. Obsidian's community review checks plugins with `eslint-plugin-obsidianmd`. That linter runs in the plugin repo, not here, but these rules apply to this code too:
+helix-motions bundles this code into its `main.js`, so it must stay safe there. Obsidian's community review checks plugins with `eslint-plugin-obsidianmd`. The plugin's `bun run lint` also runs it on this package's `src`, so a change here can fail the plugin's lint. Its rule `prefer-create-el` is off for this code: `createEl` exists only in Obsidian, and the rule's concern, nodes made in the wrong window, is covered by the first rule below. These rules apply:
 
 - Obsidian has popout windows, each with its own `window` and `document`. Create DOM nodes with the `ownerDocument` of the editor or the parent node, not the global `document`. Use the timers of the right window, for example `view.dom.ownerDocument.defaultView` or `window.setTimeout`, not bare `setTimeout`.
 - No console logging.

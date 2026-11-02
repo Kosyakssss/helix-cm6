@@ -1,0 +1,7 @@
+The editor treats every selection as a range with an anchor and a head. Motions move the head and usually the anchor too; extending motions keep the anchor where it is. This short text has sentences of different lengths, so sentence and paragraph text objects have something to work on. Mr. Smith arrived at 3 p.m. on a Tuesday, e.g. after lunch.
+
+A second paragraph starts here. It is long enough to wrap several times in a normal window, which makes it good for checking that j and k move by visual rows when lines wrap, and that gj and gk keep working on the logical lines underneath. Try it with a proportional font too, because the cursor must sit on the right glyph when the characters have different widths: iiiiiiiiii versus WWWWWWWWWW, and llllllllll versus mmmmmmmmmm.
+
+Short.
+
+A paragraph after a one-word paragraph. Numbers like 3.14159, 1,000,000 and 0x1F should behave as words where Helix says they do. Hyphenated-words, snake_case_words, camelCaseWords and kebab-case-words test the subword motions.

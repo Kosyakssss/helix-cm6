@@ -20,6 +20,8 @@ sh regex/build.sh        # rebuild regex.wasm (needs rustup; installs Rust 1.99.
 - `sh test/oracle/setup.sh` puts Helix next to this repo (or into `$HELIX_DIR`) with the oracle test and the markdown grammars. Then `bun test` compares the headless engine with real Helix.
 - `bun test/oracle/diff.ts hand|fuzz|md|mdfuzz [filter]` lists failures in a readable form.
 
+- `bun run play` opens a page to try changes by hand.
+
 See `docs/testing.md` for details.
 
 ## Pull requests

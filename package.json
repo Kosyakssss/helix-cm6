@@ -38,6 +38,7 @@
     "diff": "bun test/oracle/diff.ts",
     "browser": "bun test/browser/differential.ts",
     "views": "bun test/browser/views.ts",
+    "play": "bun play/server.ts",
     "lint": "eslint src"
   },
   "dependencies": {

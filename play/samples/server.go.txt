@@ -1,0 +1,30 @@
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"sync"
+)
+
+type store struct {
+	mu    sync.Mutex
+	notes map[string]string
+}
+
+func (s *store) get(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name := r.URL.Query().Get("name")
+	if text, ok := s.notes[name]; ok {
+		json.NewEncoder(w).Encode(map[string]string{"name": name, "text": text})
+		return
+	}
+	http.Error(w, "not found", http.StatusNotFound)
+}
+
+func main() {
+	s := &store{notes: map[string]string{"hello": "world"}}
+	http.HandleFunc("/note", s.get)
+	log.Fatal(http.ListenAndServe("127.0.0.1:8080", nil))
+}

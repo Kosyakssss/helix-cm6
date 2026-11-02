@@ -1,0 +1,63 @@
+---
+title: Edge cases
+tags: [helix, test]
+aliases:
+  - edges
+---
+
+# Heading with `code` and [link](#heading)
+
+Setext heading
+==============
+
+Another setext
+--------------
+
+Text with a footnote[^1] and a wiki link [[Some note#Heading|alias]] and an embed ![[image.png]].
+
+[^1]: The footnote text.
+
+> [!note] A callout
+> With **two** lines.
+>
+> - and a list inside
+
+Line with trailing two spaces for a hard break  
+next line.
+
+Escaped \*stars\* and \`ticks\` and a pipe \| outside a table.
+
+| Left | Center | Right |
+|:-----|:------:|------:|
+| a \| b | `x | y` | 1 |
+|  |  | empty cells |
+| very long cell content that is much wider than the others | c | 22 |
+
+    indented code block
+    second line
+
+~~~
+tilde fence with ``` inside
+~~~
+
+<details>
+<summary>HTML block</summary>
+
+Inside HTML.
+</details>
+
+$$
+E = mc^2
+$$
+
+* star bullet
++ plus bullet
+- dash bullet
+    - four-space nested
+
+10. list starting at ten
+11. next
+
+***
+
+Final line without anything special.

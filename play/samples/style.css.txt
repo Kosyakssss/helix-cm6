@@ -1,0 +1,20 @@
+:root {
+  --accent: oklch(65% 0.15 250);
+  --radius: 4px;
+}
+
+.editor .cursor[data-mode="normal"] {
+  background: var(--accent);
+  border-radius: var(--radius);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: oklch(75% 0.12 250);
+  }
+}
+
+.status > span:not(:last-child)::after {
+  content: " | ";
+  opacity: 0.5;
+}

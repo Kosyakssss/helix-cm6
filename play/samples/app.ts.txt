@@ -1,0 +1,43 @@
+import { readFile } from "node:fs/promises";
+
+type Mode = "normal" | "insert" | "select";
+
+interface Range {
+  anchor: number;
+  head: number;
+}
+
+export class Selection {
+  constructor(
+    readonly ranges: readonly Range[],
+    readonly primary = 0,
+  ) {}
+
+  map(fn: (range: Range, index: number) => Range): Selection {
+    return new Selection(this.ranges.map(fn), this.primary);
+  }
+
+  get main(): Range {
+    return this.ranges[this.primary]!;
+  }
+}
+
+const keymap: Record<Mode, Record<string, string>> = {
+  normal: { w: "move_next_word_start", b: "move_prev_word_start", x: "extend_line_below" },
+  insert: { "C-w": "delete_word_backward" },
+  select: { w: "extend_next_word_start" },
+};
+
+export async function load(path: string): Promise<string[]> {
+  const text = await readFile(path, "utf8");
+  return text.split(/\r?\n/).filter((line) => line.trim() !== "" && !line.startsWith("#"));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+for (const [mode, keys] of Object.entries(keymap)) {
+  const names = Object.keys(keys).map((key) => `${mode}:${key}`);
+  console.log(names.join(", "), clamp(names.length, 0, 10));
+}

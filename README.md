@@ -59,6 +59,11 @@ The engine has no files, pickers or buffers. Commands that need them call `Helix
 - `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
 - `test/oracle/`: the comparison with real Helix.
 - `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium, and a test with two editors.
+- `play/`: a page to try the engine by hand.
+
+## Try it
+
+`bun run play` serves a page on http://127.0.0.1:4173 (set `PORT` to change it). It has sample files in several languages and edge cases (wide characters, emoji, right-to-left text, tabs, long lines, a 20,000-line note), a split view, light and dark mode, and font choices. `:config-reload` applies its `helix.toml`. The page rebuilds from `src` on every reload. It uses one `helix()` for all files, so the markdown syntax tree also parses the code samples.
 
 ## Tests
 

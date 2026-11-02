@@ -1,0 +1,14 @@
+Nested brackets: (a [b {c (d) e} f] g)
+Unbalanced: ( [ } ) ]
+Quotes: "double 'single `back` single' double"
+Escaped quotes: "she said \"hi\" and left"
+Adjacent pairs: ()[]{}""''``
+Empty inside: ( ) [ ] { }
+Across lines: (
+  first,
+  [second, { third }],
+)
+Angle brackets: <tag attr="v">text</tag> and a < b > c
+Markdown-like: **bold** _under_ ~~strike~~ ==mark==
+Apostrophes: don't, it's, rock 'n' roll
+Math: f(g(h(x))) = [1, [2, [3]]]
