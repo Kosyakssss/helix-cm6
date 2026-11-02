@@ -25,7 +25,6 @@ export declare const commitHistory: import("@codemirror/state").StateEffectType<
 }>;
 export declare const setHistoryCurrent: import("@codemirror/state").StateEffectType<number>;
 export declare const historyApply: import("@codemirror/state").StateEffectType<null>;
-export declare const startPending: import("@codemirror/state").StateEffectType<Selection>;
 export declare function createHistory(doc: Text): HistoryState;
 export declare function makeHistoryField(selectionOf: (state: Transaction["startState"]) => Selection): StateField<HistoryState>;
 export interface Step {

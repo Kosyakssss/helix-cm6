@@ -26,7 +26,6 @@ export interface HistoryState {
 export const commitHistory = StateEffect.define<{ selection: Selection; timestamp: number }>();
 export const setHistoryCurrent = StateEffect.define<number>();
 export const historyApply = StateEffect.define<null>();
-export const startPending = StateEffect.define<Selection>();
 
 function rootRevision(doc: Text): Revision {
   const empty = ChangeSet.empty(doc.length);

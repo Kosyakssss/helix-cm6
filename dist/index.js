@@ -1010,7 +1010,6 @@ import { ChangeSet, StateEffect, StateField } from "@codemirror/state";
 var commitHistory = StateEffect.define();
 var setHistoryCurrent = StateEffect.define();
 var historyApply = StateEffect.define();
-var startPending = StateEffect.define();
 function rootRevision(doc) {
   const empty = ChangeSet.empty(doc.length);
   return {
