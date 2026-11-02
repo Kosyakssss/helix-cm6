@@ -140,7 +140,7 @@ function pendingNode(editor: HelixEditor, mode: "normal" | "select" | "insert"):
 
 const HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace"]);
 
-const OS_NAVIGATION = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+const OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
 
 export function helixExtension(env: ViewEnv): Extension {
   const { editor } = env;

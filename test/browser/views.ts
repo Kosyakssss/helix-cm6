@@ -100,7 +100,7 @@ async function run(type: BrowserType): Promise<string[]> {
   const unbound = await page.evaluate(() => (window as unknown as { helixLastKeydown(): unknown }).helixLastKeydown());
   if (JSON.stringify(unbound) !== JSON.stringify({ key: "b", meta: true, prevented: false })) fails.push(`unbound Meta-b reaches the page untouched: got ${JSON.stringify(unbound)}`);
   if ((await doc()) !== undone) fails.push("unbound Meta-b changed the text");
-  for (const combo of ["Control+ArrowLeft", "Control+Home", "Control+Shift+PageDown"]) {
+  for (const combo of ["Control+End", "Control+Home", "Control+Shift+PageDown"]) {
     await page.keyboard.press(combo);
     const ctrl = await page.evaluate(() => (window as unknown as { helixLastKeydown(): { prevented: boolean } | null }).helixLastKeydown());
     if (!ctrl || ctrl.prevented) fails.push(`unbound ${combo} in normal mode reaches the OS: got ${JSON.stringify(ctrl)}`);
@@ -109,9 +109,9 @@ async function run(type: BrowserType): Promise<string[]> {
   await page.keyboard.press("Control+k");
   if ((await doc()) !== beforeCtrlK) fails.push("unbound Ctrl-k in normal mode changed the text");
   await page.keyboard.press("g");
-  await page.keyboard.press("Control+ArrowLeft");
+  await page.keyboard.press("Control+End");
   const cancelled = await page.evaluate(() => (window as unknown as { helixLastKeydown(): { key: string } | null }).helixLastKeydown());
-  if (cancelled?.key === "ArrowLeft") fails.push(`an unbound Ctrl key after a pending g cancels it as in Helix: got ${JSON.stringify(cancelled)}`);
+  if (cancelled?.key === "End") fails.push(`an unbound Ctrl key after a pending g cancels it as in Helix: got ${JSON.stringify(cancelled)}`);
   if (type === chromium) {
     const cdp = await context.newCDPSession(page);
     const metaShiftZ = { key: "z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 12 };

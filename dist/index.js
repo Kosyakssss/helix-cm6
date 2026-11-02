@@ -9942,7 +9942,7 @@ function pendingNode(editor, mode) {
   return node && node.kind === "node" ? node : editor.keymaps.map[mode];
 }
 var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace"]);
-var OS_NAVIGATION = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
+var OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
 function helixExtension(env) {
   const { editor } = env;
   const onKey = (event, view) => {
