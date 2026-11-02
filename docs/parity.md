@@ -20,7 +20,7 @@ States:
 
 ## Commands
 
-Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 39, ported 30, missing 20, out of scope 11.
+Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 49, ported 30, out of scope 11, missing 10.
 
 ### Static commands
 
@@ -38,13 +38,13 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `buffer_picker` | app |
 | `change_selection` | ported |
 | `change_selection_noyank` | ported |
-| `changed_file_picker` | missing |
+| `changed_file_picker` | app |
 | `code_action` | app |
 | `collapse_selection` | ported |
 | `command_mode` | ported |
 | `command_palette` | app |
 | `commit_undo_checkpoint` | ported |
-| `completion` | missing |
+| `completion` | app |
 | `copy_between_registers` | ported |
 | `copy_selection_on_next_line` | ported |
 | `copy_selection_on_prev_line` | ported |
@@ -125,10 +125,10 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `find_prev_char` | ported |
 | `find_till_char` | ported |
 | `flip_selections` | ported |
-| `format_selections` | missing |
+| `format_selections` | app |
 | `global_search` | app |
 | `goto_column` | ported |
-| `goto_declaration` | missing |
+| `goto_declaration` | app |
 | `goto_definition` | app |
 | `goto_file` | app |
 | `goto_file_end` | ported |
@@ -138,7 +138,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `goto_first_change` | missing |
 | `goto_first_diag` | app |
 | `goto_first_nonwhitespace` | ported |
-| `goto_implementation` | missing |
+| `goto_implementation` | app |
 | `goto_last_accessed_file` | app |
 | `goto_last_change` | missing |
 | `goto_last_diag` | app |
@@ -174,7 +174,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `goto_prev_xml_element` | partial: markdown only |
 | `goto_previous_buffer` | app |
 | `goto_reference` | app |
-| `goto_type_definition` | missing |
+| `goto_type_definition` | app |
 | `goto_window_bottom` | ported |
 | `goto_window_center` | ported |
 | `goto_window_top` | ported |
@@ -287,7 +287,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `select_mode` | ported |
 | `select_next_sibling` | partial: markdown only |
 | `select_prev_sibling` | partial: markdown only |
-| `select_references_to_symbol_under_cursor` | missing |
+| `select_references_to_symbol_under_cursor` | app |
 | `select_regex` | ported |
 | `select_register` | ported |
 | `select_textobject_around` | ported |
@@ -299,7 +299,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `shell_pipe_to` | ported |
 | `shrink_selection` | partial: markdown only |
 | `shrink_to_line_bounds` | ported |
-| `signature_help` | missing |
+| `signature_help` | app |
 | `smart_tab` | ported |
 | `split_selection` | ported |
 | `split_selection_on_newline` | ported |
@@ -321,7 +321,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `toggle_block_comments` | ported |
 | `toggle_comments` | ported |
 | `toggle_line_comments` | ported |
-| `transpose_view` | missing |
+| `transpose_view` | app |
 | `trim_selections` | ported |
 | `undo` | ported |
 | `unindent` | ported |
@@ -362,7 +362,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `:write-buffer-close` | app |
 | `:write-buffer-close!` | app |
 | `:new` | app |
-| `:format` | missing |
+| `:format` | app |
 | `:indent-style` | ported |
 | `:line-ending` | missing |
 | `:earlier` | ported |
@@ -375,8 +375,8 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `:write-quit-all!` | app |
 | `:quit-all` | app |
 | `:quit-all!` | app |
-| `:cquit` | missing |
-| `:cquit!` | missing |
+| `:cquit` | app |
+| `:cquit!` | app |
 | `:theme` | missing |
 | `:yank-join` | ported |
 | `:clipboard-yank` | ported |
@@ -390,17 +390,17 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `:primary-clipboard-paste-before` | ported |
 | `:primary-clipboard-paste-replace` | ported |
 | `:show-clipboard-provider` | out of scope |
-| `:change-current-directory` | missing |
-| `:show-directory-stack` | missing |
-| `:push-directory` | missing |
-| `:pop-directory` | missing |
-| `:show-directory` | missing |
+| `:change-current-directory` | app |
+| `:show-directory-stack` | app |
+| `:push-directory` | app |
+| `:pop-directory` | app |
+| `:show-directory` | app |
 | `:encoding` | out of scope |
 | `:character-info` | ported |
 | `:reload` | app |
 | `:reload-all` | app |
 | `:update` | app |
-| `:lsp-workspace-command` | missing |
+| `:lsp-workspace-command` | app |
 | `:lsp-restart` | out of scope |
 | `:lsp-stop` | out of scope |
 | `:tree-sitter-scopes` | missing |
@@ -424,7 +424,7 @@ Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 
 | `:tree-sitter-subtree` | missing |
 | `:config-reload` | app |
 | `:config-open` | app |
-| `:config-open-workspace` | missing |
+| `:config-open-workspace` | app |
 | `:log-open` | out of scope |
 | `:insert-output` | ported |
 | `:append-output` | ported |
