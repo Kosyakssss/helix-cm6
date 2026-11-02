@@ -100,11 +100,14 @@ async function run(type: BrowserType): Promise<string[]> {
   const unbound = await page.evaluate(() => (window as unknown as { helixLastKeydown(): unknown }).helixLastKeydown());
   if (JSON.stringify(unbound) !== JSON.stringify({ key: "b", meta: true, prevented: false })) fails.push(`unbound Meta-b reaches the page untouched: got ${JSON.stringify(unbound)}`);
   if ((await doc()) !== undone) fails.push("unbound Meta-b changed the text");
-  for (const combo of ["Control+ArrowLeft", "Control+Home"]) {
+  for (const combo of ["Control+ArrowLeft", "Control+Home", "Control+Shift+PageDown"]) {
     await page.keyboard.press(combo);
     const ctrl = await page.evaluate(() => (window as unknown as { helixLastKeydown(): { prevented: boolean } | null }).helixLastKeydown());
     if (!ctrl || ctrl.prevented) fails.push(`unbound ${combo} in normal mode reaches the OS: got ${JSON.stringify(ctrl)}`);
   }
+  const beforeCtrlK = await doc();
+  await page.keyboard.press("Control+k");
+  if ((await doc()) !== beforeCtrlK) fails.push("unbound Ctrl-k in normal mode changed the text");
   await page.keyboard.press("g");
   await page.keyboard.press("Control+ArrowLeft");
   const cancelled = await page.evaluate(() => (window as unknown as { helixLastKeydown(): { key: string } | null }).helixLastKeydown());

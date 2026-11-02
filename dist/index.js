@@ -9942,6 +9942,7 @@ function pendingNode(editor, mode) {
   return node && node.kind === "node" ? node : editor.keymaps.map[mode];
 }
 var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace"]);
+var OS_NAVIGATION = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"]);
 function helixExtension(env) {
   const { editor } = env;
   const onKey = (event, view) => {
@@ -9971,7 +9972,7 @@ function helixExtension(env) {
     }
     if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key)))
       return false;
-    if (event.ctrlKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
+    if (OS_NAVIGATION.has(event.key) && event.ctrlKey && !event.altKey && !event.metaKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
       return false;
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
