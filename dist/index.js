@@ -1,5 +1,5 @@
 // src/codemirror.ts
-import { EditorState as EditorState3, Facet as Facet2 } from "@codemirror/state";
+import { Facet as Facet2 } from "@codemirror/state";
 import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
 
 // src/keys.ts
@@ -7405,7 +7405,8 @@ var IGNORED_EDITOR = new Set([
   "soft-wrap",
   "inline-diagnostics",
   "word-completion",
-  "workspace-trust"
+  "workspace-trust",
+  "terminal"
 ]);
 function asBool(v, key, warnings) {
   if (typeof v === "boolean")
@@ -8137,12 +8138,12 @@ class SystemClipboard {
     if (type === "selection")
       return;
     this.cache = contents;
-    navigator.clipboard.writeText(contents).catch(() => {
+    navigator.clipboard?.writeText(contents).catch(() => {
       return;
     });
   }
   refresh() {
-    navigator.clipboard.readText().then((text) => {
+    navigator.clipboard?.readText().then((text) => {
       this.cache = text;
     }).catch(() => {
       return;
@@ -9257,8 +9258,111 @@ async function loadSyntax(win, source) {
   });
 }
 
+// src/view/theme.ts
+import { EditorView } from "@codemirror/view";
+var fg = "var(--hx-fg, currentColor)";
+var bg = "var(--hx-bg, Canvas)";
+var selection2 = "var(--hx-selection, Highlight)";
+var error = "var(--hx-error, #d32f2f)";
+var muted = "var(--hx-muted, color-mix(in srgb, currentColor 60%, transparent))";
+var panel = "var(--hx-panel, color-mix(in srgb, currentColor 5%, Canvas))";
+var border = "var(--hx-border, color-mix(in srgb, currentColor 20%, transparent))";
+var hover = "var(--hx-hover, color-mix(in srgb, currentColor 8%, transparent))";
+var radius = "var(--hx-cursor-radius, 2px)";
+var nativeSelectionTheme = EditorView.baseTheme({
+  "&.hx .cm-line::selection, &.hx .cm-line ::selection, &.hx .cm-content::selection": { backgroundColor: `${selection2} !important` }
+});
+var helixTheme = EditorView.baseTheme({
+  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
+  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer": { display: "none" },
+  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
+  "&.hx .cm-selectionLayer": { display: "none" },
+  "& ::highlight(hx-sel)": { backgroundColor: selection2 },
+  ".cm-layer .hx-cell": {
+    position: "absolute",
+    left: "var(--hx-cell-left)",
+    top: "var(--hx-cell-top)",
+    width: "var(--hx-cell-width)",
+    height: "var(--hx-cell-height)",
+    borderRadius: radius,
+    pointerEvents: "none"
+  },
+  ".cm-layer .hx-cell-block": {
+    borderRadius: "0",
+    backgroundColor: "var(--hx-cell-backdrop)",
+    backgroundImage: "var(--hx-cell-backdrop-image)"
+  },
+  ".cm-layer .hx-cell-block::before": {
+    content: '""',
+    position: "absolute",
+    inset: "0",
+    borderRadius: radius,
+    backgroundColor: `color-mix(in srgb, ${fg} 45%, ${bg})`
+  },
+  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: fg },
+  ".cm-layer .hx-cell-sq-tl, .cm-layer .hx-cell-sq-tl::before": { borderTopLeftRadius: "0" },
+  ".cm-layer .hx-cell-sq-tr, .cm-layer .hx-cell-sq-tr::before": { borderTopRightRadius: "0" },
+  ".cm-layer .hx-cell-sq-bl, .cm-layer .hx-cell-sq-bl::before": { borderBottomLeftRadius: "0" },
+  ".cm-layer .hx-cell-sq-br, .cm-layer .hx-cell-sq-br::before": { borderBottomRightRadius: "0" },
+  ".cm-layer .hx-cell-underline": { boxShadow: `inset 0 -2px 0 ${fg}` },
+  ".cm-layer .hx-cell-bar": { boxShadow: `inset 2px 0 0 ${fg}` },
+  ".cm-layer .hx-cell-sel": { backgroundColor: selection2, borderRadius: "0" },
+  ".cm-layer .hx-cell-glyph": {
+    position: "absolute",
+    left: "0",
+    top: "var(--hx-glyph-top)",
+    height: "var(--hx-glyph-height)",
+    font: "var(--hx-glyph-font)",
+    lineHeight: "var(--hx-glyph-height)",
+    letterSpacing: "var(--hx-glyph-spacing)",
+    fontFeatureSettings: "var(--hx-glyph-features)",
+    fontVariationSettings: "var(--hx-glyph-variations)",
+    whiteSpace: "pre",
+    color: bg
+  },
+  "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
+  "&.hx .hx-cursorline": { backgroundColor: hover },
+  ".hx-panel": {
+    position: "relative",
+    fontFamily: "var(--hx-panel-font, monospace)",
+    fontSize: "var(--hx-panel-font-size, 0.85em)",
+    background: panel,
+    borderTop: `1px solid ${border}`
+  },
+  ".hx-panel.hx-panel-empty": { borderTop: "none" },
+  ".hx-panel > .hx-hidden": { display: "none" },
+  ".hx-autoinfo": {
+    position: "absolute",
+    right: "12px",
+    bottom: "calc(100% + 8px + var(--hx-autoinfo-lift, 0px))",
+    padding: "6px 12px",
+    maxHeight: "min(60vh, var(--hx-autoinfo-room, 60vh))",
+    maxWidth: "calc(100% - 24px)",
+    overflow: "auto",
+    background: panel,
+    border: `1px solid ${border}`,
+    borderRadius: "var(--hx-radius, 4px)",
+    boxShadow: "var(--hx-shadow, 0 2px 8px rgb(0 0 0 / 0.15))",
+    whiteSpace: "nowrap"
+  },
+  ".hx-autoinfo-title": { fontWeight: "600", textAlign: "center", marginBottom: "4px" },
+  ".hx-autoinfo-row": { display: "flex", gap: "1.5em" },
+  ".hx-autoinfo-key": { minWidth: "3em", color: "var(--hx-accent, LinkText)" },
+  ".hx-autoinfo-unavailable": { opacity: "0.45" },
+  ".hx-prompt, .hx-message": {
+    padding: "3px calc(10px + var(--hx-bar-overlap, 0px)) 3px 10px",
+    whiteSpace: "pre"
+  },
+  ".hx-message": { overflow: "hidden", textOverflow: "ellipsis" },
+  ".hx-message-error": { color: error },
+  ".hx-prompt-label": { color: muted, marginRight: "0.25em" },
+  ".hx-prompt-cursor": { background: fg, color: bg },
+  ".hx-completions": { display: "flex", flexWrap: "wrap", gap: "0 1.5em", paddingBottom: "3px", color: muted },
+  ".hx-completion-selected": { color: fg, background: hover }
+});
+
 // src/view/view.ts
-import { Prec, RangeSetBuilder } from "@codemirror/state";
+import { EditorState as EditorState3, Prec, RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
   EditorView as EditorView2,
@@ -9733,106 +9837,6 @@ function cursorLayers(editor) {
   ];
 }
 
-// src/view/theme.ts
-import { EditorView } from "@codemirror/view";
-var fg = "var(--hx-fg, currentColor)";
-var bg = "var(--hx-bg, Canvas)";
-var selection2 = "var(--hx-selection, color-mix(in srgb, Highlight 35%, transparent))";
-var error = "var(--hx-error, #d32f2f)";
-var muted = "var(--hx-muted, color-mix(in srgb, currentColor 60%, transparent))";
-var panel = "var(--hx-panel, color-mix(in srgb, currentColor 5%, Canvas))";
-var border = "var(--hx-border, color-mix(in srgb, currentColor 20%, transparent))";
-var hover = "var(--hx-hover, color-mix(in srgb, currentColor 8%, transparent))";
-var radius = "var(--hx-cursor-radius, 2px)";
-var helixTheme = EditorView.baseTheme({
-  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
-  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer": { display: "none" },
-  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
-  "&.hx .cm-selectionLayer": { display: "none" },
-  "& ::highlight(hx-sel)": { backgroundColor: selection2 },
-  ".cm-layer .hx-cell": {
-    position: "absolute",
-    left: "var(--hx-cell-left)",
-    top: "var(--hx-cell-top)",
-    width: "var(--hx-cell-width)",
-    height: "var(--hx-cell-height)",
-    borderRadius: radius,
-    pointerEvents: "none"
-  },
-  ".cm-layer .hx-cell-block": {
-    borderRadius: "0",
-    backgroundColor: "var(--hx-cell-backdrop)",
-    backgroundImage: "var(--hx-cell-backdrop-image)"
-  },
-  ".cm-layer .hx-cell-block::before": {
-    content: '""',
-    position: "absolute",
-    inset: "0",
-    borderRadius: radius,
-    backgroundColor: `color-mix(in srgb, ${fg} 45%, ${bg})`
-  },
-  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: fg },
-  ".cm-layer .hx-cell-sq-tl, .cm-layer .hx-cell-sq-tl::before": { borderTopLeftRadius: "0" },
-  ".cm-layer .hx-cell-sq-tr, .cm-layer .hx-cell-sq-tr::before": { borderTopRightRadius: "0" },
-  ".cm-layer .hx-cell-sq-bl, .cm-layer .hx-cell-sq-bl::before": { borderBottomLeftRadius: "0" },
-  ".cm-layer .hx-cell-sq-br, .cm-layer .hx-cell-sq-br::before": { borderBottomRightRadius: "0" },
-  ".cm-layer .hx-cell-underline": { boxShadow: `inset 0 -2px 0 ${fg}` },
-  ".cm-layer .hx-cell-bar": { boxShadow: `inset 2px 0 0 ${fg}` },
-  ".cm-layer .hx-cell-sel": { backgroundColor: selection2, borderRadius: "0" },
-  ".cm-layer .hx-cell-glyph": {
-    position: "absolute",
-    left: "0",
-    top: "var(--hx-glyph-top)",
-    height: "var(--hx-glyph-height)",
-    font: "var(--hx-glyph-font)",
-    lineHeight: "var(--hx-glyph-height)",
-    letterSpacing: "var(--hx-glyph-spacing)",
-    fontFeatureSettings: "var(--hx-glyph-features)",
-    fontVariationSettings: "var(--hx-glyph-variations)",
-    whiteSpace: "pre",
-    color: bg
-  },
-  "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
-  "&.hx .hx-cursorline": { backgroundColor: hover },
-  ".hx-panel": {
-    position: "relative",
-    fontFamily: "var(--hx-panel-font, monospace)",
-    fontSize: "var(--hx-panel-font-size, 0.85em)",
-    background: panel,
-    borderTop: `1px solid ${border}`
-  },
-  ".hx-panel.hx-panel-empty": { borderTop: "none" },
-  ".hx-panel > .hx-hidden": { display: "none" },
-  ".hx-autoinfo": {
-    position: "absolute",
-    right: "12px",
-    bottom: "calc(100% + 8px + var(--hx-autoinfo-lift, 0px))",
-    padding: "6px 12px",
-    maxHeight: "min(60vh, var(--hx-autoinfo-room, 60vh))",
-    maxWidth: "calc(100% - 24px)",
-    overflow: "auto",
-    background: panel,
-    border: `1px solid ${border}`,
-    borderRadius: "var(--hx-radius, 4px)",
-    boxShadow: "var(--hx-shadow, 0 2px 8px rgb(0 0 0 / 0.15))",
-    whiteSpace: "nowrap"
-  },
-  ".hx-autoinfo-title": { fontWeight: "600", textAlign: "center", marginBottom: "4px" },
-  ".hx-autoinfo-row": { display: "flex", gap: "1.5em" },
-  ".hx-autoinfo-key": { minWidth: "3em", color: "var(--hx-accent, LinkText)" },
-  ".hx-autoinfo-unavailable": { opacity: "0.45" },
-  ".hx-prompt, .hx-message": {
-    padding: "3px calc(10px + var(--hx-bar-overlap, 0px)) 3px 10px",
-    whiteSpace: "pre"
-  },
-  ".hx-message": { overflow: "hidden", textOverflow: "ellipsis" },
-  ".hx-message-error": { color: error },
-  ".hx-prompt-label": { color: muted, marginRight: "0.25em" },
-  ".hx-prompt-cursor": { background: fg, color: bg },
-  ".hx-completions": { display: "flex", flexWrap: "wrap", gap: "0 1.5em", paddingBottom: "3px", color: muted },
-  ".hx-completion-selected": { color: fg, background: hover }
-});
-
 // src/view/view.ts
 class LabelWidget extends WidgetType {
   text;
@@ -9967,6 +9971,8 @@ function helixExtension(env) {
     }
     if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key)))
       return false;
+    if (event.ctrlKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
+      return false;
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k)
@@ -10018,12 +10024,20 @@ function helixExtension(env) {
       this.view.contentDOM.removeEventListener("keydown", this.listener, true);
     }
   });
-  const swallowInput = Prec.highest(EditorView2.inputHandler.of((view) => {
+  const swallowInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
     const value = view.state.field(helixField, false);
     if (!value || value.mode === "insert" && !editor.activePrompt)
       return false;
-    if (view.compositionStarted)
+    if (view.compositionStarted) {
       windowOf(view)?.setTimeout(() => endComposition(view), 0);
+      return true;
+    }
+    const host = env.hostFor(view);
+    for (const ch of text) {
+      const key = keyFromDom({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
+      if (key !== null)
+        editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
+    }
     return true;
   }));
   const autoPairsInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
@@ -10133,6 +10147,7 @@ function helixExtension(env) {
     };
   });
   return [
+    EditorState3.allowMultipleSelections.of(true),
     helixField,
     historyField,
     syncNativeSelection,
@@ -10350,7 +10365,8 @@ function helix2(options = {}) {
   const loaded = loadConfig(options.config ?? null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
-  editor.registers = new Registers(new SystemClipboard);
+  const clipboard = new SystemClipboard;
+  editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);
   const hosts = new WeakMap;
   let count = 0;
@@ -10403,6 +10419,16 @@ function helix2(options = {}) {
     promptChanged: refresh,
     jumpLabels: refresh
   };
+  const clipboardReader = EditorView4.domEventObservers({
+    keydown: () => {
+      queueMicrotask(() => {
+        const pending = editor.keymaps.pending();
+        const register = editor.selectedRegister;
+        if (register === "+" || register === "*" || pending.length === 1 && pending[0] === "space")
+          clipboard.refresh();
+      });
+    }
+  });
   const nativeUndo = EditorView4.domEventHandlers({
     beforeinput: (event) => {
       if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")
@@ -10438,7 +10464,7 @@ function helix2(options = {}) {
         active = null;
     }
   });
-  return [extension, helixEditor.of(editor), drawSelection(), EditorState3.allowMultipleSelections.of(true), nativeUndo];
+  return [extension, helixEditor.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 // src/core/markup.ts
 function print(s) {

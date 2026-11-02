@@ -1,4 +1,4 @@
-import { EditorState, Facet, type Extension, type TransactionSpec } from "@codemirror/state";
+import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
 import { HelixEditor } from "./core/editor";
 import type { Host } from "./core/host";
@@ -8,6 +8,7 @@ import { Registers } from "./registers";
 import type { SyntaxSessions } from "./syntax/languages";
 import { SystemClipboard } from "./view/clipboard";
 import { loadSyntax } from "./view/syntax";
+import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
 import { loadRegex, type WasmSource } from "./view/wasm";
@@ -24,7 +25,8 @@ export function helix(options: HelixOptions = {}): Extension {
   const loaded = loadConfig(options.config ?? null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
-  editor.registers = new Registers(new SystemClipboard());
+  const clipboard = new SystemClipboard();
+  editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);
 
   const hosts = new WeakMap<EditorView, Host>();
@@ -82,6 +84,16 @@ export function helix(options: HelixOptions = {}): Extension {
     jumpLabels: refresh,
   };
 
+  const clipboardReader = EditorView.domEventObservers({
+    keydown: () => {
+      queueMicrotask(() => {
+        const pending = editor.keymaps.pending();
+        const register = editor.selectedRegister;
+        if (register === "+" || register === "*" || (pending.length === 1 && pending[0] === "space")) clipboard.refresh();
+      });
+    },
+  });
+
   const nativeUndo = EditorView.domEventHandlers({
     beforeinput: (event) => {
       if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo") return false;
@@ -115,5 +127,5 @@ export function helix(options: HelixOptions = {}): Extension {
       if (active === view) active = null;
     },
   });
-  return [extension, helixEditor.of(editor), drawSelection(), EditorState.allowMultipleSelections.of(true), nativeUndo];
+  return [extension, helixEditor.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }

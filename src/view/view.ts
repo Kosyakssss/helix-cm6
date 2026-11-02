@@ -1,4 +1,4 @@
-import { Prec, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { EditorState, Prec, RangeSetBuilder, type Extension } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -164,6 +164,7 @@ export function helixExtension(env: ViewEnv): Extension {
       if (physical && physical !== key && pendingNode(editor, "insert").map.has(physical)) key = physical;
     }
     if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key))) return false;
+    if (event.ctrlKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key)) return false;
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k),
@@ -215,10 +216,18 @@ export function helixExtension(env: ViewEnv): Extension {
   );
 
   const swallowInput = Prec.highest(
-    EditorView.inputHandler.of((view) => {
+    EditorView.inputHandler.of((view, _from, _to, text) => {
       const value = view.state.field(helixField, false);
       if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
-      if (view.compositionStarted) windowOf(view)?.setTimeout(() => endComposition(view), 0);
+      if (view.compositionStarted) {
+        windowOf(view)?.setTimeout(() => endComposition(view), 0);
+        return true;
+      }
+      const host = env.hostFor(view);
+      for (const ch of text) {
+        const key = keyFromDom({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
+        if (key !== null) editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
+      }
       return true;
     }),
   );
@@ -332,6 +341,7 @@ export function helixExtension(env: ViewEnv): Extension {
   });
 
   return [
+    EditorState.allowMultipleSelections.of(true),
     helixField,
     historyField,
     syncNativeSelection,

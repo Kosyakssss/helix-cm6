@@ -2,13 +2,17 @@ import { EditorView } from "@codemirror/view";
 
 const fg = "var(--hx-fg, currentColor)";
 const bg = "var(--hx-bg, Canvas)";
-const selection = "var(--hx-selection, color-mix(in srgb, Highlight 35%, transparent))";
+const selection = "var(--hx-selection, Highlight)";
 const error = "var(--hx-error, #d32f2f)";
 const muted = "var(--hx-muted, color-mix(in srgb, currentColor 60%, transparent))";
 const panel = "var(--hx-panel, color-mix(in srgb, currentColor 5%, Canvas))";
 const border = "var(--hx-border, color-mix(in srgb, currentColor 20%, transparent))";
 const hover = "var(--hx-hover, color-mix(in srgb, currentColor 8%, transparent))";
 const radius = "var(--hx-cursor-radius, 2px)";
+
+export const nativeSelectionTheme = EditorView.baseTheme({
+  "&.hx .cm-line::selection, &.hx .cm-line ::selection, &.hx .cm-content::selection": { backgroundColor: `${selection} !important` },
+});
 
 export const helixTheme = EditorView.baseTheme({
   "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },

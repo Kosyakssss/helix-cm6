@@ -12,12 +12,7 @@ States:
 
 ## Open bugs
 
-- Text that arrives without a key event (IME, emoji picker, dictation) is dropped while a prompt, or a key such as `f` or `r`, waits for it.
-- In a plain `helix()` editor the primary selection is not drawn in normal and select mode: `drawSelection()` hides the browser's selection, and the theme hides `drawSelection()`'s layer. The default selection colour, 35% of `Highlight`, is too faint.
-- `helixExtension()` does not allow multiple selections, so an app that builds its own editor from it, such as helix-motions' `helix.toml` editor, keeps only one selection.
-- In normal and select mode, an unbound key is always taken from the browser. With Ctrl, this blocks OS shortcuts such as macOS window tiling.
-- A plain `helix()` editor does not read the system clipboard before `"+p` or `space p`.
-- `editor.terminal` warns as an unknown key.
+- An IME composition in normal or select mode, or in a prompt, is cancelled, so composed text (for example Japanese in a search) cannot be typed there. Text input without a composition, such as the emoji picker or dictation, works.
 
 ## Commands
 

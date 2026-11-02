@@ -14,12 +14,12 @@ export class SystemClipboard implements ClipboardProvider {
   set(contents: string, type: ClipboardType): void {
     if (type === "selection") return;
     this.cache = contents;
-    void navigator.clipboard.writeText(contents).catch(() => undefined);
+    void navigator.clipboard?.writeText(contents).catch(() => undefined);
   }
 
   refresh(): void {
     navigator.clipboard
-      .readText()
+      ?.readText()
       .then((text) => {
         this.cache = text;
       })

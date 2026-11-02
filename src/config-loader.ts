@@ -48,6 +48,7 @@ const IGNORED_EDITOR = new Set([
   "inline-diagnostics",
   "word-completion",
   "workspace-trust",
+  "terminal",
 ]);
 
 function asBool(v: unknown, key: string, warnings: string[]): boolean | undefined {
