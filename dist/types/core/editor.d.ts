@@ -5,6 +5,7 @@ import { type Host } from "./host";
 import { Prompt, type Completion } from "./prompt";
 import { JumpList, type Jump } from "../commands/jumps";
 import type { ShellRunner } from "../commands/shell";
+import type { Variable } from "../commands/expansion";
 import { type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
 import type { Selection } from "../selection";
@@ -56,6 +57,7 @@ export interface UiHooks {
 export interface Workspace {
     run(cx: Context, name: string, args: string[]): void;
     openJump?(cx: Context, jump: Jump): void;
+    variable?(cx: Context, name: Variable): string | null;
 }
 export interface ViewOps {
     scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", syncCursor: boolean): void;

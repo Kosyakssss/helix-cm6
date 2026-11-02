@@ -5505,6 +5505,420 @@ var UNSUPPORTED = [
   "dap_disable_exceptions"
 ];
 
+// src/commands/command-line.ts
+function split(line) {
+  const m = /[ \t]/.exec(line);
+  const command = m ? line.slice(0, m.index) : line;
+  const rest = m ? line.slice(m.index + 1) : "";
+  const completeCommand = command === "" || rest.trim() === "" && !/[ \t]$/.test(line);
+  return [command, rest, completeCommand];
+}
+
+class ParseArgsError extends Error {
+}
+var SHELL_SIGNATURE = { positionals: [1, 2], rawAfter: 1 };
+function wrongPositionalCount(min, max, actual) {
+  const plural = (n) => n === 1 ? "" : "s";
+  let expected;
+  if (min === 0 && max === 0)
+    expected = "no arguments";
+  else if (max !== null && min === max)
+    expected = `exactly ${min} argument${plural(min)}`;
+  else if (actual < min)
+    expected = `at least ${min} argument${plural(min)}`;
+  else
+    expected = `at most ${max} argument${plural(max)}`;
+  return new ParseArgsError(`expected ${expected}, got ${actual}`);
+}
+var EXPANSION_KINDS = { "": "variable", u: "unicode", sh: "shell", reg: "register" };
+
+class Tokenizer {
+  input;
+  validate;
+  pos = 0;
+  constructor(input, validate) {
+    this.input = input;
+    this.validate = validate;
+  }
+  rest() {
+    this.skipBlanks();
+    if (this.pos === this.input.length)
+      return null;
+    const contentStart = this.pos;
+    this.pos = this.input.length;
+    return { kind: { kind: "expand" }, contentStart, content: this.input.slice(contentStart), isTerminated: false };
+  }
+  byte() {
+    return this.input[this.pos];
+  }
+  prevByte() {
+    return this.pos > 0 ? this.input[this.pos - 1] : undefined;
+  }
+  skipBlanks() {
+    while (this.byte() === " " || this.byte() === "\t")
+      this.pos++;
+  }
+  parseUnquoted() {
+    let escaped = "";
+    let hasEscape = false;
+    let start = this.pos;
+    for (let byte = this.byte();byte !== undefined; byte = this.byte()) {
+      if (byte === " " || byte === "\t") {
+        if (this.prevByte() === "\\") {
+          escaped += this.input.slice(start, this.pos - 1) + byte;
+          hasEscape = true;
+          start = this.pos + 1;
+        } else if (!hasEscape) {
+          return this.input.slice(start, this.pos);
+        } else {
+          break;
+        }
+      }
+      this.pos++;
+    }
+    const end = this.prevByte() === "\\" ? this.pos - 1 : this.pos;
+    if (!hasEscape)
+      return this.input.slice(start, end);
+    return escaped + this.input.slice(start, end);
+  }
+  parseQuoted(quote) {
+    this.pos++;
+    let escaped = "";
+    for (;; ) {
+      const idx = this.input.indexOf(quote, this.pos);
+      if (idx < 0)
+        break;
+      if (this.input[idx + 1] === quote) {
+        escaped += this.input.slice(this.pos, idx + 1);
+        this.pos = idx + 2;
+      } else {
+        const quoted = escaped + this.input.slice(this.pos, idx);
+        this.pos = idx + 1;
+        return [quoted, true];
+      }
+    }
+    const quoted = escaped + this.input.slice(this.pos);
+    this.pos = this.input.length;
+    return [quoted, false];
+  }
+  parsePercentToken() {
+    this.pos++;
+    const kindStart = this.pos;
+    while (/^[a-z]$/.test(this.byte() ?? ""))
+      this.pos++;
+    const kindName = this.input.slice(kindStart, this.pos);
+    const pairs = { "(": ")", "[": "]", "{": "}", "<": ">", "'": "'", '"': '"', "|": "|" };
+    const open = this.byte();
+    const close = open !== undefined ? pairs[open] : undefined;
+    if (open === undefined || close === undefined) {
+      if (this.validate) {
+        throw new ParseArgsError(kindName === "" ? "'%' was not properly escaped. Please use '%%'" : `missing a string delimiter after '%${kindName}'`);
+      }
+      return { kind: { kind: "expansion-kind" }, contentStart: kindStart, content: kindName, isTerminated: false };
+    }
+    const contentStart = this.pos + 1;
+    const expansion = EXPANSION_KINDS[kindName];
+    if (expansion === undefined && this.validate)
+      throw new ParseArgsError(`unknown expansion '${kindName}'`);
+    const kind = expansion === undefined ? { kind: "expand" } : { kind: "expansion", expansion };
+    const [content, isTerminated] = open === close ? this.parseQuoted(open) : this.parseQuotedBalanced(open, close);
+    if (this.validate && !isTerminated)
+      throw new ParseArgsError(`unterminated token ${content}`);
+    return { kind, contentStart, content, isTerminated };
+  }
+  parseQuotedBalanced(open, close) {
+    this.pos++;
+    const start = this.pos;
+    let level = 1;
+    for (;; ) {
+      let idx = -1;
+      for (let i = this.pos;i < this.input.length; i++) {
+        if (this.input[i] === open || this.input[i] === close) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx < 0)
+        break;
+      this.pos = idx + 1;
+      if (this.input[idx] === open)
+        level++;
+      else {
+        level--;
+        if (level === 0)
+          break;
+      }
+    }
+    const isTerminated = level === 0;
+    let end;
+    if (isTerminated)
+      end = this.pos - 1;
+    else {
+      this.pos = this.input.length;
+      end = this.pos;
+    }
+    return [this.input.slice(start, end), isTerminated];
+  }
+  next() {
+    this.skipBlanks();
+    const byte = this.byte();
+    if (byte === undefined)
+      return null;
+    if (byte === '"' || byte === "'" || byte === "`") {
+      const contentStart = this.pos + 1;
+      const [content, isTerminated] = this.parseQuoted(byte);
+      const kind = byte === '"' ? { kind: "expand" } : { kind: "quoted", quote: byte };
+      if (this.validate && !isTerminated)
+        throw new ParseArgsError(`unterminated token ${content}`);
+      return { kind, contentStart, content, isTerminated };
+    }
+    if (byte === "%")
+      return this.parsePercentToken();
+    const contentStart = this.pos;
+    const peek = this.input[this.pos + 1];
+    if (byte === "\\" && (peek === '"' || peek === "'" || peek === "`" || peek === "%"))
+      this.pos++;
+    return { kind: { kind: "unquoted" }, contentStart, content: this.parseUnquoted(), isTerminated: false };
+  }
+}
+
+class Args {
+  signature;
+  validate;
+  onlyPositionals = false;
+  state = { kind: "positional" };
+  positional = [];
+  flags = new Map;
+  constructor(signature, validate) {
+    this.signature = signature;
+    this.validate = validate;
+  }
+  readToken(parser) {
+    if (this.signature.rawAfter !== undefined && this.positional.length >= this.signature.rawAfter) {
+      this.onlyPositionals = true;
+      return parser.rest();
+    }
+    return parser.next();
+  }
+  static parse(line, signature, validate, map) {
+    const tokenizer = new Tokenizer(line, validate);
+    const args = new Args(signature, validate);
+    for (let token = args.readToken(tokenizer);token !== null; token = args.readToken(tokenizer))
+      args.push(map(token));
+    args.finish();
+    return args;
+  }
+  static parseAsync(line, signature, map) {
+    const tokenizer = new Tokenizer(line, true);
+    const args = new Args(signature, true);
+    const loop = () => {
+      for (let token = args.readToken(tokenizer);token !== null; token = args.readToken(tokenizer)) {
+        const arg = map(token);
+        if (arg instanceof Promise) {
+          return arg.then((value) => {
+            args.push(value);
+            return loop();
+          });
+        }
+        args.push(arg);
+      }
+      args.finish();
+      return args;
+    };
+    return loop();
+  }
+  push(arg) {
+    const awaiting = this.flagAwaitingArgument();
+    if (!this.onlyPositionals && arg === "--") {
+      this.onlyPositionals = true;
+      this.state = { kind: "flag", flag: null };
+    } else if (awaiting) {
+      this.flags.set(awaiting.name, arg);
+      this.state = { kind: "flag-argument", flag: awaiting };
+    } else if (!this.onlyPositionals && arg.startsWith("-")) {
+      const flags = this.signature.flags ?? [];
+      const flag = arg.startsWith("--") ? flags.find((f) => f.name === arg.slice(2)) : flags.find((f) => f.alias !== undefined && f.alias === arg.slice(1));
+      if (!flag) {
+        if (this.validate)
+          throw new ParseArgsError(`unknown flag '${arg}'`);
+        this.positional.push(arg);
+        this.state = { kind: "flag", flag: null };
+        return;
+      }
+      if (this.validate && this.flags.has(flag.name))
+        throw new ParseArgsError(`flag '--${flag.name}' specified more than once`);
+      this.flags.set(flag.name, "");
+      this.state = { kind: "flag", flag };
+    } else {
+      this.positional.push(arg);
+      this.state = { kind: "positional" };
+    }
+  }
+  finish() {
+    if (!this.validate)
+      return;
+    const awaiting = this.flagAwaitingArgument();
+    if (awaiting)
+      throw new ParseArgsError(`flag '--${awaiting.name}' missing an argument`);
+    const [min, max] = this.signature.positionals;
+    const actual = this.positional.length;
+    if (actual < min || max !== null && actual > max)
+      throw wrongPositionalCount(min, max, actual);
+  }
+  flagAwaitingArgument() {
+    return this.state.kind === "flag" && this.state.flag?.completions ? this.state.flag : null;
+  }
+  join(sep) {
+    return this.positional.join(sep);
+  }
+  hasFlag(name) {
+    return this.flags.has(name);
+  }
+  getFlag(name) {
+    return this.flags.get(name);
+  }
+}
+
+// src/commands/expansion.ts
+var VARIABLES = new Set([
+  "cursor_line",
+  "cursor_column",
+  "buffer_name",
+  "file_path_absolute",
+  "line_ending",
+  "workspace_directory",
+  "current_working_directory",
+  "language",
+  "selection",
+  "selection_line_start",
+  "selection_line_end"
+]);
+function then(value, f) {
+  return value instanceof Promise ? value.then(f) : f(value);
+}
+function expand(cx, token) {
+  const k = token.kind;
+  switch (k.kind) {
+    case "unquoted":
+    case "quoted":
+      return token.content;
+    case "expand":
+      return expandInner(cx, token.content);
+    case "expansion-kind":
+      throw new Error("expansion name tokens cannot be emitted when command line validation is enabled");
+    case "expansion":
+      switch (k.expansion) {
+        case "variable":
+          if (!VARIABLES.has(token.content))
+            throw new Error(`unknown variable '${token.content}'`);
+          return expandVariable(cx, token.content);
+        case "unicode": {
+          const code = /^[0-9a-fA-F]+$/.test(token.content) ? parseInt(token.content, 16) : NaN;
+          if (!Number.isNaN(code) && code <= 1114111 && !(code >= 55296 && code <= 57343))
+            return String.fromCodePoint(code);
+          throw new Error(`could not interpret '${token.content}' as a Unicode character code`);
+        }
+        case "shell":
+          return expandShell(cx, token.content);
+        case "register":
+          return expandRegister(cx, token.content);
+      }
+  }
+}
+function expandShell(cx, content) {
+  return then(expandInner(cx, content), (command) => {
+    const run = cx.editor.shell;
+    const shell = cx.editor.config.shell;
+    if (!run || shell.length === 0)
+      throw new Error("Failed to start shell: No shell set");
+    const finish = (output) => {
+      let text = output.stdout;
+      if (text.endsWith(`
+`)) {
+        text = text.slice(0, -1);
+        if (text.endsWith("\r"))
+          text = text.slice(0, -1);
+      }
+      return text;
+    };
+    const output = run(command, null, shell);
+    return output instanceof Promise ? output.then(finish) : finish(output);
+  });
+}
+function expandRegister(cx, content) {
+  const chars = [...content];
+  if (chars.length === 0)
+    throw new Error("Missing register name");
+  if (chars.length > 1)
+    throw new Error(`Invalid register \`${content}\`: should only be a single character`);
+  const values = cx.editor.registers.read(chars[0], cx.editor.registerEnv(cx.host));
+  return values ? values.join("") : "";
+}
+function expandInner(cx, content) {
+  const step = (start, escaped) => {
+    for (;; ) {
+      const idx = content.indexOf("%", start);
+      if (idx < 0)
+        return escaped === "" ? content : escaped + content.slice(start);
+      if (content[idx + 1] === "%") {
+        escaped += content.slice(start, idx + 1);
+        start = idx + 2;
+        continue;
+      }
+      escaped += content.slice(start, idx);
+      const tokenizer = new Tokenizer(content.slice(idx), true);
+      const token = tokenizer.parsePercentToken();
+      const next = idx + tokenizer.pos;
+      const expanded = expand(cx, token);
+      if (expanded instanceof Promise) {
+        const before = escaped;
+        return expanded.then((text) => step(next, before + text));
+      }
+      escaped += expanded;
+      start = next;
+    }
+  };
+  return step(0, "");
+}
+function expandVariable(cx, variable) {
+  const doc = docOf(cx);
+  const primary = selOf(cx).primary();
+  const app = cx.editor.workspace?.variable?.(cx, variable);
+  if (app !== undefined && app !== null)
+    return app;
+  switch (variable) {
+    case "cursor_line":
+      return String(doc.lineAt(primary.cursor(doc)).number);
+    case "cursor_column": {
+      const cursor = primary.cursor(doc);
+      let col = 0;
+      for (let pos = doc.lineAt(cursor).from;pos < cursor; pos = nextGraphemeBoundary(doc, pos))
+        col++;
+      return String(col + 1);
+    }
+    case "buffer_name":
+      return cx.host.name;
+    case "file_path_absolute":
+      return cx.host.name;
+    case "line_ending":
+      return `
+`;
+    case "current_working_directory":
+    case "workspace_directory":
+      return "";
+    case "language":
+      return "text";
+    case "selection":
+      return doc.sliceString(primary.from(), primary.to());
+    case "selection_line_start":
+      return String(doc.lineAt(primary.from()).number);
+    case "selection_line_end": {
+      const end = primary.to() > primary.from() && doc.lineAt(primary.to()).from === primary.to() ? primary.to() - 1 : primary.to();
+      return String(doc.lineAt(end).number);
+    }
+  }
+}
+
 // src/commands/shell.ts
 function interpret(output) {
   if (output.code !== 0) {
@@ -5637,7 +6051,19 @@ function shellPrompt(cx, label, run) {
     onAccept: (input) => {
       if (input === "")
         return;
-      run(new Context(editor, host, null, null), input);
+      const pcx = new Context(editor, host, null, null);
+      let parsed;
+      try {
+        parsed = Args.parseAsync(input, SHELL_SIGNATURE, (token) => expand(pcx, token));
+      } catch (err) {
+        editor.setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (!(parsed instanceof Promise)) {
+        run(pcx, parsed.join(" "));
+        return;
+      }
+      editor.whileBusy(parsed.then((args) => void run(pcx, args.join(" ")), (err) => editor.setError(err instanceof Error ? err.message : String(err))));
     }
   });
 }
@@ -5671,7 +6097,7 @@ function contains(superSet, subSet) {
     }
   }
 }
-function expand(cx) {
+function expand2(cx) {
   applyMotion(cx, (cx) => {
     const syntax = syntaxOf(cx);
     if (!syntax)
@@ -5732,7 +6158,7 @@ function gotoTsObject(dir) {
   });
 }
 var syntaxCommands = {
-  expand_selection: expand,
+  expand_selection: expand2,
   shrink_selection: shrink,
   select_next_sibling: selectWith(selectNextSibling),
   select_prev_sibling: selectWith(selectPrevSibling),
@@ -6140,77 +6566,107 @@ function getOption(editor, args) {
 }
 
 // src/commands/typed.ts
-function scanTokens(input) {
-  const out = [];
-  let i = 0;
-  while (i < input.length) {
-    while (i < input.length && /\s/.test(input[i]))
-      i++;
-    if (i >= input.length)
-      break;
-    const start = i;
-    const q = input[i];
-    if (q === "'" || q === '"' || q === "`") {
-      let content = "";
-      let j = i + 1;
-      let terminated = false;
-      while (j < input.length) {
-        if (input[j] === q) {
-          if (input[j + 1] === q) {
-            content += q;
-            j += 2;
-            continue;
-          }
-          terminated = true;
-          j++;
-          break;
-        }
-        content += input[j];
-        j++;
-      }
-      out.push({ start, contentStart: start + 1, content, quote: q, terminated });
-      i = j;
-      continue;
-    }
-    let tok = "";
-    while (i < input.length && !/\s/.test(input[i])) {
-      if (input[i] === "\\" && i + 1 < input.length) {
-        tok += input[i + 1];
-        i += 2;
-        continue;
-      }
-      tok += input[i];
-      i++;
-    }
-    out.push({ start, contentStart: start, content: tok, quote: null, terminated: false });
-  }
-  return out;
-}
-function tokenize(input) {
-  return scanTokens(input).map((t) => t.content);
-}
-function parseArgs(raw, cmd) {
-  const tokens = tokenize(raw);
-  const flags = new Set;
-  const positional = [];
-  let onlyPositional = false;
-  for (const t of tokens) {
-    if (!onlyPositional && t === "--") {
-      onlyPositional = true;
-      continue;
-    }
-    if (!onlyPositional && cmd.flags && t.startsWith("-")) {
-      const name = t.replace(/^--?/, "");
-      const full = Object.entries(cmd.flags).find(([long, short]) => long === name || short === name);
-      if (full) {
-        flags.add(full[0]);
-        continue;
-      }
-    }
-    positional.push(t);
-  }
-  return { positional, flags, raw };
-}
+var sig = (min, max, extra = {}) => ({ positionals: [min, max], ...extra });
+var WRITE_FLAGS = [
+  { name: "no-format", doc: "skip auto-formatting" },
+  { name: "no-code-actions", doc: "skip code actions on save" }
+];
+var SIGNATURES = {
+  exit: sig(0, 1, { flags: WRITE_FLAGS }),
+  "exit!": sig(0, 1, { flags: WRITE_FLAGS }),
+  quit: sig(0, 0),
+  "quit!": sig(0, 0),
+  open: sig(1, null),
+  "buffer-close": sig(0, null),
+  "buffer-close!": sig(0, null),
+  "buffer-close-others": sig(0, 0, { flags: [{ name: "skip-visible", alias: "s", doc: "don't close buffers that are visible" }] }),
+  "buffer-close-others!": sig(0, 0, { flags: [{ name: "skip-visible", alias: "s", doc: "don't close buffers that are visible" }] }),
+  "buffer-close-all": sig(0, 0),
+  "buffer-close-all!": sig(0, 0),
+  "buffer-next": sig(0, 0),
+  "buffer-previous": sig(0, 0),
+  write: sig(0, 1, { flags: WRITE_FLAGS }),
+  "write!": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-buffer-close": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-buffer-close!": sig(0, 1, { flags: WRITE_FLAGS }),
+  new: sig(0, 0),
+  format: sig(0, 0),
+  "indent-style": sig(0, 1),
+  "line-ending": sig(0, 1),
+  earlier: sig(0, 1),
+  later: sig(0, 1),
+  "write-quit": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-quit!": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-all": sig(0, 0, { flags: WRITE_FLAGS }),
+  "write-all!": sig(0, 0, { flags: WRITE_FLAGS }),
+  "write-quit-all": sig(0, 0, { flags: WRITE_FLAGS }),
+  "write-quit-all!": sig(0, 0, { flags: WRITE_FLAGS }),
+  "quit-all": sig(0, 0),
+  "quit-all!": sig(0, 0),
+  cquit: sig(0, 1),
+  "cquit!": sig(0, 1),
+  theme: sig(0, 1),
+  "yank-join": sig(0, 1),
+  "clipboard-yank": sig(0, 0),
+  "clipboard-yank-join": sig(0, 1),
+  "primary-clipboard-yank": sig(0, 0),
+  "primary-clipboard-yank-join": sig(0, 1),
+  "clipboard-paste-after": sig(0, 0),
+  "clipboard-paste-before": sig(0, 0),
+  "clipboard-paste-replace": sig(0, 0),
+  "primary-clipboard-paste-after": sig(0, 0),
+  "primary-clipboard-paste-before": sig(0, 0),
+  "primary-clipboard-paste-replace": sig(0, 0),
+  "show-clipboard-provider": sig(0, 0),
+  "change-current-directory": sig(1, 1),
+  "show-directory-stack": sig(0, 0),
+  "push-directory": sig(1, 1),
+  "pop-directory": sig(0, 0),
+  "show-directory": sig(0, 0),
+  encoding: sig(0, 1),
+  "character-info": sig(0, 0),
+  reload: sig(0, 0),
+  "reload-all": sig(0, 0),
+  update: sig(0, 0, { flags: [WRITE_FLAGS[0]] }),
+  "lsp-workspace-command": sig(0, null, { rawAfter: 1 }),
+  "lsp-restart": sig(0, null),
+  "lsp-stop": sig(0, null),
+  "tree-sitter-scopes": sig(0, 0),
+  "tree-sitter-highlight-name": sig(0, 0),
+  "tree-sitter-layers": sig(0, 0),
+  vsplit: sig(0, null),
+  "vsplit-new": sig(0, 0),
+  hsplit: sig(0, null),
+  "hsplit-new": sig(0, 0),
+  tutor: sig(0, 0),
+  goto: sig(1, 1),
+  "set-language": sig(0, 1),
+  "set-option": sig(2, 2, { rawAfter: 1 }),
+  "toggle-option": sig(1, null, { rawAfter: 1 }),
+  "get-option": sig(1, 1),
+  sort: sig(0, 0, { flags: [{ name: "insensitive", alias: "i", doc: "sort the ranges case-insensitively" }, { name: "reverse", alias: "r", doc: "sort ranges in reverse order" }] }),
+  reflow: sig(0, 1),
+  "tree-sitter-subtree": sig(0, 0),
+  "config-reload": sig(0, 0),
+  "config-open": sig(0, 0),
+  "config-open-workspace": sig(0, 0),
+  "log-open": sig(0, 0),
+  "insert-output": SHELL_SIGNATURE,
+  "append-output": SHELL_SIGNATURE,
+  pipe: SHELL_SIGNATURE,
+  "pipe-to": SHELL_SIGNATURE,
+  "run-shell-command": SHELL_SIGNATURE,
+  "reset-diff-change": sig(0, 0),
+  "clear-register": sig(0, 1),
+  "set-register": sig(2, 2, { rawAfter: 1 }),
+  redraw: sig(0, 0),
+  move: sig(1, 1),
+  "move!": sig(1, 1),
+  "yank-diagnostic": sig(0, 1),
+  read: sig(1, 1),
+  echo: sig(1, null),
+  noop: sig(0, null)
+};
 function validateOnly(fun) {
   return (cx, args, event) => {
     if (event === "validate")
@@ -6379,15 +6835,14 @@ var DEFS = [
   { name: "primary-clipboard-paste-before", aliases: [], doc: "Paste primary clipboard before selections.", fun: validateOnly((cx) => paste(cx, "*", "before", 1)) },
   { name: "primary-clipboard-paste-replace", aliases: [], doc: "Replace selections with content of system primary clipboard.", fun: validateOnly((cx) => replaceSelectionsWithRegister(cx, "*", 1)) },
   { name: "character-info", aliases: ["char"], doc: "Get info about the character under the primary cursor.", fun: validateOnly(characterInfo) },
-  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "insert")) },
-  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "append")) },
-  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "replace")) },
-  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "ignore")) },
+  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "insert")) },
+  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "append")) },
+  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "replace")) },
+  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "ignore")) },
   {
     name: "sort",
     aliases: [],
     doc: "Sort ranges in selection.",
-    flags: { reverse: "r", insensitive: "i" },
     fun: validateOnly(sortCommand)
   },
   {
@@ -6469,7 +6924,7 @@ var DEFS = [
   { name: "noop", aliases: [], doc: "Does nothing.", fun: () => {} },
   { name: "redraw", aliases: [], doc: "Clear and re-render the whole UI", fun: validateOnly((cx) => cx.host.view?.requestMeasure()) }
 ];
-var TYPABLE = DEFS;
+var TYPABLE = DEFS.map((def) => ({ ...def, signature: SIGNATURES[def.name] ?? sig(0, null) }));
 var TYPABLE_MAP = new Map;
 for (const cmd of TYPABLE) {
   TYPABLE_MAP.set(cmd.name, cmd);
@@ -6477,17 +6932,34 @@ for (const cmd of TYPABLE) {
     TYPABLE_MAP.set(a, cmd);
 }
 function splitCommandLine(input) {
-  const trimmed = input.replace(/^\s+/, "");
-  const m = /^(\S*)\s*([\s\S]*)$/.exec(trimmed);
-  return [m[1], m[2]];
+  const [command, rest] = split(input);
+  return [command, rest];
+}
+function executeCommand(cx, cmd, input, event) {
+  if (event !== "validate") {
+    cmd.fun(cx, Args.parse(input, cmd.signature, false, (token) => token.content), event);
+    return;
+  }
+  const fail = (err) => cx.editor.setError(`'${cmd.name}': ${err instanceof Error ? err.message : String(err)}`);
+  let parsed;
+  try {
+    parsed = Args.parseAsync(input, cmd.signature, (token) => expand(cx, token));
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  if (!(parsed instanceof Promise)) {
+    cmd.fun(cx, parsed, event);
+    return;
+  }
+  cx.editor.whileBusy(parsed.then((args) => cmd.fun(cx, args, event), fail));
 }
 function executeCommandLine(cx, input, event) {
-  const [command, rest] = splitCommandLine(input);
+  const [command, rest] = split(input);
   if (command === "")
     return;
   if (/^\d+$/.test(command) && rest.trim() === "") {
-    const goto = TYPABLE_MAP.get("goto");
-    goto.fun(cx, parseArgs(command, goto), event);
+    executeCommand(cx, TYPABLE_MAP.get("goto"), command, event);
     return;
   }
   const cmd = TYPABLE_MAP.get(command);
@@ -6496,10 +6968,19 @@ function executeCommandLine(cx, input, event) {
       cx.editor.setError(`no such command: '${command}'`);
     return;
   }
-  cmd.fun(cx, parseArgs(rest, cmd), event);
+  executeCommand(cx, cmd, rest, event);
 }
 var PATH_COMMANDS = new Set(["open", "vsplit", "hsplit", "read", "move", "move!", "write", "write!"]);
 var OPTION_COMMANDS = new Set(["set-option", "toggle-option", "get-option"]);
+function completionTokens(input) {
+  const tokenizer = new Tokenizer(input, false);
+  const out = [];
+  for (let token = tokenizer.next();token !== null; token = tokenizer.next()) {
+    const quote = token.kind.kind === "quoted" ? token.kind.quote : token.kind.kind === "expand" && input[token.contentStart - 1] === '"' ? '"' : null;
+    out.push({ start: quote === null ? token.contentStart : token.contentStart - 1, contentStart: token.contentStart, content: token.content, quote, terminated: token.isTerminated });
+  }
+  return out;
+}
 function quoteCompletion(token, candidate) {
   if (token.quote === null) {
     const text = /[ \t%]/.test(candidate) ? `'${candidate.replace(/'/g, "''")}'` : candidate;
@@ -6513,7 +6994,7 @@ function completeCommandLine(input, pathCompleter) {
     const cmd = TYPABLE_MAP.get(command);
     if (!cmd)
       return [];
-    const tokens = scanTokens(input).slice(1);
+    const tokens = completionTokens(input).slice(1);
     let token = tokens[tokens.length - 1];
     if (!token || token.quote === null && /\s$/.test(input) || token.terminated) {
       if (token?.terminated)
@@ -6553,7 +7034,7 @@ var STATIC_COMMANDS = {
 function isKnownCommand(name) {
   return name in STATIC_COMMANDS || UNSUPPORTED.includes(name);
 }
-function executeCommand(cx, command, arg) {
+function executeCommand2(cx, command, arg) {
   switch (command.kind) {
     case "static": {
       const fn = STATIC_COMMANDS[command.name];
@@ -7167,7 +7648,7 @@ class HelixEditor {
       this.workspace.openJump(cx, jump);
   }
   runStatic(cx, name) {
-    executeCommand(cx, { kind: "static", name });
+    executeCommand2(cx, { kind: "static", name });
   }
   workspaceCommand(cx, name, args = []) {
     if (this.workspace)
@@ -7325,7 +7806,7 @@ class HelixEditor {
     const result = this.keymaps.get(m, key);
     this.autoinfo = this.keymaps.sticky;
     const execute = (command) => {
-      executeCommand(cx, command);
+      executeCommand2(cx, command);
       const current = mode(cx.host);
       if (current !== lastMode && current === "insert") {
         this.lastInsert = { command, keys: [] };
@@ -7370,7 +7851,7 @@ class HelixEditor {
         } else {
           const again = this.keymaps.get("insert", ev);
           if (again.kind === "matched")
-            executeCommand(cx, again.command);
+            executeCommand2(cx, again.command);
         }
       }
       return true;
@@ -7378,7 +7859,7 @@ class HelixEditor {
     return true;
   }
   insertChar(cx, ch) {
-    executeCommand(cx, { kind: "static", name: "__insert_char" }, ch);
+    executeCommand2(cx, { kind: "static", name: "__insert_char" }, ch);
   }
   commandMode_(m, cx, key) {
     const digit = /^[0-9]$/.test(key) ? Number(key) : null;
@@ -7396,7 +7877,7 @@ class HelixEditor {
     if (key === "." && this.keymaps.pending().length === 0) {
       const times = this.count ?? 1;
       for (let i = 0;i < times; i++) {
-        executeCommand(cx, this.lastInsert.command);
+        executeCommand2(cx, this.lastInsert.command);
         for (const k of [...this.lastInsert.keys]) {
           if (this.replayKeyHook?.(cx.host, k))
             continue;

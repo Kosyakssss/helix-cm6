@@ -62,6 +62,12 @@ const EDITS = [
   "%s(?i)é<ret>", "%sSS<ret>", "%s\\b<ret>", "%s^<ret>", "%s$<ret>", "%s.<ret>", "%s\\pL+<ret>", "%s[^a-z]+<ret>",
   "|tr a-z A-Z<ret>", "x|tr a-z A-Z<ret>", "%<A-s>|rev<ret>", "!printf hi<ret>", "<A-!>printf 'a\\n'<ret>", "<A-|>cat<ret>",
   "x$grep -q o<ret>", "%<A-s>$grep -q e<ret>", "%<A-s>$false<ret>", "|false<ret>", "|echo err <gt>&2; false<ret>", "x|cat<ret>u",
+  ":set-register a %{cursor_line}:%{cursor_column}<ret>\"ap", ":set-register a %{selection}<ret>\"aP", ":set-register a %u{25CF}<ret>\"ap",
+  ":set-register a \"l%{selection_line_start}-%{selection_line_end}\"<ret>\"ap", "x:set-register a %{selection_line_end}<ret>\"ap",
+  ":set-register a '%{cursor_line}'<ret>\"ap", ":set-register a `x``y`<ret>\"ap", ":set-register a %%<ret>\"ap", ":set-register a %sh{printf hi}<ret>\"ap",
+  ":set-register a %reg{a}x<ret>\"ap", ":set-register a a\\ b<ret>\"ap", ":set-register a %{nope}<ret>\"ap", ":set-register a %q{x}<ret>\"ap",
+  ":sort --reverse<ret>", "%<A-s>:sort -r -i<ret>", ":sort -x<ret>", ":sort -r -r<ret>", ":reflow 1 2<ret>", ":echo<ret>", ":goto 2<ret>",
+  "!printf %{cursor_line}<ret>", "|printf '%%s' x<ret>", "!printf \"a b\"<ret>",
   ":pipe rev<ret>", ":insert-output printf x<ret>", ":append-output echo y<ret>", ":pipe-to cat<ret>",
   "%Sx*<ret>", "%<A-s>K\\d<ret>", "%<A-s><A-K>\\p{Cyrillic}<ret>", "/\\d<ret>n", "?\\w+<ret>N", "/(?<ret>",
 ];

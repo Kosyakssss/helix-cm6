@@ -10,6 +10,8 @@ import { yankJoinedTo, paste, replaceSelectionsWithRegister } from "./edit";
 import { gotoLineWithoutJumplist } from "./motion";
 import { commitHistoryNow, jumplistFor } from "./jumps";
 import { shell } from "./shell";
+import { Args, SHELL_SIGNATURE, split, Tokenizer, type Flag, type Signature } from "./command-line";
+import { expand } from "./expansion";
 
 export type PromptEvent = "update" | "validate" | "abort";
 
@@ -17,95 +19,45 @@ export interface TypableCommand {
   name: string;
   aliases: string[];
   doc: string;
-  flags?: Record<string, string>;
+  signature: Signature;
   fun: (cx: Context, args: Args, event: PromptEvent) => void;
 }
 
-export interface Args {
-  positional: string[];
-  flags: Set<string>;
-  raw: string;
-}
+const sig = (min: number, max: number | null, extra: Partial<Signature> = {}): Signature => ({ positionals: [min, max], ...extra });
+const WRITE_FLAGS: Flag[] = [
+  { name: "no-format", doc: "skip auto-formatting" },
+  { name: "no-code-actions", doc: "skip code actions on save" },
+];
 
-interface Token {
-  start: number;
-  contentStart: number;
-  content: string;
-  quote: string | null;
-  terminated: boolean;
-}
-
-function scanTokens(input: string): Token[] {
-  const out: Token[] = [];
-  let i = 0;
-  while (i < input.length) {
-    while (i < input.length && /\s/.test(input[i]!)) i++;
-    if (i >= input.length) break;
-    const start = i;
-    const q = input[i]!;
-    if (q === "'" || q === '"' || q === "`") {
-      let content = "";
-      let j = i + 1;
-      let terminated = false;
-      while (j < input.length) {
-        if (input[j] === q) {
-          if (input[j + 1] === q) {
-            content += q;
-            j += 2;
-            continue;
-          }
-          terminated = true;
-          j++;
-          break;
-        }
-        content += input[j];
-        j++;
-      }
-      out.push({ start, contentStart: start + 1, content, quote: q, terminated });
-      i = j;
-      continue;
-    }
-    let tok = "";
-    while (i < input.length && !/\s/.test(input[i]!)) {
-      if (input[i] === "\\" && i + 1 < input.length) {
-        tok += input[i + 1];
-        i += 2;
-        continue;
-      }
-      tok += input[i];
-      i++;
-    }
-    out.push({ start, contentStart: start, content: tok, quote: null, terminated: false });
-  }
-  return out;
-}
-
-export function tokenize(input: string): string[] {
-  return scanTokens(input).map((t) => t.content);
-}
-
-function parseArgs(raw: string, cmd: TypableCommand): Args {
-  const tokens = tokenize(raw);
-  const flags = new Set<string>();
-  const positional: string[] = [];
-  let onlyPositional = false;
-  for (const t of tokens) {
-    if (!onlyPositional && t === "--") {
-      onlyPositional = true;
-      continue;
-    }
-    if (!onlyPositional && cmd.flags && t.startsWith("-")) {
-      const name = t.replace(/^--?/, "");
-      const full = Object.entries(cmd.flags).find(([long, short]) => long === name || short === name);
-      if (full) {
-        flags.add(full[0]);
-        continue;
-      }
-    }
-    positional.push(t);
-  }
-  return { positional, flags, raw };
-}
+const SIGNATURES: Record<string, Signature> = {
+  exit: sig(0, 1, { flags: WRITE_FLAGS }), "exit!": sig(0, 1, { flags: WRITE_FLAGS }),
+  quit: sig(0, 0), "quit!": sig(0, 0), open: sig(1, null),
+  "buffer-close": sig(0, null), "buffer-close!": sig(0, null),
+  "buffer-close-others": sig(0, 0, { flags: [{ name: "skip-visible", alias: "s", doc: "don't close buffers that are visible" }] }),
+  "buffer-close-others!": sig(0, 0, { flags: [{ name: "skip-visible", alias: "s", doc: "don't close buffers that are visible" }] }),
+  "buffer-close-all": sig(0, 0), "buffer-close-all!": sig(0, 0), "buffer-next": sig(0, 0), "buffer-previous": sig(0, 0),
+  write: sig(0, 1, { flags: WRITE_FLAGS }), "write!": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-buffer-close": sig(0, 1, { flags: WRITE_FLAGS }), "write-buffer-close!": sig(0, 1, { flags: WRITE_FLAGS }),
+  new: sig(0, 0), format: sig(0, 0), "indent-style": sig(0, 1), "line-ending": sig(0, 1), earlier: sig(0, 1), later: sig(0, 1),
+  "write-quit": sig(0, 1, { flags: WRITE_FLAGS }), "write-quit!": sig(0, 1, { flags: WRITE_FLAGS }),
+  "write-all": sig(0, 0, { flags: WRITE_FLAGS }), "write-all!": sig(0, 0, { flags: WRITE_FLAGS }),
+  "write-quit-all": sig(0, 0, { flags: WRITE_FLAGS }), "write-quit-all!": sig(0, 0, { flags: WRITE_FLAGS }),
+  "quit-all": sig(0, 0), "quit-all!": sig(0, 0), cquit: sig(0, 1), "cquit!": sig(0, 1), theme: sig(0, 1),
+  "yank-join": sig(0, 1), "clipboard-yank": sig(0, 0), "clipboard-yank-join": sig(0, 1), "primary-clipboard-yank": sig(0, 0), "primary-clipboard-yank-join": sig(0, 1),
+  "clipboard-paste-after": sig(0, 0), "clipboard-paste-before": sig(0, 0), "clipboard-paste-replace": sig(0, 0),
+  "primary-clipboard-paste-after": sig(0, 0), "primary-clipboard-paste-before": sig(0, 0), "primary-clipboard-paste-replace": sig(0, 0),
+  "show-clipboard-provider": sig(0, 0), "change-current-directory": sig(1, 1), "show-directory-stack": sig(0, 0), "push-directory": sig(1, 1),
+  "pop-directory": sig(0, 0), "show-directory": sig(0, 0), encoding: sig(0, 1), "character-info": sig(0, 0), reload: sig(0, 0), "reload-all": sig(0, 0),
+  update: sig(0, 0, { flags: [WRITE_FLAGS[0]!] }), "lsp-workspace-command": sig(0, null, { rawAfter: 1 }), "lsp-restart": sig(0, null), "lsp-stop": sig(0, null),
+  "tree-sitter-scopes": sig(0, 0), "tree-sitter-highlight-name": sig(0, 0), "tree-sitter-layers": sig(0, 0),
+  vsplit: sig(0, null), "vsplit-new": sig(0, 0), hsplit: sig(0, null), "hsplit-new": sig(0, 0), tutor: sig(0, 0), goto: sig(1, 1), "set-language": sig(0, 1),
+  "set-option": sig(2, 2, { rawAfter: 1 }), "toggle-option": sig(1, null, { rawAfter: 1 }), "get-option": sig(1, 1),
+  sort: sig(0, 0, { flags: [{ name: "insensitive", alias: "i", doc: "sort the ranges case-insensitively" }, { name: "reverse", alias: "r", doc: "sort ranges in reverse order" }] }),
+  reflow: sig(0, 1), "tree-sitter-subtree": sig(0, 0), "config-reload": sig(0, 0), "config-open": sig(0, 0), "config-open-workspace": sig(0, 0), "log-open": sig(0, 0),
+  "insert-output": SHELL_SIGNATURE, "append-output": SHELL_SIGNATURE, pipe: SHELL_SIGNATURE, "pipe-to": SHELL_SIGNATURE, "run-shell-command": SHELL_SIGNATURE,
+  "reset-diff-change": sig(0, 0), "clear-register": sig(0, 1), "set-register": sig(2, 2, { rawAfter: 1 }), redraw: sig(0, 0), move: sig(1, 1), "move!": sig(1, 1),
+  "yank-diagnostic": sig(0, 1), read: sig(1, 1), echo: sig(1, null), noop: sig(0, null),
+};
 
 function validateOnly(fun: (cx: Context, args: Args) => void): TypableCommand["fun"] {
   return (cx, args, event) => {
@@ -175,7 +127,7 @@ function ws(name: string, extra: Partial<TypableCommand> = {}): Pick<TypableComm
   return { ...extra, fun: validateOnly((cx, args) => cx.editor.workspaceCommand(cx, name, args.positional)) };
 }
 
-const DEFS: (Omit<TypableCommand, "fun"> & { fun: TypableCommand["fun"] })[] = [
+const DEFS: Omit<TypableCommand, "signature">[] = [
   { name: "exit", aliases: ["x", "xit"], doc: "Write changes to disk if the buffer is modified and then quit.", ...ws("write-quit") },
   { name: "exit!", aliases: ["x!", "xit!"], doc: "Force write and quit.", ...ws("write-quit") },
   { name: "quit", aliases: ["q"], doc: "Close the current view.", ...ws("quit") },
@@ -270,15 +222,14 @@ const DEFS: (Omit<TypableCommand, "fun"> & { fun: TypableCommand["fun"] })[] = [
   { name: "primary-clipboard-paste-before", aliases: [], doc: "Paste primary clipboard before selections.", fun: validateOnly((cx) => paste(cx, "*", "before", 1)) },
   { name: "primary-clipboard-paste-replace", aliases: [], doc: "Replace selections with content of system primary clipboard.", fun: validateOnly((cx) => replaceSelectionsWithRegister(cx, "*", 1)) },
   { name: "character-info", aliases: ["char"], doc: "Get info about the character under the primary cursor.", fun: validateOnly(characterInfo) },
-  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "insert")) },
-  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "append")) },
-  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "replace")) },
-  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "ignore")) },
+  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "insert")) },
+  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "append")) },
+  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "replace")) },
+  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.join(" "), "ignore")) },
   {
     name: "sort",
     aliases: [],
     doc: "Sort ranges in selection.",
-    flags: { reverse: "r", insensitive: "i" },
     fun: validateOnly(sortCommand),
   },
   {
@@ -356,7 +307,7 @@ const DEFS: (Omit<TypableCommand, "fun"> & { fun: TypableCommand["fun"] })[] = [
   { name: "redraw", aliases: [], doc: "Clear and re-render the whole UI", fun: validateOnly((cx) => cx.host.view?.requestMeasure()) },
 ];
 
-export const TYPABLE: TypableCommand[] = DEFS;
+export const TYPABLE: TypableCommand[] = DEFS.map((def) => ({ ...def, signature: SIGNATURES[def.name] ?? sig(0, null) }));
 
 export const TYPABLE_MAP = new Map<string, TypableCommand>();
 for (const cmd of TYPABLE) {
@@ -365,17 +316,35 @@ for (const cmd of TYPABLE) {
 }
 
 export function splitCommandLine(input: string): [string, string] {
-  const trimmed = input.replace(/^\s+/, "");
-  const m = /^(\S*)\s*([\s\S]*)$/.exec(trimmed)!;
-  return [m[1]!, m[2]!];
+  const [command, rest] = split(input);
+  return [command, rest];
+}
+
+export function executeCommand(cx: Context, cmd: TypableCommand, input: string, event: PromptEvent): void {
+  if (event !== "validate") {
+    cmd.fun(cx, Args.parse(input, cmd.signature, false, (token) => token.content), event);
+    return;
+  }
+  const fail = (err: unknown) => cx.editor.setError(`'${cmd.name}': ${err instanceof Error ? err.message : String(err)}`);
+  let parsed: Args | Promise<Args>;
+  try {
+    parsed = Args.parseAsync(input, cmd.signature, (token) => expand(cx, token));
+  } catch (err) {
+    fail(err);
+    return;
+  }
+  if (!(parsed instanceof Promise)) {
+    cmd.fun(cx, parsed, event);
+    return;
+  }
+  void cx.editor.whileBusy(parsed.then((args) => cmd.fun(cx, args, event), fail));
 }
 
 export function executeCommandLine(cx: Context, input: string, event: PromptEvent): void {
-  const [command, rest] = splitCommandLine(input);
+  const [command, rest] = split(input);
   if (command === "") return;
   if (/^\d+$/.test(command) && rest.trim() === "") {
-    const goto = TYPABLE_MAP.get("goto")!;
-    goto.fun(cx, parseArgs(command, goto), event);
+    executeCommand(cx, TYPABLE_MAP.get("goto")!, command, event);
     return;
   }
   const cmd = TYPABLE_MAP.get(command);
@@ -383,14 +352,32 @@ export function executeCommandLine(cx: Context, input: string, event: PromptEven
     if (event === "validate") cx.editor.setError(`no such command: '${command}'`);
     return;
   }
-  cmd.fun(cx, parseArgs(rest, cmd), event);
+  executeCommand(cx, cmd, rest, event);
 }
 
 const PATH_COMMANDS = new Set(["open", "vsplit", "hsplit", "read", "move", "move!", "write", "write!"]);
 const OPTION_COMMANDS = new Set(["set-option", "toggle-option", "get-option"]);
 
 
-function quoteCompletion(token: Token, candidate: string): Completion {
+interface CompletionToken {
+  start: number;
+  contentStart: number;
+  content: string;
+  quote: string | null;
+  terminated: boolean;
+}
+
+function completionTokens(input: string): CompletionToken[] {
+  const tokenizer = new Tokenizer(input, false);
+  const out: CompletionToken[] = [];
+  for (let token = tokenizer.next(); token !== null; token = tokenizer.next()) {
+    const quote = token.kind.kind === "quoted" ? token.kind.quote : token.kind.kind === "expand" && input[token.contentStart - 1] === '"' ? '"' : null;
+    out.push({ start: quote === null ? token.contentStart : token.contentStart - 1, contentStart: token.contentStart, content: token.content, quote, terminated: token.isTerminated });
+  }
+  return out;
+}
+
+function quoteCompletion(token: CompletionToken, candidate: string): Completion {
   if (token.quote === null) {
     const text = /[ \t%]/.test(candidate) ? `'${candidate.replace(/'/g, "''")}'` : candidate;
     return { start: token.start, text, label: candidate };
@@ -403,7 +390,7 @@ export function completeCommandLine(input: string, pathCompleter: ((prefix: stri
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);
     if (!cmd) return [];
-    const tokens = scanTokens(input).slice(1);
+    const tokens = completionTokens(input).slice(1);
     let token = tokens[tokens.length - 1];
     if (!token || (token.quote === null && /\s$/.test(input)) || token.terminated) {
       if (token?.terminated) return [];

@@ -3,6 +3,8 @@ import type { CommandFn } from "./motion";
 import { Range, Selection } from "../selection";
 import { commitHistoryNow } from "./jumps";
 import { apply, changeSetOf, docOf, selOf } from "./util";
+import { Args, SHELL_SIGNATURE } from "./command-line";
+import { expand } from "./expansion";
 
 export interface ShellOutput {
   code: number | null;
@@ -150,7 +152,24 @@ function shellPrompt(cx: Context, label: string, run: (cx: Context, command: str
     history: "|",
     onAccept: (input) => {
       if (input === "") return;
-      void run(new Context(editor, host, null, null), input);
+      const pcx = new Context(editor, host, null, null);
+      let parsed: Args | Promise<Args>;
+      try {
+        parsed = Args.parseAsync(input, SHELL_SIGNATURE, (token) => expand(pcx, token));
+      } catch (err) {
+        editor.setError(err instanceof Error ? err.message : String(err));
+        return;
+      }
+      if (!(parsed instanceof Promise)) {
+        void run(pcx, parsed.join(" "));
+        return;
+      }
+      void editor.whileBusy(
+        parsed.then(
+          (args) => void run(pcx, args.join(" ")),
+          (err: unknown) => editor.setError(err instanceof Error ? err.message : String(err)),
+        ),
+      );
     },
   });
 }

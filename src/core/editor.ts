@@ -7,6 +7,7 @@ import { executeCommand, runTypable, STATIC_COMMANDS } from "../commands";
 import { Prompt, type Completion } from "./prompt";
 import { commitHistoryNow, JumpList, type Jump } from "../commands/jumps";
 import type { ShellRunner } from "../commands/shell";
+import type { Variable } from "../commands/expansion";
 import { completeCommandLine, executeCommandLine } from "../commands/typed";
 import { setSel } from "../commands/util";
 import { getOption, setOption, toggleOption } from "./options";
@@ -73,6 +74,7 @@ export interface UiHooks {
 export interface Workspace {
   run(cx: Context, name: string, args: string[]): void;
   openJump?(cx: Context, jump: Jump): void;
+  variable?(cx: Context, name: Variable): string | null;
 }
 
 export interface ViewOps {
