@@ -1,5 +1,8 @@
 interface Exports {
     memory: WebAssembly.Memory;
+    __indirect_function_table: WebAssembly.Table;
+    __stack_pointer: WebAssembly.Global;
+    calloc(count: number, size: number): number;
     _initialize(): void;
     hm_malloc(size: number): number;
     hm_free(ptr: number): void;
@@ -41,6 +44,7 @@ export declare class Runtime {
     private words;
     private bytes;
     private constructor();
+    loadLanguage(binary: Uint8Array, name: string): Promise<number>;
     static load(binary: Uint8Array): Promise<Runtime>;
     u32(): Uint32Array;
     u8(): Uint8Array;

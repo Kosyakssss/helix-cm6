@@ -33,5 +33,6 @@ for name in markdown markdown-inline; do
   $cc -c -I "md/tree-sitter-$name/src" "md/tree-sitter-$name/src/parser.c" -o "$name-parser.o"
   $cc -c -I "md/tree-sitter-$name/src" "md/tree-sitter-$name/src/scanner.c" -o "$name-scanner.o"
 done
-$cc -mexec-model=reactor -Wl,--strip-all lib.o binding.o markdown-parser.o markdown-scanner.o markdown-inline-parser.o markdown-inline-scanner.o -o tree-sitter.wasm
+exports=$(tr -d '"\n' < ts/lib/src/wasm/stdlib-symbols.txt | tr ',' '\n' | sed '/^$/d; s/^/-Wl,--export=/' | tr '\n' ' ')
+$cc -mexec-model=reactor -Wl,--strip-all -Wl,--export-table -Wl,--growable-table -Wl,--export=__stack_pointer $exports lib.o binding.o markdown-parser.o markdown-scanner.o markdown-inline-parser.o markdown-inline-scanner.o -o tree-sitter.wasm
 cp tree-sitter.wasm "$here/tree-sitter.wasm"

@@ -8823,6 +8823,40 @@ class SystemClipboard {
 }
 
 // src/syntax/ts.ts
+function readLeb(bytes, at) {
+  let result = 0;
+  let shift = 0;
+  for (;; ) {
+    const byte = bytes[at.pos++];
+    result |= (byte & 127) << shift;
+    if ((byte & 128) === 0)
+      return result >>> 0;
+    shift += 7;
+  }
+}
+function dylinkInfo(module) {
+  const section = WebAssembly.Module.customSections(module, "dylink.0")[0];
+  if (!section)
+    throw new Error("not a tree-sitter grammar module: no dylink.0 section");
+  const bytes = new Uint8Array(section);
+  const at = { pos: 0 };
+  while (at.pos < bytes.length) {
+    const type = bytes[at.pos++];
+    const size = readLeb(bytes, at);
+    const end = at.pos + size;
+    if (type === 1) {
+      const memorySize = readLeb(bytes, at);
+      const memoryAlign = readLeb(bytes, at);
+      const tableSize = readLeb(bytes, at);
+      return { memorySize, memoryAlign, tableSize };
+    }
+    at.pos = end;
+  }
+  return { memorySize: 0, memoryAlign: 0, tableSize: 0 };
+}
+function alignUp(value, align) {
+  return Math.ceil(value / align) * align;
+}
 var NODE_WORDS = 6;
 var NODE_BYTES = NODE_WORDS * 4;
 var ENOSYS = 52;
@@ -8837,6 +8871,43 @@ class Runtime {
     this.scratch = x.hm_malloc(NODE_BYTES * 2 + 16);
     this.words = new Uint32Array(x.memory.buffer);
     this.bytes = new Uint8Array(x.memory.buffer);
+  }
+  async loadLanguage(binary, name) {
+    const module = await WebAssembly.compile(binary);
+    const info = dylinkInfo(module);
+    const x = this.x;
+    const align = 2 ** info.memoryAlign;
+    const memoryBase = info.memorySize > 0 ? alignUp(x.calloc(1, info.memorySize + align), align) : 0;
+    const table = x.__indirect_function_table;
+    const tableBase = table.length;
+    if (info.tableSize > 0)
+      table.grow(info.tableSize);
+    const env = {
+      memory: x.memory,
+      __indirect_function_table: table,
+      __stack_pointer: x.__stack_pointer,
+      __memory_base: new WebAssembly.Global({ value: "i32", mutable: false }, memoryBase),
+      __table_base: new WebAssembly.Global({ value: "i32", mutable: false }, tableBase)
+    };
+    const own = x;
+    for (const imp of WebAssembly.Module.imports(module)) {
+      if (imp.module !== "env")
+        throw new Error(`grammar ${name} imports ${imp.module}.${imp.name}`);
+      if (imp.name in env)
+        continue;
+      const value = imp.kind === "function" ? own[imp.name] : undefined;
+      if (value === undefined)
+        throw new Error(`grammar ${name} imports ${imp.name}, which tree-sitter does not export`);
+      env[imp.name] = value;
+    }
+    const instance = await WebAssembly.instantiate(module, { env });
+    const exports = instance.exports;
+    exports.__wasm_apply_data_relocs?.();
+    exports.__wasm_call_ctors?.();
+    const entry = exports[`tree_sitter_${name.replace(/[-.]/g, "_")}`];
+    if (!entry)
+      throw new Error(`grammar ${name} has no tree_sitter_${name} function`);
+    return entry();
   }
   static async load(binary) {
     const stub = () => ENOSYS;
