@@ -1,4 +1,4 @@
-import { chromium, type Browser } from "playwright-core";
+import { chromium, firefox, webkit, type Browser, type Page } from "playwright-core";
 import { parseKey, parseMacro } from "../../src/keys";
 import { oracleAsync, type Case } from "../oracle/oracle";
 import { handSuite } from "../oracle/suites";
@@ -40,6 +40,13 @@ function domKey(helixKey: string) {
       ? [`Digit${base}`, base.charCodeAt(0)]
       : (PUNCTUATION[base] ?? ["", 0]);
   return { key: ch, code, keyCode, modifiers, text: plain ? ch : undefined };
+}
+
+async function pressKey(page: Page, d: ReturnType<typeof domKey>): Promise<void> {
+  const mods = [d.modifiers & 1 && "Alt", d.modifiers & 2 && "Control", d.modifiers & 4 && "Meta", d.modifiers & 8 && "Shift"].filter(Boolean);
+  const key = d.key === " " ? "Space" : d.key;
+  if (mods.length === 0 && d.code === "" && [...key].length === 1) return page.keyboard.type(key);
+  await page.keyboard.press([...mods, key].join("+"));
 }
 
 interface State {
@@ -88,7 +95,7 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));
-  const cdp = await context.newCDPSession(page);
+  const cdp = browser.browserType() === chromium ? await context.newCDPSession(page) : null;
   const fails: string[] = [];
   for (const c of shard) {
     const want = expected.get(c.id)!;
@@ -97,6 +104,10 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
     await page.waitForFunction(() => (window as unknown as { helixReady(): boolean }).helixReady());
     for (const k of parseMacro(c.keys)) {
       const d = domKey(k);
+      if (!cdp) {
+        await pressKey(page, d);
+        continue;
+      }
       const base = { key: d.key, code: d.code, windowsVirtualKeyCode: d.keyCode, nativeVirtualKeyCode: d.keyCode, modifiers: d.modifiers };
       await cdp.send("Input.dispatchKeyEvent", d.text ? { ...base, type: "keyDown", text: d.text, unmodifiedText: d.text } : { ...base, type: "rawKeyDown" });
       await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
@@ -111,7 +122,7 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
       got.mode === want.mode;
     if (!ok) {
       fails.push(
-        `${c.id}: ${JSON.stringify(c.keys)} in ${JSON.stringify(c.in)}\n  want ${JSON.stringify(want.out)} ${want.mode} ranges=${JSON.stringify(want.ranges)} primary=${want.primary}\n  got  ${JSON.stringify(got.out)} ${got.mode} ranges=${JSON.stringify(got.ranges)} primary=${got.primary}${got.focused ? "" : " unfocused"}${errors.length ? ` errors ${errors.join(" | ")}` : ""}`,
+        `${browser.browserType().name()} ${c.id}: ${JSON.stringify(c.keys)} in ${JSON.stringify(c.in)}\n  want ${JSON.stringify(want.out)} ${want.mode} ranges=${JSON.stringify(want.ranges)} primary=${want.primary}\n  got  ${JSON.stringify(got.out)} ${got.mode} ranges=${JSON.stringify(got.ranges)} primary=${got.primary}${got.focused ? "" : " unfocused"}${errors.length ? ` errors ${errors.join(" | ")}` : ""}`,
       );
     }
   }
@@ -119,10 +130,19 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
   return fails;
 }
 
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined });
-const shardCount = Math.min(jobs, cases.length);
-const shards = Array.from({ length: shardCount }, (_, s) => cases.filter((_, i) => i % shardCount === s));
-const fails = (await Promise.all(shards.map((shard) => runShard(browser, shard))).finally(() => browser.close())).flat();
+const types = { chromium, firefox, webkit };
+const names = (process.env.BROWSERS ?? "chromium,firefox,webkit").split(",") as (keyof typeof types)[];
+const fails: string[] = [];
+for (const name of names) {
+  const type = types[name];
+  if (!type) throw new Error(`unknown browser ${JSON.stringify(name)}`);
+  const browser = await type.launch({ executablePath: (name === "chromium" && process.env.CHROMIUM_PATH) || undefined });
+  const shardCount = Math.min(jobs, cases.length);
+  const shards = Array.from({ length: shardCount }, (_, s) => cases.filter((_, i) => i % shardCount === s));
+  const found = (await Promise.all(shards.map((shard) => runShard(browser, shard))).finally(() => browser.close())).flat();
+  console.log(`${name}: ${cases.length} cases, ${found.length} failures`);
+  fails.push(...found);
+}
 console.log(fails.slice(0, Number(process.env.SHOW ?? 40)).join("\n"));
-console.log(`\n${cases.length} cases, ${fails.length} failures, ${all.length - cases.length} skipped (oracle error)`);
+console.log(`\n${cases.length} cases in ${names.join(", ")}, ${fails.length} failures, ${all.length - cases.length} skipped (oracle error)`);
 process.exit(fails.length > 0 || cases.length !== all.length ? 1 : 0);
