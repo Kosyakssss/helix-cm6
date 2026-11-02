@@ -6,7 +6,8 @@ import { plain, print } from "../../src/core/markup";
 import { helixField, helixOwned, setHelix, toNative } from "../../src/state";
 
 const { text, selection } = print(new URLSearchParams(location.search).get("markup") ?? "");
-const view = new EditorView({ parent: document.body, doc: "\n", extensions: helix({ syntax: false }) });
+const runShell = (window as unknown as { helixShell(command: string, input: string | null, shell: readonly string[]): Promise<{ code: number | null; stdout: string; stderr: string }> }).helixShell;
+const view = new EditorView({ parent: document.body, doc: "\n", extensions: helix({ syntax: false, shell: (command, input, shell) => runShell(command, input, shell) }) });
 const next = { ...view.state.field(helixField), selection };
 view.dispatch({
   changes: { from: 0, to: 1, insert: text },
@@ -30,6 +31,10 @@ function regexLoaded(): boolean {
   return view.state.facet(helixEditor)?.regex != null;
 }
 
+function idle(): boolean {
+  return !view.state.facet(helixEditor)?.isBusy();
+}
+
 function state() {
   const value = view.state.field(helixField);
   const doc = view.state.doc.toString();
@@ -44,4 +49,4 @@ function state() {
   };
 }
 
-Object.assign(window, { helixReady: regexLoaded, helixState: state });
+Object.assign(window, { helixReady: regexLoaded, helixIdle: idle, helixState: state });

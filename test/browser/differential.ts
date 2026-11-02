@@ -92,6 +92,10 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
     const js = new URL(route.request().url()).pathname === "/page.js";
     return route.fulfill({ contentType: js ? "text/javascript" : "text/html", body: js ? script : html });
   });
+  await context.exposeFunction("helixShell", (command: string, input: string | null, shell: string[]) => {
+    const proc = Bun.spawnSync([...shell, command], { stdin: input === null ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });
+    return { code: proc.exitCode, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+  });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (err) => errors.push(String(err)));
@@ -112,6 +116,7 @@ async function runShard(browser: Browser, shard: Case[]): Promise<string[]> {
       await cdp.send("Input.dispatchKeyEvent", d.text ? { ...base, type: "keyDown", text: d.text, unmodifiedText: d.text } : { ...base, type: "rawKeyDown" });
       await cdp.send("Input.dispatchKeyEvent", { ...base, type: "keyUp" });
     }
+    await page.waitForFunction(() => (window as unknown as { helixIdle(): boolean }).helixIdle());
     const got = await page.evaluate(() => (window as unknown as { helixState(): State }).helixState());
     const ok =
       errors.length === 0 &&

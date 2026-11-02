@@ -17,6 +17,7 @@ export interface StatuslineConfig {
 }
 export interface Config {
     scrolloff: number;
+    shell: string[];
     scrollLines: number;
     defaultYankRegister: string;
     mouseYankRegister: string;

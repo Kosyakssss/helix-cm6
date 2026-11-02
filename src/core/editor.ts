@@ -6,6 +6,7 @@ import { doc, mode, selection, type Host } from "./host";
 import { executeCommand, runTypable, STATIC_COMMANDS } from "../commands";
 import { Prompt, type Completion } from "./prompt";
 import { commitHistoryNow, JumpList, type Jump } from "../commands/jumps";
+import type { ShellRunner } from "../commands/shell";
 import { completeCommandLine, executeCommandLine } from "../commands/typed";
 import { setSel } from "../commands/util";
 import { getOption, setOption, toggleOption } from "./options";
@@ -110,6 +111,9 @@ export class HelixEditor {
   syntax: ((host: Host) => Syntax | null) | null = null;
   regex: RustRegexEngine | null = null;
   pathCompleter: ((prefix: string) => string[]) | null = null;
+  shell: ShellRunner | null = null;
+  private busy = 0;
+  private queuedKeys: [Host, string, HandleKeyOptions][] = [];
   gotoPreview: Selection | null = null;
   onConfigChanged: (() => void) | null = null;
   replayKeyHook: ((host: Host, key: string) => boolean) | null = null;
@@ -264,7 +268,31 @@ export class HelixEditor {
     });
   }
 
+  isBusy(): boolean {
+    return this.busy > 0;
+  }
+
+  whileBusy(work: void | Promise<void>): void | Promise<void> {
+    if (!(work instanceof Promise)) return;
+    this.busy++;
+    const done = work.finally(() => {
+      this.busy--;
+      if (this.busy > 0) return;
+      const queued = this.queuedKeys;
+      this.queuedKeys = [];
+      for (const [host, key, options] of queued) {
+        if (this.busy > 0) this.queuedKeys.push([host, key, options]);
+        else this.handleKey(host, key, options);
+      }
+    });
+    return done;
+  }
+
   handleKey(host: Host, key: string, options: HandleKeyOptions = {}): boolean {
+    if (this.busy > 0) {
+      this.queuedKeys.push([host, key, { ...options, nativeInsert: false }]);
+      return true;
+    }
     if (this.onNextKeyCleanup.length > 0) {
       const cleanups = this.onNextKeyCleanup;
       this.onNextKeyCleanup = [];

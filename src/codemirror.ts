@@ -2,6 +2,7 @@ import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
 import { HelixEditor } from "./core/editor";
 import type { Host } from "./core/host";
+import type { ShellRunner } from "./commands/shell";
 import { loadConfig } from "./config-loader";
 import { buildKeymaps } from "./keymap";
 import { Registers } from "./registers";
@@ -17,6 +18,7 @@ export interface HelixOptions {
   config?: string;
   regex?: WasmSource;
   syntax?: WasmSource | false;
+  shell?: ShellRunner;
 }
 
 export const helixEditor = Facet.define<HelixEditor, HelixEditor | null>({ combine: (values) => values[0] ?? null });
@@ -25,6 +27,7 @@ export function helix(options: HelixOptions = {}): Extension {
   const loaded = loadConfig(options.config ?? null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
+  editor.shell = options.shell ?? null;
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);

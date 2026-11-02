@@ -4,6 +4,7 @@ import { type Config } from "../config";
 import { type Host } from "./host";
 import { Prompt, type Completion } from "./prompt";
 import { JumpList, type Jump } from "../commands/jumps";
+import type { ShellRunner } from "../commands/shell";
 import { type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
 import type { Selection } from "../selection";
@@ -100,6 +101,9 @@ export declare class HelixEditor {
     syntax: ((host: Host) => Syntax | null) | null;
     regex: RustRegexEngine | null;
     pathCompleter: ((prefix: string) => string[]) | null;
+    shell: ShellRunner | null;
+    private busy;
+    private queuedKeys;
     gotoPreview: Selection | null;
     onConfigChanged: (() => void) | null;
     replayKeyHook: ((host: Host, key: string) => boolean) | null;
@@ -132,6 +136,8 @@ export declare class HelixEditor {
     getOption(cx: Context, args: string[]): void;
     prompt(cx: Context, request: PromptRequest): void;
     commandMode(cx: Context): void;
+    isBusy(): boolean;
+    whileBusy(work: void | Promise<void>): void | Promise<void>;
     handleKey(host: Host, key: string, options?: HandleKeyOptions): boolean;
     feedKeys(host: Host, keys: string, options?: HandleKeyOptions): void;
     pendingDisplay(): string;

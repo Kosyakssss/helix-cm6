@@ -13,10 +13,11 @@ States:
 ## Open bugs
 
 - An IME composition in normal or select mode, or in a prompt, is cancelled, so composed text (for example Japanese in a search) cannot be typed there. Text input without a composition, such as the emoji picker or dictation, works.
+- Command-line expansions (`%{buffer_name}`, `%sh{…}` and the rest) are missing.
 
 ## Commands
 
-Static: ported 201, app 51, partial 24, missing 20, out of scope 17. Typed: app 39, ported 26, missing 24, out of scope 11.
+Static: ported 206, app 51, partial 24, out of scope 17, missing 15. Typed: app 39, ported 30, missing 20, out of scope 11.
 
 ### Static commands
 
@@ -288,11 +289,11 @@ Static: ported 201, app 51, partial 24, missing 20, out of scope 17. Typed: app 
 | `select_register` | ported |
 | `select_textobject_around` | ported |
 | `select_textobject_inner` | ported |
-| `shell_append_output` | missing |
-| `shell_insert_output` | missing |
-| `shell_keep_pipe` | missing |
-| `shell_pipe` | missing |
-| `shell_pipe_to` | missing |
+| `shell_append_output` | ported |
+| `shell_insert_output` | ported |
+| `shell_keep_pipe` | ported |
+| `shell_pipe` | ported |
+| `shell_pipe_to` | ported |
 | `shrink_selection` | partial: markdown only |
 | `shrink_to_line_bounds` | ported |
 | `signature_help` | missing |
@@ -422,10 +423,10 @@ Static: ported 201, app 51, partial 24, missing 20, out of scope 17. Typed: app 
 | `:config-open` | app |
 | `:config-open-workspace` | missing |
 | `:log-open` | out of scope |
-| `:insert-output` | missing |
-| `:append-output` | missing |
-| `:pipe` | missing |
-| `:pipe-to` | missing |
+| `:insert-output` | ported |
+| `:append-output` | ported |
+| `:pipe` | ported |
+| `:pipe-to` | ported |
 | `:run-shell-command` | missing |
 | `:reset-diff-change` | missing |
 | `:clear-register` | ported |
@@ -449,7 +450,7 @@ Static: ported 201, app 51, partial 24, missing 20, out of scope 17. Typed: app 
 | `scroll-lines` | ported |
 | `mouse` | missing |
 | `mouse-yank-register` | ported |
-| `shell` | missing: shell commands |
+| `shell` | ported: passed to the app's runner, `helix({ shell })` |
 | `line-number` | partial: parsed, relative numbers not drawn |
 | `cursorline` | ported |
 | `cursorcolumn` | missing |

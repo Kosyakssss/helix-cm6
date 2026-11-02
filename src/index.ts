@@ -48,5 +48,6 @@ export { commitHistoryNow, jumplistFor, pushJump, type Jump } from "./commands/j
 export { gotoLineWithoutJumplist } from "./commands/motion";
 export { docOf, selOf, setSel } from "./commands/util";
 export type { CommentTokens } from "./commands/comments";
+export type { ShellBehavior, ShellOutput, ShellRunner } from "./commands/shell";
 export { createLoader, SyntaxSessions } from "./syntax/languages";
 export type { Syntax } from "./syntax/syntax";

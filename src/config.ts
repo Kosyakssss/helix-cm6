@@ -14,6 +14,7 @@ export interface StatuslineConfig {
 
 export interface Config {
   scrolloff: number;
+  shell: string[];
   scrollLines: number;
   defaultYankRegister: string;
   mouseYankRegister: string;
@@ -50,6 +51,7 @@ export const DEFAULT_AUTO_PAIRS: [string, string][] = [
 export function defaultConfig(): Config {
   return {
     scrolloff: 5,
+    shell: ["sh", "-c"],
     scrollLines: 3,
     defaultYankRegister: '"',
     mouseYankRegister: "*",

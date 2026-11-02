@@ -411,6 +411,7 @@ var DEFAULT_AUTO_PAIRS = [
 function defaultConfig() {
   return {
     scrolloff: 5,
+    shell: ["sh", "-c"],
     scrollLines: 3,
     defaultYankRegister: '"',
     mouseYankRegister: "*",
@@ -5485,11 +5486,6 @@ var UNSUPPORTED = [
   "goto_next_tabstop",
   "goto_prev_tabstop",
   "transpose_view",
-  "shell_pipe",
-  "shell_pipe_to",
-  "shell_insert_output",
-  "shell_append_output",
-  "shell_keep_pipe",
   "suspend",
   "dap_launch",
   "dap_restart",
@@ -5508,6 +5504,150 @@ var UNSUPPORTED = [
   "dap_enable_exceptions",
   "dap_disable_exceptions"
 ];
+
+// src/commands/shell.ts
+function interpret(output) {
+  if (output.code !== 0) {
+    if (output.stderr === "")
+      return { ok: false, error: output.code === null ? "Shell command failed" : `Shell command failed: status ${output.code}` };
+    return { ok: true, text: output.stderr };
+  }
+  return { ok: true, text: output.stderr !== "" ? output.stderr : output.stdout };
+}
+function failure(err) {
+  return { ok: false, error: err instanceof Error ? err.message : String(err) };
+}
+function shellImpl(cx, command, input) {
+  const run = cx.editor.shell;
+  const argv = cx.editor.config.shell;
+  if (!run || argv.length === 0)
+    return { ok: false, error: "No shell set" };
+  try {
+    const output = run(command, input, argv);
+    return output instanceof Promise ? output.then(interpret, failure) : interpret(output);
+  } catch (err) {
+    return failure(err);
+  }
+}
+function each(items, f, index = 0) {
+  for (let i = index;i < items.length; i++) {
+    const next = f(items[i], i);
+    if (next instanceof Promise)
+      return next.then((go) => go ? each(items, f, i + 1) : undefined);
+    if (!next)
+      return;
+  }
+}
+function after(work, f) {
+  return work instanceof Promise ? work.then(f) : f();
+}
+function stillCurrent(cx, doc, selection) {
+  if (docOf(cx) === doc && selOf(cx).eq(selection))
+    return true;
+  cx.editor.setError("The document changed while the shell command ran");
+  return false;
+}
+function shell(cx, command, behavior) {
+  const pipe = behavior === "replace" || behavior === "ignore";
+  const doc = docOf(cx);
+  const selection = selOf(cx);
+  const outputs = [];
+  let shared = null;
+  let failed = false;
+  const work = each(selection.ranges, (range) => {
+    if (shared !== null) {
+      outputs.push(shared);
+      return true;
+    }
+    const input = doc.sliceString(range.from(), range.to());
+    const take = (result) => {
+      if (!result.ok) {
+        cx.editor.setError(result.error);
+        failed = true;
+        return false;
+      }
+      let output = result.text;
+      if (!input.endsWith(`
+`) && output.endsWith(`
+`)) {
+        output = output.slice(0, -1);
+        if (output.endsWith("\r"))
+          output = output.slice(0, -1);
+      }
+      if (!pipe)
+        shared = output;
+      outputs.push(output);
+      return true;
+    };
+    const result = shellImpl(cx, command, pipe ? input : null);
+    return result instanceof Promise ? result.then(take) : take(result);
+  });
+  return cx.editor.whileBusy(after(work, () => {
+    if (failed || behavior === "ignore" || !stillCurrent(cx, doc, selection))
+      return;
+    const changes = [];
+    const ranges = [];
+    let offset = 0;
+    selection.ranges.forEach((range, i) => {
+      const output = outputs[i];
+      const [from, to, deleted] = behavior === "replace" ? [range.from(), range.to(), range.to() - range.from()] : behavior === "insert" ? [range.from(), range.from(), 0] : [range.to(), range.to(), 0];
+      const anchor = to + offset - deleted;
+      ranges.push(new Range(anchor, anchor + output.length).withDirection(range.direction()));
+      offset += output.length - deleted;
+      changes.push([from, to, output]);
+    });
+    apply(cx, changeSetOf(doc, changes), new Selection(ranges, selection.primaryIndex));
+    commitHistoryNow(cx.host);
+  }));
+}
+function shellKeepPipe(cx, command) {
+  const doc = docOf(cx);
+  const selection = selOf(cx);
+  const ranges = [];
+  const oldIndex = selection.primaryIndex;
+  let index = null;
+  const work = each(selection.ranges, (range, i) => {
+    const keep = (result) => {
+      if (!result.ok)
+        return true;
+      ranges.push(range);
+      if (i >= oldIndex && index === null)
+        index = ranges.length - 1;
+      return true;
+    };
+    const result = shellImpl(cx, command, doc.sliceString(range.from(), range.to()));
+    return result instanceof Promise ? result.then(keep) : keep(result);
+  });
+  return cx.editor.whileBusy(after(work, () => {
+    if (ranges.length === 0) {
+      cx.editor.setError("No selections remaining");
+      return;
+    }
+    if (!stillCurrent(cx, doc, selection))
+      return;
+    apply(cx, changeSetOf(doc, []), new Selection(ranges, index ?? ranges.length - 1));
+  }));
+}
+function shellPrompt(cx, label, run) {
+  const editor = cx.editor;
+  const host = cx.host;
+  editor.prompt(cx, {
+    label,
+    history: "|",
+    onAccept: (input) => {
+      if (input === "")
+        return;
+      run(new Context(editor, host, null, null), input);
+    }
+  });
+}
+var shellCommands = {
+  shell_pipe: (cx) => shellPrompt(cx, "pipe:", (c, cmd) => shell(c, cmd, "replace")),
+  shell_pipe_to: (cx) => shellPrompt(cx, "pipe-to:", (c, cmd) => shell(c, cmd, "ignore")),
+  shell_insert_output: (cx) => shellPrompt(cx, "insert-output:", (c, cmd) => shell(c, cmd, "insert")),
+  shell_append_output: (cx) => shellPrompt(cx, "append-output:", (c, cmd) => shell(c, cmd, "append")),
+  shell_keep_pipe: (cx) => shellPrompt(cx, "keep-pipe:", shellKeepPipe)
+};
 
 // src/commands/syntax.ts
 function contains(superSet, subSet) {
@@ -6239,6 +6379,10 @@ var DEFS = [
   { name: "primary-clipboard-paste-before", aliases: [], doc: "Paste primary clipboard before selections.", fun: validateOnly((cx) => paste(cx, "*", "before", 1)) },
   { name: "primary-clipboard-paste-replace", aliases: [], doc: "Replace selections with content of system primary clipboard.", fun: validateOnly((cx) => replaceSelectionsWithRegister(cx, "*", 1)) },
   { name: "character-info", aliases: ["char"], doc: "Get info about the character under the primary cursor.", fun: validateOnly(characterInfo) },
+  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "insert")) },
+  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "append")) },
+  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "replace")) },
+  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "ignore")) },
   {
     name: "sort",
     aliases: [],
@@ -6403,7 +6547,8 @@ var STATIC_COMMANDS = {
   ...editCommands,
   ...insertCommands,
   ...miscCommands,
-  ...syntaxCommands
+  ...syntaxCommands,
+  ...shellCommands
 };
 function isKnownCommand(name) {
   return name in STATIC_COMMANDS || UNSUPPORTED.includes(name);
@@ -6944,6 +7089,9 @@ class HelixEditor {
   syntax = null;
   regex = null;
   pathCompleter = null;
+  shell = null;
+  busy = 0;
+  queuedKeys = [];
   gotoPreview = null;
   onConfigChanged = null;
   replayKeyHook = null;
@@ -7074,7 +7222,33 @@ class HelixEditor {
       onCancel: () => executeCommandLine(fresh(), "", "abort")
     });
   }
+  isBusy() {
+    return this.busy > 0;
+  }
+  whileBusy(work) {
+    if (!(work instanceof Promise))
+      return;
+    this.busy++;
+    const done = work.finally(() => {
+      this.busy--;
+      if (this.busy > 0)
+        return;
+      const queued = this.queuedKeys;
+      this.queuedKeys = [];
+      for (const [host, key, options] of queued) {
+        if (this.busy > 0)
+          this.queuedKeys.push([host, key, options]);
+        else
+          this.handleKey(host, key, options);
+      }
+    });
+    return done;
+  }
   handleKey(host, key, options = {}) {
+    if (this.busy > 0) {
+      this.queuedKeys.push([host, key, { ...options, nativeInsert: false }]);
+      return true;
+    }
     if (this.onNextKeyCleanup.length > 0) {
       const cleanups = this.onNextKeyCleanup;
       this.onNextKeyCleanup = [];
@@ -7373,7 +7547,6 @@ class Keymaps {
 var IGNORED_EDITOR = new Set([
   "mouse",
   "middle-click-paste",
-  "shell",
   "auto-completion",
   "path-completion",
   "auto-format",
@@ -7459,6 +7632,13 @@ function applyEditor(config, editor, warnings) {
         const s = asStr(value, key, warnings);
         if (s !== undefined)
           config.jumpLabelAlphabet = [...s];
+        break;
+      }
+      case "shell": {
+        if (Array.isArray(value) && value.every((v) => typeof v === "string"))
+          config.shell = value;
+        else
+          warnings.push("editor.shell: expected a list of strings");
         break;
       }
       case "text-width": {
@@ -10366,6 +10546,7 @@ function helix2(options = {}) {
   const loaded = loadConfig(options.config ?? null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
+  editor.shell = options.shell ?? null;
   const clipboard = new SystemClipboard;
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);

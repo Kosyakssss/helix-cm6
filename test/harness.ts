@@ -28,6 +28,10 @@ export interface RunResult {
 export function makeEditor(config?: Partial<Config>) {
   const editor = new HelixEditor(buildKeymaps(), { ...defaultConfig(), ...config });
   editor.regex = regexEngine;
+  editor.shell = (command, input, shell) => {
+    const proc = Bun.spawnSync([...shell, command], { stdin: input === null ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });
+    return { code: proc.exitCode, stdout: proc.stdout.toString(), stderr: proc.stderr.toString() };
+  };
   return editor;
 }
 

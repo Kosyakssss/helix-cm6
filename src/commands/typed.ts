@@ -9,6 +9,7 @@ import { earlier, later } from "./misc";
 import { yankJoinedTo, paste, replaceSelectionsWithRegister } from "./edit";
 import { gotoLineWithoutJumplist } from "./motion";
 import { commitHistoryNow, jumplistFor } from "./jumps";
+import { shell } from "./shell";
 
 export type PromptEvent = "update" | "validate" | "abort";
 
@@ -269,6 +270,10 @@ const DEFS: (Omit<TypableCommand, "fun"> & { fun: TypableCommand["fun"] })[] = [
   { name: "primary-clipboard-paste-before", aliases: [], doc: "Paste primary clipboard before selections.", fun: validateOnly((cx) => paste(cx, "*", "before", 1)) },
   { name: "primary-clipboard-paste-replace", aliases: [], doc: "Replace selections with content of system primary clipboard.", fun: validateOnly((cx) => replaceSelectionsWithRegister(cx, "*", 1)) },
   { name: "character-info", aliases: ["char"], doc: "Get info about the character under the primary cursor.", fun: validateOnly(characterInfo) },
+  { name: "insert-output", aliases: [], doc: "Run shell command, inserting output before each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "insert")) },
+  { name: "append-output", aliases: [], doc: "Run shell command, appending output after each selection.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "append")) },
+  { name: "pipe", aliases: ["|"], doc: "Pipe each selection to the shell command.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "replace")) },
+  { name: "pipe-to", aliases: [], doc: "Pipe each selection to the shell command, ignoring output.", fun: validateOnly((cx, args) => void shell(cx, args.raw, "ignore")) },
   {
     name: "sort",
     aliases: [],

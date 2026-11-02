@@ -60,6 +60,9 @@ const EDITS = [
   "<C-r>", "ix<C-r>\"<esc>", "yi<C-r>\"<esc>",
   "%s\\d+<ret>", "%s\\w+<ret>", "%s[[:alpha:]]+<ret>", "%s(?x) l o<ret>", "%s(?=o)<ret>", "%s(o)\\1<ret>", "%s\\z<ret>",
   "%s(?i)é<ret>", "%sSS<ret>", "%s\\b<ret>", "%s^<ret>", "%s$<ret>", "%s.<ret>", "%s\\pL+<ret>", "%s[^a-z]+<ret>",
+  "|tr a-z A-Z<ret>", "x|tr a-z A-Z<ret>", "%<A-s>|rev<ret>", "!printf hi<ret>", "<A-!>printf 'a\\n'<ret>", "<A-|>cat<ret>",
+  "x$grep -q o<ret>", "%<A-s>$grep -q e<ret>", "%<A-s>$false<ret>", "|false<ret>", "|echo err <gt>&2; false<ret>", "x|cat<ret>u",
+  ":pipe rev<ret>", ":insert-output printf x<ret>", ":append-output echo y<ret>", ":pipe-to cat<ret>",
   "%Sx*<ret>", "%<A-s>K\\d<ret>", "%<A-s><A-K>\\p{Cyrillic}<ret>", "/\\d<ret>n", "?\\w+<ret>N", "/(?<ret>",
 ];
 

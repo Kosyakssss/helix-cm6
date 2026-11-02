@@ -37,6 +37,7 @@ new EditorView({ parent: document.body, extensions: helix({ config: helixToml })
 - `config`: the text of a Helix `config.toml`. Default: Helix's defaults.
 - `regex`: where to get the regex wasm module. Default: a lazily imported JS module with the module inlined (`dist/regex-wasm.js`, 370 KB).
 - `syntax`: the same for the tree-sitter module (`dist/tree-sitter-wasm.js`, 250 KB), or `false` for no syntax tree. Without a tree, text objects and surround use plain text, and tree commands do nothing.
+- `shell`: runs a shell command for `|`, `!`, `$`, `:pipe` and the other shell commands. It gets the command, the selection text (or `null`) and `editor.shell` from the config (`["sh", "-c"]` by default), and returns the exit code, stdout and stderr, at once or as a promise. Keys typed while it runs wait, as in Helix. Without it, these commands say "No shell set".
 
 A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm` and `helix-cm6/tree-sitter.wasm`, for example with Vite:
 
@@ -58,7 +59,7 @@ The engine has no files, pickers or buffers. Commands that need them call `Helix
 - `src/index.ts`: the public API. `dist/` is its build (`bun run build`).
 - `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
 - `test/oracle/`: the comparison with real Helix.
-- `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium, and a test with two editors.
+- `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium, Firefox and WebKit, and a test with two editors.
 - `play/`: a page to try the engine by hand.
 
 ## Try it
@@ -67,7 +68,7 @@ The engine has no files, pickers or buffers. Commands that need them call `Helix
 
 ## Tests
 
-`bun test` compares the headless engine with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium. `bun run views` checks two editors that share one `helix()`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
+`bun test` compares the headless engine with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium, Firefox and WebKit. `bun run views` checks two editors that share one `helix()`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
 
 ## Helix forks
 

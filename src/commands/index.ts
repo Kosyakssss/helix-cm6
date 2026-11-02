@@ -5,6 +5,7 @@ import { selectCommands } from "./select";
 import { editCommands } from "./edit";
 import { insertCommands } from "./insert";
 import { miscCommands, UNSUPPORTED } from "./misc";
+import { shellCommands } from "./shell";
 import { syntaxCommands } from "./syntax";
 import { executeCommandLine } from "./typed";
 
@@ -15,6 +16,7 @@ export const STATIC_COMMANDS: Record<string, CommandFn> = {
   ...insertCommands,
   ...miscCommands,
   ...syntaxCommands,
+  ...shellCommands,
 };
 
 export function isKnownCommand(name: string): boolean {

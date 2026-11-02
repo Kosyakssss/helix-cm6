@@ -15,7 +15,6 @@ export interface LoadedConfig {
 const IGNORED_EDITOR = new Set([
   "mouse",
   "middle-click-paste",
-  "shell",
   "auto-completion",
   "path-completion",
   "auto-format",
@@ -96,6 +95,11 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
       case "jump-label-alphabet": {
         const s = asStr(value, key, warnings);
         if (s !== undefined) config.jumpLabelAlphabet = [...s];
+        break;
+      }
+      case "shell": {
+        if (Array.isArray(value) && value.every((v) => typeof v === "string")) config.shell = value;
+        else warnings.push("editor.shell: expected a list of strings");
         break;
       }
       case "text-width": {
