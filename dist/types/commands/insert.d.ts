@@ -6,7 +6,7 @@ import { type AutoPairs } from "../auto-pairs";
 import { Range } from "../selection";
 import { setSel } from "./util";
 import type { CommandFn } from "./motion";
-export declare function autoPairsFor(editor: HelixEditor, host: Host, differs?: (global: AutoPairs, markdown: AutoPairs) => boolean): AutoPairs | null;
+export declare function autoPairsFor(editor: HelixEditor, host: Host, differs?: (global: AutoPairs, language: AutoPairs) => boolean): AutoPairs | null;
 export declare function insertDiffers(doc: Text, ranges: readonly Range[], ch: string): (a: AutoPairs, b: AutoPairs) => boolean;
 export declare function mayAutoPair(editor: HelixEditor, ch: string): boolean;
 export declare function autoPairsOf(cx: Context): AutoPairs | null;

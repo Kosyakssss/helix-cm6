@@ -10,8 +10,8 @@ interface Exports {
     hm_symbol_name(language: number, symbol: number): number;
     hm_parse(language: number, text: number, length: number, ranges: number, count: number, oldTree: number): number;
     hm_tree_edit(tree: number, start: number, oldEnd: number, newEnd: number): void;
-    hm_injection_matches(query: number, node: number, modes: number, content: number, language: number, shebang: number, buffer: number, capacity: number): number;
     hm_tree_delete(tree: number): void;
+    hm_tree_copy(tree: number): number;
     hm_tree_root(tree: number, out: number): void;
     hm_node_start(node: number): number;
     hm_node_end(node: number): number;
@@ -31,7 +31,18 @@ interface Exports {
     hm_cursor_next_sibling(cursor: number): number;
     hm_cursor_prev_sibling(cursor: number): number;
     hm_cursor_first_child_for_byte(cursor: number, goal: number): number;
-    hm_query_new(language: number, source: number, length: number): number;
+    hm_query_new(language: number, source: number, length: number, error: number): number;
+    hm_query_delete(query: number): void;
+    hm_query_string_count(query: number): number;
+    hm_query_start_byte(query: number, pattern: number): number;
+    hm_query_disable_capture(query: number, name: number, length: number): void;
+    hm_qc_new(): number;
+    hm_qc_delete(cursor: number): void;
+    hm_qc_exec(cursor: number, query: number, node: number, start: number, end: number, limit: number): void;
+    hm_qc_next_match(cursor: number, out: number): number;
+    hm_qc_next_capture(cursor: number, out: number): number;
+    hm_qc_remove_match(cursor: number, id: number): void;
+    hm_qc_exceeded(cursor: number): number;
     hm_query_capture_count(query: number): number;
     hm_query_pattern_count(query: number): number;
     hm_query_capture_name(query: number, index: number, length: number): number;
@@ -93,6 +104,7 @@ export declare class Tree {
     readonly ptr: number;
     constructor(rt: Runtime, ptr: number);
     edit(start: number, oldEnd: number, newEnd: number): void;
+    copy(): Tree;
     get rootNode(): Node;
     walk(): TreeCursor;
     delete(): void;
@@ -113,32 +125,5 @@ export declare class Parser {
     readonly rt: Runtime;
     constructor(rt: Runtime);
     parse(language: Language, text: number, length: number, ranges: ByteRange[] | null, oldTree?: Tree | null): Tree | null;
-}
-export declare class Query {
-    readonly rt: Runtime;
-    readonly ptr: number;
-    readonly captureNames: string[];
-    private readonly properties;
-    constructor(rt: Runtime, language: Language, source: string);
-    patternProperties(): Record<string, string | null>[];
-}
-export interface InjectionMatch {
-    pattern: number;
-    start: number;
-    end: number;
-    languageRange: [number, number] | null;
-    shebang: boolean;
-    excluded: [number, number][];
-}
-export declare class InjectionQuery {
-    readonly rt: Runtime;
-    readonly query: Query;
-    private readonly modes;
-    private readonly ids;
-    private buffer;
-    private capacity;
-    constructor(rt: Runtime, query: Query);
-    properties(pattern: number): Record<string, string | null>;
-    matches(node: Node): InjectionMatch[];
 }
 export {};

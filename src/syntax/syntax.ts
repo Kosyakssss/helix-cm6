@@ -1,18 +1,7 @@
 import type { ChangeSet, Text } from "@codemirror/state";
-import type { InjectionMatch, InjectionQuery, Language, Node, Parser, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
-
-export interface LanguageConfig {
-  id: string;
-  injectionRegex: RegExp | null;
-  grammar: Language;
-  injections: InjectionQuery | null;
-}
-
-export interface Loader {
-  rt: Runtime;
-  parser: Parser;
-  languages: LanguageConfig[];
-}
+import type { IncludedChildren, InjectionScope, LanguageId } from "./injections";
+import type { LanguageLoader } from "./loader";
+import type { Node, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
 
 type ByteRange = [number, number];
 
@@ -47,13 +36,14 @@ export class Layer {
   ranges: ByteRange[] = [];
   flags: Flags = freshFlags();
   constructor(
-    readonly language: LanguageConfig,
+    readonly language: LanguageId,
     readonly parent: Layer | null,
   ) {}
 }
 
 class Source {
   readonly utf8: Uint8Array;
+  private readonly decoder = new TextDecoder();
   readonly ptr: number;
   private maps: { byteAt: Uint32Array; posAt: Uint32Array } | null = null;
 
@@ -96,6 +86,10 @@ class Source {
     return posAt[Math.min(byte, posAt.length - 1)]!;
   }
 
+  slice(start: number, end: number): string {
+    return this.decoder.decode(this.utf8.subarray(start, end));
+  }
+
   free(): void {
     this.rt.x.hm_free(this.ptr);
   }
@@ -122,15 +116,23 @@ export class Syntax {
   private source: Source;
 
   constructor(
-    private readonly loader: Loader,
+    readonly loader: LanguageLoader,
     text: string,
-    language: LanguageConfig,
+    language: LanguageId,
   ) {
     this.root = new Layer(language, null);
     this.root.ranges = [[0, MAX]];
     this.layers.add(this.root);
     this.source = new Source(loader.rt, text);
     this.update([]);
+    if (!this.root.tree) {
+      this.delete();
+      throw new Error("`LanguageLoader::get_config` for the root layer language returned `None`");
+    }
+  }
+
+  get input(): Source {
+    return this.source;
   }
 
   byteOf(pos: number): number {
@@ -142,7 +144,7 @@ export class Syntax {
   }
 
   slice(start: number, end: number): string {
-    return new TextDecoder().decode(this.source.utf8.subarray(start, end));
+    return this.source.slice(start, end);
   }
 
   get byteLength(): number {
@@ -189,15 +191,17 @@ export class Syntax {
   }
 
   private parse(layer: Layer): void {
-    const ranges = layer === this.root ? null : layer.ranges.map(([start, end]) => ({ start, end }));
+    const config = this.loader.getConfig(layer.language);
+    if (!config) return;
+    const ranges = layer.ranges.length === 1 && layer.ranges[0]![0] === 0 && layer.ranges[0]![1] === MAX ? null : layer.ranges.map(([start, end]) => ({ start, end }));
     let old = layer.tree;
-    if (old && layer !== this.root) {
+    if (old && ranges) {
       const first = layer.ranges[0]?.[0] ?? 0;
       const last = layer.ranges[layer.ranges.length - 1]?.[1] ?? MAX;
       const root = old.rootNode;
       if (!(root.startByte <= first && root.endByte >= last)) old = null;
     }
-    const tree = this.loader.parser.parse(layer.language.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
+    const tree = this.loader.parser.parse(config.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
     if (!tree) throw new Error("tree-sitter parse failed");
     layer.tree?.delete();
     layer.tree = tree;
@@ -205,6 +209,14 @@ export class Syntax {
 
   treeOf(layer: Layer): Tree {
     return layer.tree!;
+  }
+
+  layerAndTreeForByteRange(start: number, end: number): [Layer, Tree] {
+    let layer: Layer = this.layerForByteRange(start, end);
+    for (;;) {
+      if (layer.tree) return [layer, layer.tree];
+      if (layer.parent) layer = layer.parent;
+    }
   }
 
   injectionAtByteIdx(layer: Layer, idx: number): Injection | null {
@@ -240,9 +252,7 @@ export class Syntax {
   }
 
   treeForByteRange(start: number, end: number): Tree {
-    let layer: Layer | null = this.layerForByteRange(start, end);
-    while (layer && !layer.tree) layer = layer.parent;
-    return (layer ?? this.root).tree!;
+    return this.layerAndTreeForByteRange(start, end)[1];
   }
 
   namedDescendantForByteRange(start: number, end: number): Node | null {
@@ -329,19 +339,23 @@ export class Syntax {
 
   private runInjectionQuery(layer: Layer, edits: Edit[], parseLayer: (layer: Layer) => void): void {
     this.mapInjections(layer, edits);
-    const query = layer.language.injections;
-    if (!query || !layer.tree) return;
+    const config = this.loader.getConfig(layer.language);
+    if (!config || config.injectionQuery.contentCapture === null || !layer.tree) return;
     const parentRanges = layer.ranges;
+    layer.ranges = [];
     const injections: Injection[] = [];
     const old = layer.injections;
+    layer.injections = [];
     let oi = 0;
-    for (const mat of this.matches(query, layer.tree.rootNode)) {
-      const matched: ByteRange = [mat.start, mat.end];
+    const combined = new Map<InjectionScope, Layer>();
+    for (const mat of config.injectionQuery.execute(layer.tree.rootNode, this.source, this.loader)) {
+      const matched: ByteRange = [mat.range[0], mat.range[1]];
       let insertPosition = injections.length;
       const last = injections[injections.length - 1];
       if (last && rangesIntersect(last.range, matched)) {
         if (last.range[0] <= matched[0]) continue;
         insertPosition = injections.findIndex((injection) => injection.range[1] > matched[0]);
+        if (insertPosition < 0) insertPosition = injections.length;
         if (injections[insertPosition]!.range[0] < matched[1]) continue;
       }
       while (oi < old.length && old[oi]!.range[1] <= matched[0]) old[oi++]!.layer.flags.modified = true;
@@ -351,27 +365,50 @@ export class Syntax {
         reused = candidate;
         oi++;
       }
-      const child = this.initInjection(layer, mat.language, reused);
+      let child: Layer;
+      if (mat.scope !== null && mat.scope.startsWith("match:") && mat.lastMatch) {
+        child = combined.get(mat.scope) ?? this.initInjection(layer, mat.language, reused);
+        combined.delete(mat.scope);
+      } else if (mat.scope !== null) {
+        let existing = combined.get(mat.scope);
+        if (!existing) {
+          existing = this.initInjection(layer, mat.language, reused);
+          combined.set(mat.scope, existing);
+        }
+        child = existing;
+      } else {
+        child = this.initInjection(layer, mat.language, reused);
+      }
       if (!child.flags.touched) {
         child.flags.touched = true;
         parseLayer(child);
       }
       if (child.flags.reused) {
-        child.flags.modified ||=
-          !reused || reused.matchedNodeRange[0] !== matched[0] || reused.matchedNodeRange[1] !== matched[1] || reused.layer !== child;
+        child.flags.modified ||= !reused || reused.matchedNodeRange[0] !== matched[0] || reused.matchedNodeRange[1] !== matched[1] || reused.layer !== child;
+      } else if (reused) {
+        child.flags.reused = true;
+        child.flags.modified = true;
+        const tree = reused.layer.tree?.copy() ?? null;
+        child.tree?.delete();
+        child.tree = tree;
       }
-      const added: Injection[] = [];
-      for (const range of intersectRanges(matched, mat.excluded, parentRanges)) {
+      const oldLen = injections.length;
+      for (const range of intersectRanges(mat.includeChildren, mat.node, parentRanges)) {
         child.ranges.push(range);
-        added.push({ range, layer: child, matchedNodeRange: matched });
+        injections.push({ range, layer: child, matchedNodeRange: matched });
       }
-      injections.splice(insertPosition, 0, ...added);
+      if (oldLen !== insertPosition) {
+        const inserted = injections.length - oldLen;
+        rotateRight(injections, insertPosition, inserted);
+        if (insertPosition <= child.ranges.length && inserted <= child.ranges.length - insertPosition) rotateRight(child.ranges, insertPosition, inserted);
+      }
     }
     for (; oi < old.length; oi++) old[oi]!.layer.flags.modified = true;
+    layer.ranges = parentRanges;
     layer.injections = injections;
   }
 
-  private initInjection(parent: Layer, language: LanguageConfig, reuse: Injection | null): Layer {
+  private initInjection(parent: Layer, language: LanguageId, reuse: Injection | null): Layer {
     if (reuse) {
       reuse.layer.flags.reused = true;
       reuse.layer.ranges = [];
@@ -381,55 +418,29 @@ export class Syntax {
     this.layers.add(layer);
     return layer;
   }
-
-  private matches(query: InjectionQuery, root: Node): ResolvedMatch[] {
-    const found = query.matches(root);
-    found.sort((a, b) => a.start - b.start || a.pattern - b.pattern);
-    const result: ResolvedMatch[] = [];
-    for (const match of found) {
-      if (match.end <= match.start) continue;
-      const language = this.resolve(query, match);
-      if (language) result.push({ ...match, language });
-    }
-    return result;
-  }
-
-  private resolve(query: InjectionQuery, match: InjectionMatch): LanguageConfig | null {
-    const languages = this.loader.languages;
-    if (match.languageRange) {
-      const text = this.slice(match.languageRange[0], match.languageRange[1]);
-      const exact = languages.find((l) => l.id === text);
-      if (exact) return exact;
-      let best: LanguageConfig | null = null;
-      let bestLength = 0;
-      for (const language of languages) {
-        const found = language.injectionRegex?.exec(text);
-        if (found && found[0].length > bestLength) {
-          best = language;
-          bestLength = found[0].length;
-        }
-      }
-      return best;
-    }
-    if (match.shebang) return null;
-    const name = query.properties(match.pattern)["injection.language"];
-    return typeof name === "string" ? (languages.find((l) => l.id === name) ?? null) : null;
-  }
 }
 
-interface ResolvedMatch extends InjectionMatch {
-  language: LanguageConfig;
+function rotateRight<T>(items: T[], from: number, count: number): void {
+  if (count === 0) return;
+  const moved = items.splice(items.length - count, count);
+  items.splice(from, 0, ...moved);
 }
 
 function rangesIntersect(a: ByteRange, b: ByteRange): boolean {
   return a[0] === b[0] || (a[1] > b[0] && b[1] > a[0]);
 }
 
-function intersectRanges(range: ByteRange, excluded: ByteRange[], parentRanges: ByteRange[]): ByteRange[] {
-  const parents = excludeRanges(
-    parentRanges.filter((r) => r[1] > range[0]),
-    excluded,
-  );
+function intersectRanges(includeChildren: IncludedChildren, node: Node, parentRanges: ByteRange[]): ByteRange[] {
+  const range: ByteRange = [node.startByte, node.endByte];
+  const excluded: ByteRange[] = [];
+  if (includeChildren !== "all") {
+    for (const child of node.children) {
+      if (includeChildren === "unnamed" && !child.isNamed) continue;
+      excluded.push([child.startByte, child.endByte]);
+    }
+  }
+  const i = parentRanges.findIndex((r) => r[1] > range[0]);
+  const parents = excludeRanges(i < 0 ? [] : parentRanges.slice(i), excluded);
   const merged: ByteRange[] = [];
   for (const r of parents) {
     const prev = merged[merged.length - 1];
@@ -499,10 +510,16 @@ export class SyntaxCursor {
 
   gotoParent(): boolean {
     if (this.cursor.gotoParent()) return true;
-    const parent = this.current.parent;
-    if (!parent) return false;
-    this.use(parent, this.syntax.treeOf(parent));
-    return true;
+    let layer = this.current;
+    for (;;) {
+      const parent = layer.parent;
+      if (!parent) return false;
+      layer = parent;
+      if (layer.tree) {
+        this.use(layer, layer.tree);
+        return true;
+      }
+    }
   }
 
   gotoParentWith(predicate: (node: Node) => boolean): boolean {
@@ -515,8 +532,8 @@ export class SyntaxCursor {
   gotoFirstChild(): boolean {
     const node = this.cursor.currentNode;
     const injection = this.syntax.injectionAtByteIdx(this.current, node.startByte);
-    if (injection && injection.range[1] >= node.endByte) {
-      this.use(injection.layer, this.syntax.treeOf(injection.layer));
+    if (injection && injection.range[1] >= node.endByte && injection.layer.tree) {
+      this.use(injection.layer, injection.layer.tree);
       return true;
     }
     return this.cursor.gotoFirstChild();
@@ -531,8 +548,8 @@ export class SyntaxCursor {
   }
 
   resetToByteRange(start: number, end: number): void {
-    const layer = this.syntax.layerForByteRange(start, end);
-    this.use(layer, this.syntax.treeOf(layer));
+    const [layer, tree] = this.syntax.layerAndTreeForByteRange(start, end);
+    this.use(layer, tree);
     for (;;) {
       const node = this.cursor.currentNode;
       if (start < node.startByte || end > node.endByte) {

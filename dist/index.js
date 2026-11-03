@@ -4818,17 +4818,16 @@ function handleInsertSame(doc, range, pair) {
 }
 
 // src/commands/insert.ts
-var MARKDOWN_AUTO_PAIRS = [
-  ["(", ")"],
-  ["{", "}"],
-  ["[", "]"],
-  ['"', '"'],
-  ["'", "'"],
-  ["`", "`"],
-  ["‘", "’"],
-  ["«", "»"],
-  ["“", "”"]
-];
+function languagePairs(editor) {
+  const loader = editor.languages;
+  if (!loader)
+    return [];
+  const out = [];
+  for (const data of loader.languages)
+    if (data.syntax && data.config.autoPairs)
+      out.push(data.config.autoPairs);
+  return out;
+}
 function autoPairsFor(editor, host, differs = () => true) {
   const pairs = editor.config.autoPairs;
   if (!pairs || !editor.helixAutoPairs)
@@ -4836,15 +4835,15 @@ function autoPairsFor(editor, host, differs = () => true) {
   const global = makeAutoPairs(pairs);
   if (!editor.syntax)
     return global;
-  const markdown = makeAutoPairs(MARKDOWN_AUTO_PAIRS);
-  if (!differs(global, markdown))
+  if (!languagePairs(editor).some((p) => differs(global, makeAutoPairs(p))))
     return global;
   const syntax = editor.syntax(host);
   if (!syntax)
     return global;
   const primary = selection(host).primary();
   const layer = syntax.layerForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
-  return layer.language.id === "markdown" ? markdown : global;
+  const own = syntax.loader.language(layer.language).config.autoPairs;
+  return own ? makeAutoPairs(own) : global;
 }
 function insertDiffers(doc, ranges, ch) {
   return (a, b) => ranges.some((r) => JSON.stringify(hookInsert(doc, r, ch, a)) !== JSON.stringify(hookInsert(doc, r, ch, b)));
@@ -4854,7 +4853,7 @@ function mayAutoPair(editor, ch) {
   if (!pairs || !editor.helixAutoPairs)
     return false;
   const has = (list) => list.some(([open, close]) => open === ch || close === ch);
-  return has(pairs) || editor.syntax !== null && has(MARKDOWN_AUTO_PAIRS) || isWhitespace(ch);
+  return has(pairs) || editor.syntax !== null && languagePairs(editor).some(has) || isWhitespace(ch);
 }
 function autoPairsOf(cx) {
   return autoPairsFor(cx.editor, cx.host);
@@ -7578,6 +7577,7 @@ class HelixEditor {
   jumpLabels = new Map;
   commentTokens = null;
   syntax = null;
+  languages = null;
   regex = null;
   pathCompleter = null;
   shell = null;
@@ -8822,6 +8822,176 @@ class SystemClipboard {
   }
 }
 
+// src/syntax/config.ts
+import { parse as parse3 } from "smol-toml";
+function isTable(v) {
+  return typeof v === "object" && v !== null && !Array.isArray(v) && !(v instanceof Date);
+}
+function nameOf(v) {
+  return isTable(v) && typeof v.name === "string" ? v.name : undefined;
+}
+function mergeTomlValues(left, right, depth) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    if (depth === 0)
+      return right;
+    const items = [...left];
+    for (const rvalue of right) {
+      const rname = nameOf(rvalue);
+      const lpos = rname === undefined ? -1 : items.findIndex((v) => nameOf(v) === rname);
+      const lvalue = lpos < 0 ? undefined : items.splice(lpos, 1)[0];
+      items.push(lvalue === undefined ? rvalue : mergeTomlValues(lvalue, rvalue, depth - 1));
+    }
+    return items;
+  }
+  if (isTable(left) && isTable(right)) {
+    if (depth === 0)
+      return right;
+    const out = { ...left };
+    for (const [key, rvalue] of Object.entries(right)) {
+      out[key] = key in left ? mergeTomlValues(left[key], rvalue, depth - 1) : rvalue;
+    }
+    return out;
+  }
+  return right;
+}
+
+class ConfigError extends Error {
+}
+function str(v, what) {
+  if (typeof v !== "string")
+    throw new ConfigError(`${what}: expected a string`);
+  return v;
+}
+function optStr(v, what) {
+  return v === undefined ? null : str(v, what);
+}
+function optNum(v, what) {
+  if (v === undefined)
+    return null;
+  if (typeof v !== "number" && typeof v !== "bigint")
+    throw new ConfigError(`${what}: expected an integer`);
+  return Number(v);
+}
+function optBool(v, what) {
+  if (v === undefined)
+    return null;
+  if (typeof v !== "boolean")
+    throw new ConfigError(`${what}: expected a boolean`);
+  return v;
+}
+function strList(v, what) {
+  if (!Array.isArray(v))
+    throw new ConfigError(`${what}: expected a list`);
+  return v.map((x) => str(x, what));
+}
+function fileType(v, what) {
+  if (typeof v === "string")
+    return { kind: "extension", extension: v };
+  if (isTable(v)) {
+    const keys = Object.keys(v);
+    if (keys.length === 0)
+      throw new ConfigError("expected a `suffix` key in the `file-types` entry");
+    if (keys[0] !== "glob")
+      throw new ConfigError(`unknown key in \`file-types\` list: ${keys[0]}`);
+    let glob = str(v.glob, what);
+    if (!glob.startsWith("/") && !glob.startsWith("*/"))
+      glob = `*/${glob}`;
+    return { kind: "glob", glob };
+  }
+  throw new ConfigError(`${what}: expected string or table`);
+}
+function blockToken(v, what) {
+  if (!isTable(v))
+    throw new ConfigError(`${what}: expected a table`);
+  return { start: str(v.start, what), end: str(v.end, what) };
+}
+function autoPairs(v, what) {
+  if (v === undefined || v === false)
+    return null;
+  if (v === true)
+    return null;
+  if (!isTable(v))
+    throw new ConfigError(`${what}: expected a boolean or a table`);
+  return Object.entries(v).map(([open, close]) => [open, str(close, what)]);
+}
+var DEFAULT_PAIRS = [
+  ["(", ")"],
+  ["{", "}"],
+  ["[", "]"],
+  ["'", "'"],
+  ['"', '"'],
+  ["`", "`"]
+];
+function languageConfig(v) {
+  if (!isTable(v))
+    throw new ConfigError("language: expected a table");
+  const name = str(v.name, "language.name");
+  const at = (key) => `language '${name}': ${key}`;
+  const comment = v["comment-tokens"] ?? v["comment-token"];
+  const block = v["block-comment-tokens"];
+  const indent = v.indent;
+  const soft = v["soft-wrap"];
+  const word = v["word-completion"];
+  let pairs = autoPairs(v["auto-pairs"], at("auto-pairs"));
+  if (v["auto-pairs"] === true)
+    pairs = DEFAULT_PAIRS;
+  let tabWidth = null;
+  if (isTable(indent)) {
+    tabWidth = optNum(indent["tab-width"], at("indent.tab-width"));
+    if (tabWidth === null || tabWidth < 1 || tabWidth > 16)
+      throw new ConfigError(`${at("indent.tab-width")}: tab width must be between 1 and 16`);
+  }
+  return {
+    languageId: name,
+    scope: str(v.scope, at("scope")),
+    fileTypes: (Array.isArray(v["file-types"]) ? v["file-types"] : []).map((x) => fileType(x, at("file-types"))),
+    shebangs: v.shebangs === undefined ? [] : strList(v.shebangs, at("shebangs")),
+    commentTokens: comment === undefined ? null : typeof comment === "string" ? [comment] : strList(comment, at("comment-tokens")),
+    blockCommentTokens: block === undefined ? null : Array.isArray(block) ? block.map((b) => blockToken(b, at("block-comment-tokens"))) : [blockToken(block, at("block-comment-tokens"))],
+    textWidth: optNum(v["text-width"], at("text-width")),
+    softWrap: isTable(soft) ? {
+      enable: optBool(soft.enable, at("soft-wrap.enable")),
+      maxWrap: optNum(soft["max-wrap"], at("soft-wrap.max-wrap")),
+      maxIndentRetain: optNum(soft["max-indent-retain"], at("soft-wrap.max-indent-retain")),
+      wrapIndicator: optStr(soft["wrap-indicator"], at("soft-wrap.wrap-indicator")),
+      wrapAtTextWidth: optBool(soft["wrap-at-text-width"], at("soft-wrap.wrap-at-text-width"))
+    } : null,
+    autoFormat: optBool(v["auto-format"], at("auto-format")) ?? false,
+    pathCompletion: optBool(v["path-completion"], at("path-completion")),
+    wordCompletion: isTable(word) ? { enable: optBool(word.enable, at("word-completion.enable")), triggerLength: optNum(word["trigger-length"], at("word-completion.trigger-length")) } : null,
+    grammar: optStr(v.grammar, at("grammar")),
+    injectionRegex: optStr(v["injection-regex"], at("injection-regex")),
+    indent: isTable(indent) ? { tabWidth, unit: str(indent.unit, at("indent.unit")) } : null,
+    autoPairs: pairs,
+    rulers: v.rulers === undefined ? null : v.rulers.map((r) => optNum(r, at("rulers"))),
+    rainbowBrackets: optBool(v["rainbow-brackets"], at("rainbow-brackets"))
+  };
+}
+function grammarConfig(v) {
+  if (!isTable(v))
+    throw new ConfigError("grammar: expected a table");
+  const name = str(v.name, "grammar.name");
+  const source = isTable(v.source) ? v.source : {};
+  return {
+    name,
+    git: optStr(source.git, `grammar '${name}': source.git`),
+    rev: optStr(source.rev, `grammar '${name}': source.rev`),
+    subpath: optStr(source.subpath, `grammar '${name}': source.subpath`),
+    path: optStr(source.path, `grammar '${name}': source.path`)
+  };
+}
+function parseLanguagesToml(...sources) {
+  let merged = {};
+  sources.forEach((source, i) => {
+    const value = parse3(source);
+    merged = i === 0 ? value : mergeTomlValues(merged, value, 3);
+  });
+  const table = merged;
+  const languages = Array.isArray(table.language) ? table.language.map(languageConfig) : [];
+  const grammars = Array.isArray(table.grammar) ? table.grammar.map(grammarConfig) : [];
+  return { languages, grammars };
+}
+
 // src/syntax/ts.ts
 function readLeb(bytes, at) {
   let result = 0;
@@ -9051,6 +9221,9 @@ class Tree {
   edit(start, oldEnd, newEnd) {
     this.rt.x.hm_tree_edit(this.ptr, start, oldEnd, newEnd);
   }
+  copy() {
+    return new Tree(this.rt, this.rt.x.hm_tree_copy(this.ptr));
+  }
   get rootNode() {
     this.rt.x.hm_tree_root(this.ptr, this.rt.outPtr);
     return this.rt.readNode(this.rt.outPtr);
@@ -9119,108 +9292,809 @@ class Parser {
   }
 }
 
+// src/syntax/query.ts
+class InvalidPredicateError extends Error {
+}
+function unknownPredicate(predicate) {
+  if (predicate.kind === "other")
+    return new InvalidPredicateError(`unknown predicate #${predicate.predicate.name}`);
+  return new InvalidPredicateError(`unknown property '${predicate.key}'`);
+}
+
+class QueryParseError extends Error {
+}
+var ERROR_KINDS = ["none", "syntax", "node-type", "field", "capture", "structure", "language"];
+function bytesEqual(a, b) {
+  if (a.length !== b.length)
+    return false;
+  for (let i = 0;i < a.length; i++)
+    if (a[i] !== b[i])
+      return false;
+  return true;
+}
+function argOf(query, type, value) {
+  return type === 1 ? { kind: "capture", capture: value } : { kind: "string", value: query.stringValue(value) };
+}
+function checkArgCount(p, n) {
+  if (p.args.length !== n)
+    throw new InvalidPredicateError(`expected ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function checkMinArgCount(p, n) {
+  if (n > p.args.length)
+    throw new InvalidPredicateError(`expected at least ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function checkMaxArgCount(p, n) {
+  if (p.args.length > n)
+    throw new InvalidPredicateError(`expected at most ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function strArg(query, p, i) {
+  const arg = p.args[i];
+  if (arg.kind === "string")
+    return arg.value;
+  throw new InvalidPredicateError(`${i}. argument to #${p.name} must be a literal, got capture @${JSON.stringify(query.captureName(arg.capture))}`);
+}
+function captureArg(p, i) {
+  const arg = p.args[i];
+  if (arg.kind === "capture")
+    return arg.capture;
+  throw new InvalidPredicateError(`${i}. argument to #${p.name} expected a capture, got literal ${JSON.stringify(arg.value)}`);
+}
+function parseProperty(query, p) {
+  checkMinArgCount(p, 1);
+  checkMaxArgCount(p, 2);
+  const key = strArg(query, p, 0);
+  const val = p.args.length === 2 ? strArg(query, p, 1) : null;
+  return { key, val };
+}
+
 class Query {
   rt;
+  language;
+  regex;
   ptr;
   captureNames = [];
-  properties = [];
-  constructor(rt, language, source) {
+  strings = [];
+  textPredicates = [];
+  regexes = [];
+  constructor(rt, language, source, custom, regex = null) {
     this.rt = rt;
+    this.language = language;
+    this.regex = regex;
     const bytes = new TextEncoder().encode(source);
     const src = rt.alloc(bytes);
-    this.ptr = rt.x.hm_query_new(language.ptr, src, bytes.length);
+    const error = rt.lenPtr;
+    this.ptr = rt.x.hm_query_new(language.ptr, src, bytes.length, error);
     rt.x.hm_free(src);
-    if (!this.ptr)
-      throw new Error("invalid tree-sitter query");
-    const lenWord = rt.lenPtr >> 2;
-    const text = (ptr) => rt.string(ptr, rt.u32()[lenWord]);
+    if (!this.ptr) {
+      const words = rt.u32();
+      const offset = new TextDecoder().decode(bytes.subarray(0, words[error >> 2])).length;
+      const kind = ERROR_KINDS[words[(error >> 2) + 1]] ?? "syntax";
+      throw new QueryParseError(`invalid ${kind} in query at ${offset}`);
+    }
     const captureCount = rt.x.hm_query_capture_count(this.ptr);
     for (let i = 0;i < captureCount; i++)
-      this.captureNames.push(text(rt.x.hm_query_capture_name(this.ptr, i, rt.lenPtr)));
+      this.captureNames.push(this.read(rt.x.hm_query_capture_name(this.ptr, i, rt.lenPtr)));
+    const stringCount = rt.x.hm_query_string_count(this.ptr);
+    for (let i = 0;i < stringCount; i++)
+      this.strings.push(this.read(rt.x.hm_query_string(this.ptr, i, rt.lenPtr)));
     const patternCount = rt.x.hm_query_pattern_count(this.ptr);
-    for (let pattern = 0;pattern < patternCount; pattern++) {
-      const steps = rt.x.hm_query_predicates(this.ptr, pattern, rt.lenPtr);
-      const count = rt.u32()[lenWord];
-      const words = rt.u32().slice(steps >> 2, (steps >> 2) + count * 2);
-      const props = {};
-      let predicate = [];
-      for (let i = 0;i < count; i++) {
-        const type = words[i * 2];
-        const value = words[i * 2 + 1];
-        if (type !== 0) {
-          predicate.push(type === 2 ? value : -1);
-          continue;
-        }
-        const [name, key, val] = predicate.map((id) => id < 0 ? "" : text(rt.x.hm_query_string(this.ptr, id, rt.lenPtr)));
-        if (name === "set!" && key !== undefined)
-          props[key] = val ?? null;
-        predicate = [];
+    try {
+      for (let pattern = 0;pattern < patternCount; pattern++)
+        this.textPredicates.push(this.parsePatternPredicates(pattern, custom));
+    } catch (err) {
+      this.delete();
+      if (err instanceof InvalidPredicateError) {
+        const start = new TextDecoder().decode(bytes.subarray(0, rt.x.hm_query_start_byte(this.ptr, this.textPredicates.length))).length;
+        throw new QueryParseError(`${err.message} in the pattern at ${start}`);
       }
-      this.properties.push(props);
+      throw err;
     }
   }
-  patternProperties() {
-    return this.properties;
+  read(ptr) {
+    return this.rt.string(ptr, this.rt.u32()[this.rt.lenPtr >> 2]);
+  }
+  stringValue(id) {
+    return this.strings[id];
+  }
+  captureName(capture) {
+    return this.captureNames[capture];
+  }
+  getCapture(name) {
+    const i = this.captureNames.indexOf(name);
+    return i < 0 ? null : i;
+  }
+  get patternCount() {
+    return this.textPredicates.length;
+  }
+  startByteForPattern(pattern) {
+    return this.rt.x.hm_query_start_byte(this.ptr, pattern);
+  }
+  disableCapture(name) {
+    const bytes = new TextEncoder().encode(name);
+    const ptr = this.rt.alloc(bytes);
+    this.rt.x.hm_query_disable_capture(this.ptr, ptr, bytes.length);
+    this.rt.x.hm_free(ptr);
+  }
+  delete() {
+    for (const regex of this.regexes)
+      this.regex?.drop(regex);
+    this.regexes.length = 0;
+    this.rt.x.hm_query_delete(this.ptr);
+  }
+  compileRegex(pattern) {
+    if (!this.regex)
+      throw new InvalidPredicateError(`invalid regex '${pattern}', no regex engine`);
+    try {
+      const regex = this.regex.compile(`(?-m)${pattern}`, false);
+      this.regexes.push(regex);
+      return regex;
+    } catch (err) {
+      throw new InvalidPredicateError(`invalid regex '${pattern}', ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  parsePatternPredicates(pattern, custom) {
+    const rt = this.rt;
+    const steps = rt.x.hm_query_predicates(this.ptr, pattern, rt.lenPtr);
+    const count = rt.u32()[rt.lenPtr >> 2];
+    const words = rt.u32().slice(steps >> 2, (steps >> 2) + count * 2);
+    const out = [];
+    let current = [];
+    const predicates = [];
+    for (let i = 0;i < count; i++) {
+      const type = words[i * 2];
+      const value = words[i * 2 + 1];
+      if (type === 0) {
+        if (current.length > 0)
+          predicates.push(current);
+        current = [];
+      } else
+        current.push([type, value]);
+    }
+    if (current.length > 0)
+      predicates.push(current);
+    const encode = (s) => new TextEncoder().encode(s);
+    for (const steps of predicates) {
+      const [headType, headValue] = steps[0];
+      if (headType !== 2) {
+        throw new InvalidPredicateError(`expected predicate to start with a function name. Got @${this.captureName(headValue)}.`);
+      }
+      const p = { name: this.stringValue(headValue), args: steps.slice(1).map(([t, v]) => argOf(this, t, v)) };
+      switch (p.name) {
+        case "eq?":
+        case "not-eq?":
+        case "any-eq?":
+        case "any-not-eq?": {
+          checkArgCount(p, 2);
+          const capture = captureArg(p, 0);
+          const arg2 = p.args[1];
+          const negated = ["not-eq?", "not-any-eq?"].includes(p.name);
+          const matchAll = p.name === "eq?" || p.name === "not-eq?";
+          const kind = arg2.kind === "capture" ? { kind: "eq-capture", capture: arg2.capture } : { kind: "eq-string", value: encode(arg2.value) };
+          out.push({ capture, kind, negated, matchAll });
+          break;
+        }
+        case "match?":
+        case "not-match?":
+        case "any-match?":
+        case "any-not-match?": {
+          checkArgCount(p, 2);
+          const capture = captureArg(p, 0);
+          const source = strArg(this, p, 1);
+          const negated = p.name === "not-match?" || p.name === "any-not-match?";
+          const matchAll = p.name === "match?" || p.name === "not-match?";
+          out.push({ capture, kind: { kind: "match-string", regex: this.compileRegex(source) }, negated, matchAll });
+          break;
+        }
+        case "set!": {
+          const { key, val } = parseProperty(this, p);
+          custom(pattern, { kind: "set-property", key, val });
+          break;
+        }
+        case "is-not?":
+        case "is?": {
+          const { key, val } = parseProperty(this, p);
+          custom(pattern, { kind: "is-property-set", negate: p.name === "is-not?", key, val });
+          break;
+        }
+        case "any-of?":
+        case "not-any-of?": {
+          checkMinArgCount(p, 1);
+          const capture = captureArg(p, 0);
+          const values = [];
+          for (let i = 1;i < p.args.length; i++)
+            values.push(encode(strArg(this, p, i)));
+          out.push({ capture, kind: { kind: "any-string", values }, negated: p.name === "not-any-of?", matchAll: false });
+          break;
+        }
+        default:
+          custom(pattern, { kind: "other", predicate: p });
+      }
+    }
+    return out;
+  }
+  satisfies(pattern, nodes, input) {
+    const predicates = this.textPredicates[pattern];
+    for (const predicate of predicates)
+      if (!this.satisfied(predicate, nodes, input))
+        return false;
+    return true;
+  }
+  satisfied(p, nodes, input) {
+    const text = (node) => input.utf8.subarray(node.startByte, node.endByte);
+    const helper = (results) => {
+      if (p.matchAll) {
+        for (const matched of results)
+          if (matched === p.negated)
+            return false;
+        return true;
+      }
+      for (const matched of results)
+        if (matched !== p.negated)
+          return true;
+      return false;
+    };
+    const captured = nodes.filter((n) => n.capture === p.capture);
+    const kind = p.kind;
+    switch (kind.kind) {
+      case "eq-string":
+        return helper(captured.map((n) => bytesEqual(text(n.node), kind.value)));
+      case "eq-capture": {
+        const others = nodes.filter((n) => n.capture === kind.capture);
+        const pairs = Math.min(captured.length, others.length);
+        const results = [];
+        for (let i = 0;i < pairs; i++)
+          results.push(bytesEqual(text(captured[i].node), text(others[i].node)));
+        const res = helper(results);
+        if (!p.matchAll)
+          return res;
+        return res && captured.length - pairs <= 1 && others.length === pairs;
+      }
+      case "match-string":
+        return helper(captured.map((n) => this.regex.isMatchBytes(kind.regex, text(n.node))));
+      case "any-string":
+        return helper(captured.map((n) => {
+          const bytes = text(n.node);
+          return kind.values.some((value) => bytesEqual(value, bytes));
+        }));
+    }
+  }
+}
+var TREE_SITTER_MATCH_LIMIT = 256;
+var MAX = 4294967295;
+
+class QueryCursor {
+  query;
+  input;
+  ptr;
+  out;
+  constructor(query, node, input, range = [0, MAX], limit = MAX) {
+    this.query = query;
+    this.input = input;
+    const rt = query.rt;
+    this.ptr = rt.x.hm_qc_new();
+    this.out = rt.x.hm_malloc(24);
+    rt.writeNode(rt.inPtr, node);
+    rt.x.hm_qc_exec(this.ptr, query.ptr, rt.inPtr, range[0], range[1], limit);
+  }
+  readMatch() {
+    const rt = this.query.rt;
+    const words = rt.u32();
+    const base = this.out >> 2;
+    const id = words[base];
+    const pattern = words[base + 1];
+    const count = words[base + 2];
+    const captures = words[base + 3] >> 2;
+    const nodes = [];
+    for (let i = 0;i < count; i++) {
+      const at = captures + i * 7;
+      nodes.push({ node: new Node(rt, words.slice(at, at + 6)), capture: words[at + 6] });
+    }
+    return { id, pattern, nodes };
+  }
+  nextMatch() {
+    const rt = this.query.rt;
+    for (;; ) {
+      if (!rt.x.hm_qc_next_match(this.ptr, this.out))
+        return null;
+      const match = this.readMatch();
+      if (this.query.satisfies(match.pattern, match.nodes, this.input))
+        return match;
+    }
+  }
+  nextMatchedNode() {
+    const rt = this.query.rt;
+    for (;; ) {
+      if (!rt.x.hm_qc_next_capture(this.ptr, this.out))
+        return null;
+      const match = this.readMatch();
+      const index = rt.u32()[(this.out >> 2) + 4];
+      if (this.query.satisfies(match.pattern, match.nodes, this.input))
+        return [match, index];
+      rt.x.hm_qc_remove_match(this.ptr, match.id);
+    }
+  }
+  removeMatch(id) {
+    this.query.rt.x.hm_qc_remove_match(this.ptr, id);
+  }
+  didExceedMatchLimit() {
+    return this.query.rt.x.hm_qc_exceeded(this.ptr) !== 0;
+  }
+  delete() {
+    if (!this.ptr)
+      return;
+    this.query.rt.x.hm_qc_delete(this.ptr);
+    this.query.rt.x.hm_free(this.out);
+    this.ptr = 0;
   }
 }
 
-class InjectionQuery {
-  rt;
+// src/syntax/injections.ts
+var SHEBANG = /#!\p{White_Space}*(?:\P{White_Space}*[/\\](?:env\p{White_Space}+(?:-\P{White_Space}+\p{White_Space}+)*)?)?([^\p{White_Space}.\p{Nd}]+)/u;
+function shebangMarker(text) {
+  return SHEBANG.exec(text)?.[1] ?? null;
+}
+function firstLines(text, count) {
+  let end = 0;
+  for (let line = 0;line < count; line++) {
+    const next = text.indexOf(`
+`, end);
+    if (next < 0)
+      return text;
+    end = next + 1;
+  }
+  return text.slice(0, end);
+}
+
+class InjectionsQuery {
   query;
-  modes;
-  ids;
-  buffer = 0;
-  capacity = 0;
-  constructor(rt, query) {
-    this.rt = rt;
-    this.query = query;
-    const props = query.patternProperties();
-    this.modes = rt.alloc(new Uint8Array(props.map((p) => ("injection.include-children" in p) ? 1 : ("injection.include-unnamed-children" in p) ? 2 : 0)));
-    const id = (name) => {
-      const i = query.captureNames.indexOf(name);
-      return i < 0 ? 4294967295 : i;
+  properties = new Map;
+  contentCapture;
+  languageCapture;
+  filenameCapture;
+  shebangCapture;
+  constructor(grammar, injectionQueryText, regex) {
+    const props = (pattern) => {
+      let p = this.properties.get(pattern);
+      if (!p) {
+        p = { includeChildren: "none", language: null, combined: false };
+        this.properties.set(pattern, p);
+      }
+      return p;
     };
-    this.ids = [id("injection.content"), id("injection.language"), id("injection.shebang")];
+    this.query = new Query(grammar.rt, grammar, injectionQueryText, (pattern, predicate) => {
+      if (predicate.kind === "set-property") {
+        if (predicate.key === "injection.include-unnamed-children" && predicate.val === null) {
+          props(pattern).includeChildren = "unnamed";
+          return;
+        }
+        if (predicate.key === "injection.include-children" && predicate.val === null) {
+          props(pattern).includeChildren = "all";
+          return;
+        }
+        if (predicate.key === "injection.language" && predicate.val !== null) {
+          props(pattern).language = predicate.val;
+          return;
+        }
+        if (predicate.key === "injection.combined" && predicate.val === null) {
+          props(pattern).combined = true;
+          return;
+        }
+      }
+      throw unknownPredicate(predicate);
+    }, regex);
+    this.contentCapture = this.query.getCapture("injection.content");
+    this.languageCapture = this.query.getCapture("injection.language");
+    this.filenameCapture = this.query.getCapture("injection.filename");
+    this.shebangCapture = this.query.getCapture("injection.shebang");
   }
-  properties(pattern) {
-    return this.query.patternProperties()[pattern] ?? {};
+  processMatch(match, nodeIdx, input, loader) {
+    const properties = this.properties.get(match.pattern);
+    let marker = null;
+    let lastContentNode = 0;
+    let contentNodes = 0;
+    match.nodes.forEach((matched, i) => {
+      const capture = matched.capture;
+      if (capture === this.languageCapture) {
+        marker = { kind: "match", text: input.slice(matched.node.startByte, matched.node.endByte) };
+      } else if (capture === this.filenameCapture) {
+        marker = { kind: "filename", text: input.slice(matched.node.startByte, matched.node.endByte) };
+      } else if (capture === this.shebangCapture) {
+        const lines = firstLines(input.slice(matched.node.startByte, matched.node.endByte), 2);
+        const found = shebangMarker(lines);
+        marker = found === null ? null : { kind: "shebang", text: found };
+      } else if (capture === this.contentCapture) {
+        contentNodes++;
+        lastContentNode = i;
+      }
+    });
+    const resolved = marker ?? (properties?.language ? { kind: "name", name: properties.language } : null);
+    if (!resolved)
+      return null;
+    const language = loader.languageForMarker(resolved);
+    if (language === null)
+      return null;
+    let scope = null;
+    if (properties?.combined)
+      scope = `pattern:${match.pattern}:${language}`;
+    else if (contentNodes !== 1)
+      scope = `match:${match.id}`;
+    const node = match.nodes[nodeIdx].node;
+    return {
+      language,
+      scope,
+      includeChildren: properties?.includeChildren ?? "none",
+      node,
+      range: [node.startByte, node.endByte],
+      lastMatch: lastContentNode === nodeIdx,
+      pattern: match.pattern
+    };
   }
-  matches(node) {
-    const rt = this.rt;
-    let used;
-    for (;; ) {
-      rt.writeNode(rt.inPtr, node);
-      used = rt.x.hm_injection_matches(this.query.ptr, rt.inPtr, this.modes, this.ids[0], this.ids[1], this.ids[2], this.buffer, this.capacity);
-      if (used <= this.capacity)
-        break;
-      if (this.buffer)
-        rt.x.hm_free(this.buffer);
-      this.capacity = used * 2;
-      this.buffer = rt.x.hm_malloc(this.capacity * 4);
+  *execute(node, input, loader) {
+    const content = this.contentCapture;
+    const cursor = new QueryCursor(this.query, node, input, [0, 4294967295], TREE_SITTER_MATCH_LIMIT);
+    const processMatch = this.processMatch.bind(this);
+    function* raw() {
+      for (;; ) {
+        const next = cursor.nextMatchedNode();
+        if (!next)
+          return;
+        const [match, nodeIdx] = next;
+        if (match.nodes[nodeIdx].capture !== content)
+          continue;
+        const mat = processMatch(match, nodeIdx, input, loader);
+        if (!mat) {
+          cursor.removeMatch(match.id);
+          continue;
+        }
+        if (mat.lastMatch)
+          cursor.removeMatch(match.id);
+        if (mat.range[0] === mat.range[1])
+          continue;
+        yield mat;
+      }
     }
-    const words = rt.u32().slice(this.buffer >> 2, (this.buffer >> 2) + used);
-    const out = [];
-    for (let i = 0;i < used; ) {
-      const count = words[i + 6];
-      const excluded = [];
-      for (let e = 0;e < count; e++)
-        excluded.push([words[i + 8 + e * 2], words[i + 9 + e * 2]]);
-      out.push({
-        pattern: words[i],
-        start: words[i + 1],
-        end: words[i + 2],
-        languageRange: words[i + 3] === 4294967295 ? null : [words[i + 3], words[i + 4]],
-        shebang: words[i + 5] === 1,
-        excluded
-      });
-      i += 8 + count * 2;
+    const iter = raw();
+    let peeked;
+    const peek = () => {
+      if (peeked === undefined) {
+        const r = iter.next();
+        peeked = r.done ? null : r.value;
+      }
+      return peeked;
+    };
+    const take = () => {
+      const value = peek();
+      peeked = undefined;
+      return value;
+    };
+    const nextIf = (f) => {
+      const value = peek();
+      if (value && f(value))
+        return take();
+      return null;
+    };
+    const buf = [];
+    try {
+      for (;; ) {
+        const pending = buf.pop();
+        if (pending) {
+          yield pending;
+          continue;
+        }
+        let res = take();
+        if (!res)
+          return;
+        if (res.includeChildren === "none") {
+          let fastReturn = true;
+          for (;; ) {
+            const current = res;
+            const overlap = nextIf((m) => m.range[0] === current.range[0] && m.range[1] === current.range[1]);
+            if (!overlap)
+              break;
+            if (overlap.includeChildren !== "none") {
+              buf.push(overlap);
+              fastReturn = false;
+              break;
+            }
+            res = overlap;
+          }
+          if (fastReturn) {
+            yield res;
+            continue;
+          }
+        }
+        for (;; ) {
+          const end = res.range[1];
+          const overlap = nextIf((m) => m.range[1] <= end);
+          if (!overlap)
+            break;
+          buf.push(overlap);
+        }
+        if (buf.length === 0) {
+          yield res;
+          continue;
+        }
+        buf.push(res);
+        buf.sort((a, b) => a.pattern - b.pattern || b.range[0] - a.range[0]);
+        yield buf.pop();
+      }
+    } finally {
+      cursor.delete();
     }
-    return out;
+  }
+}
+
+// src/syntax/loader.ts
+var INHERITS = /;+\s*inherits\s*:?\s*([a-z_,()-]+)\s*/g;
+async function readQuery(language, read) {
+  const query = await read(language);
+  const parts = [];
+  let last = 0;
+  for (const m of query.matchAll(INHERITS)) {
+    parts.push(Promise.resolve(query.slice(last, m.index)));
+    const inherited = m[1].split(",").map(async (lang) => `
+${await readQuery(lang, read)}
+`);
+    parts.push(Promise.all(inherited).then((texts) => texts.join("")));
+    last = m.index + m[0].length;
+  }
+  parts.push(Promise.resolve(query.slice(last)));
+  return (await Promise.all(parts)).join("");
+}
+function globRegex(glob) {
+  let out = "";
+  for (let i = 0;i < glob.length; i++) {
+    const c = glob[i];
+    if (c === "*") {
+      out += ".*";
+      while (glob[i + 1] === "*")
+        i++;
+    } else if (c === "?")
+      out += ".";
+    else if (c === "[") {
+      const end = glob.indexOf("]", i + 2);
+      if (end < 0)
+        out += "\\[";
+      else {
+        let body = glob.slice(i + 1, end);
+        if (body.startsWith("!"))
+          body = `^${body.slice(1)}`;
+        out += `[${body.replace(/\\/g, "\\\\")}]`;
+        i = end;
+      }
+    } else if (c === "{") {
+      const end = glob.indexOf("}", i);
+      if (end < 0)
+        out += "\\{";
+      else {
+        out += `(?:${glob.slice(i + 1, end).split(",").map((alt) => globRegex(alt).source.slice(1, -1)).join("|")})`;
+        i = end;
+      }
+    } else
+      out += c.replace(/[.+^$()|\\]/g, "\\$&");
+  }
+  return new RegExp(`^${out}$`, "u");
+}
+function extensionOf(path) {
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  if (name === "..")
+    return null;
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0)
+    return null;
+  return name.slice(dot + 1);
+}
+var SHEBANG2 = /^#!\p{White_Space}*(?:\P{White_Space}*[/\\](?:env\p{White_Space}+(?:-\P{White_Space}+\p{White_Space}+)*)?)?([^\p{White_Space}.\p{Nd}]+)/u;
+
+class LanguageData {
+  id;
+  config;
+  syntax = undefined;
+  loading = null;
+  queries = new Map;
+  compiled = new Map;
+  constructor(id, config) {
+    this.id = id;
+    this.config = config;
+  }
+  query(file, compile) {
+    if (this.compiled.has(file))
+      return this.compiled.get(file);
+    const text = this.queries.get(file) ?? "";
+    let query = null;
+    if (text !== "" && this.syntax) {
+      try {
+        query = compile(text);
+      } catch {
+        query = null;
+      }
+    }
+    this.compiled.set(file, query);
+    return query;
+  }
+}
+
+class LanguageLoader {
+  rt;
+  regex;
+  builtins;
+  source;
+  parser;
+  languages;
+  byExtension = new Map;
+  byShebang = new Map;
+  globs = [];
+  injectionRegexes = new Map;
+  listeners = new Set;
+  errors = [];
+  constructor(rt, regex, config, builtins, source) {
+    this.rt = rt;
+    this.regex = regex;
+    this.builtins = builtins;
+    this.source = source;
+    this.parser = new Parser(rt);
+    this.languages = config.languages.map((c, i) => new LanguageData(i, c));
+    for (const data of this.languages) {
+      for (const fileType of data.config.fileTypes) {
+        if (fileType.kind === "extension")
+          this.byExtension.set(fileType.extension, data.id);
+        else
+          this.globs.push({ glob: fileType.glob, regex: globRegex(fileType.glob), language: data.id });
+      }
+      for (const shebang of data.config.shebangs)
+        this.byShebang.set(shebang, data.id);
+    }
+  }
+  onLoad(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  language(id) {
+    return this.languages[id];
+  }
+  languageForName(name) {
+    return this.languages.find((l) => l.config.languageId === name)?.id ?? null;
+  }
+  languageForScope(scope) {
+    return this.languages.find((l) => l.config.scope === scope)?.id ?? null;
+  }
+  injectionRegex(data) {
+    const source = data.config.injectionRegex;
+    if (source === null || !this.regex)
+      return null;
+    let regex = this.injectionRegexes.get(data.id);
+    if (regex === undefined) {
+      regex = this.regex.compile(`(?-m)${source}`, false);
+      this.injectionRegexes.set(data.id, regex);
+    }
+    return regex;
+  }
+  languageForMatch(text) {
+    const exact = this.languageForName(text);
+    if (exact !== null)
+      return exact;
+    const bytes = new TextEncoder().encode(text);
+    let bestLength = 0;
+    let best = null;
+    for (const data of this.languages) {
+      const regex = this.injectionRegex(data);
+      if (regex === null)
+        continue;
+      const found = this.regex.findBytes(regex, bytes);
+      if (found && found[1] - found[0] > bestLength) {
+        best = data.id;
+        bestLength = found[1] - found[0];
+      }
+    }
+    return best;
+  }
+  languageForFilename(path) {
+    const absolute = path.startsWith("/") ? path : `/${path}`;
+    let best = null;
+    for (const glob of this.globs) {
+      if (glob.regex.test(absolute) && (!best || glob.glob.length > best.glob.length))
+        best = glob;
+    }
+    if (best)
+      return best.language;
+    const extension = extensionOf(path);
+    return extension === null ? null : this.byExtension.get(extension) ?? null;
+  }
+  languageForShebang(text) {
+    const marker = SHEBANG2.exec(text)?.[1];
+    return marker === undefined ? null : this.byShebang.get(marker) ?? null;
+  }
+  languageForMarker(marker) {
+    switch (marker.kind) {
+      case "name":
+        return this.languageForName(marker.name);
+      case "match":
+        return this.languageForMatch(marker.text);
+      case "filename":
+        return this.languageForFilename(marker.text);
+      case "shebang":
+        return this.byShebang.get(marker.text) ?? null;
+    }
+  }
+  getConfig(id) {
+    const data = this.language(id);
+    if (data.syntax === undefined) {
+      const grammar = this.builtins.grammars.get(data.config.grammar ?? data.config.languageId);
+      const queries = this.builtins.queries.get(data.config.languageId);
+      if (grammar && queries) {
+        for (const [file, text] of Object.entries(queries))
+          data.queries.set(file, text);
+        this.compileSyntax(data, grammar);
+      } else
+        this.load(id);
+    }
+    return data.syntax ?? null;
+  }
+  isLoaded(id) {
+    return this.language(id).syntax !== undefined;
+  }
+  compileSyntax(data, grammar) {
+    try {
+      data.syntax = { grammar, injectionQuery: new InjectionsQuery(grammar, data.queries.get("injections.scm") ?? "", this.regex) };
+    } catch (err) {
+      this.errors.push(`Failed to compile highlights for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+      data.syntax = null;
+    }
+  }
+  load(id) {
+    const data = this.language(id);
+    if (data.loading)
+      return data.loading;
+    data.loading = this.loadData(data).then(() => {
+      for (const listener of this.listeners)
+        listener(id);
+    });
+    return data.loading;
+  }
+  async loadData(data) {
+    const name = data.config.grammar ?? data.config.languageId;
+    let grammar = this.builtins.grammars.get(name) ?? null;
+    if (!grammar && this.source) {
+      try {
+        const bytes = await this.source.grammar(name);
+        if (bytes)
+          grammar = new Language(this.rt, await this.rt.loadLanguage(bytes, name));
+      } catch (err) {
+        this.errors.push(`Failed to load grammar '${name}': ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (!grammar) {
+      data.syntax = null;
+      return;
+    }
+    const files = ["highlights.scm", "injections.scm", "locals.scm", "textobjects.scm", "indents.scm", "rainbows.scm", "tags.scm"];
+    const source = this.source;
+    await Promise.all(files.map(async (file) => {
+      const text = await readQuery(data.config.languageId, async (language) => await source?.query(language, file) ?? "");
+      data.queries.set(file, text);
+    }));
+    this.compileSyntax(data, grammar);
+  }
+  textobjectQuery(id) {
+    const data = this.language(id);
+    return data.query("textobjects.scm", (text) => this.compile(data, text, "textobjects.scm"));
+  }
+  indentQuery(id, compile) {
+    const data = this.language(id);
+    return data.query("indents.scm", (text) => compile(data.syntax.grammar, text));
+  }
+  compile(data, text, file) {
+    try {
+      return new Query(this.rt, data.syntax.grammar, text, () => {}, this.regex);
+    } catch (err) {
+      this.errors.push(`Failed to compile ${file} queries for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+      throw err;
+    }
   }
 }
 
 // src/syntax/syntax.ts
-var MAX = 4294967295;
+var MAX2 = 4294967295;
 function freshFlags() {
   return { reused: false, modified: false, moved: false, touched: false };
 }
@@ -9242,6 +10116,7 @@ class Source {
   rt;
   text;
   utf8;
+  decoder = new TextDecoder;
   ptr;
   maps = null;
   constructor(rt, text) {
@@ -9281,6 +10156,9 @@ class Source {
     const { posAt } = this.build();
     return posAt[Math.min(byte, posAt.length - 1)];
   }
+  slice(start, end) {
+    return this.decoder.decode(this.utf8.subarray(start, end));
+  }
   free() {
     this.rt.x.hm_free(this.ptr);
   }
@@ -9311,10 +10189,17 @@ class Syntax {
   constructor(loader, text, language) {
     this.loader = loader;
     this.root = new Layer(language, null);
-    this.root.ranges = [[0, MAX]];
+    this.root.ranges = [[0, MAX2]];
     this.layers.add(this.root);
     this.source = new Source(loader.rt, text);
     this.update([]);
+    if (!this.root.tree) {
+      this.delete();
+      throw new Error("`LanguageLoader::get_config` for the root layer language returned `None`");
+    }
+  }
+  get input() {
+    return this.source;
   }
   byteOf(pos) {
     return this.source.byteOf(pos);
@@ -9323,7 +10208,7 @@ class Syntax {
     return this.source.posOf(byte);
   }
   slice(start, end) {
-    return new TextDecoder().decode(this.source.utf8.subarray(start, end));
+    return this.source.slice(start, end);
   }
   get byteLength() {
     return this.source.utf8.length;
@@ -9369,16 +10254,19 @@ class Syntax {
     }
   }
   parse(layer) {
-    const ranges = layer === this.root ? null : layer.ranges.map(([start, end]) => ({ start, end }));
+    const config = this.loader.getConfig(layer.language);
+    if (!config)
+      return;
+    const ranges = layer.ranges.length === 1 && layer.ranges[0][0] === 0 && layer.ranges[0][1] === MAX2 ? null : layer.ranges.map(([start, end]) => ({ start, end }));
     let old = layer.tree;
-    if (old && layer !== this.root) {
+    if (old && ranges) {
       const first = layer.ranges[0]?.[0] ?? 0;
-      const last = layer.ranges[layer.ranges.length - 1]?.[1] ?? MAX;
+      const last = layer.ranges[layer.ranges.length - 1]?.[1] ?? MAX2;
       const root = old.rootNode;
       if (!(root.startByte <= first && root.endByte >= last))
         old = null;
     }
-    const tree = this.loader.parser.parse(layer.language.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
+    const tree = this.loader.parser.parse(config.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
     if (!tree)
       throw new Error("tree-sitter parse failed");
     layer.tree?.delete();
@@ -9386,6 +10274,15 @@ class Syntax {
   }
   treeOf(layer) {
     return layer.tree;
+  }
+  layerAndTreeForByteRange(start, end) {
+    let layer = this.layerForByteRange(start, end);
+    for (;; ) {
+      if (layer.tree)
+        return [layer, layer.tree];
+      if (layer.parent)
+        layer = layer.parent;
+    }
   }
   injectionAtByteIdx(layer, idx) {
     const injections = layer.injections;
@@ -9422,10 +10319,7 @@ class Syntax {
     return last;
   }
   treeForByteRange(start, end) {
-    let layer = this.layerForByteRange(start, end);
-    while (layer && !layer.tree)
-      layer = layer.parent;
-    return (layer ?? this.root).tree;
+    return this.layerAndTreeForByteRange(start, end)[1];
   }
   namedDescendantForByteRange(start, end) {
     return this.treeForByteRange(start, end).rootNode.namedDescendantForByteRange(start, end);
@@ -9513,21 +10407,26 @@ class Syntax {
   }
   runInjectionQuery(layer, edits, parseLayer) {
     this.mapInjections(layer, edits);
-    const query = layer.language.injections;
-    if (!query || !layer.tree)
+    const config = this.loader.getConfig(layer.language);
+    if (!config || config.injectionQuery.contentCapture === null || !layer.tree)
       return;
     const parentRanges = layer.ranges;
+    layer.ranges = [];
     const injections = [];
     const old = layer.injections;
+    layer.injections = [];
     let oi = 0;
-    for (const mat of this.matches(query, layer.tree.rootNode)) {
-      const matched = [mat.start, mat.end];
+    const combined = new Map;
+    for (const mat of config.injectionQuery.execute(layer.tree.rootNode, this.source, this.loader)) {
+      const matched = [mat.range[0], mat.range[1]];
       let insertPosition = injections.length;
       const last = injections[injections.length - 1];
       if (last && rangesIntersect(last.range, matched)) {
         if (last.range[0] <= matched[0])
           continue;
         insertPosition = injections.findIndex((injection) => injection.range[1] > matched[0]);
+        if (insertPosition < 0)
+          insertPosition = injections.length;
         if (injections[insertPosition].range[0] < matched[1])
           continue;
       }
@@ -9539,23 +10438,48 @@ class Syntax {
         reused = candidate;
         oi++;
       }
-      const child = this.initInjection(layer, mat.language, reused);
+      let child;
+      if (mat.scope !== null && mat.scope.startsWith("match:") && mat.lastMatch) {
+        child = combined.get(mat.scope) ?? this.initInjection(layer, mat.language, reused);
+        combined.delete(mat.scope);
+      } else if (mat.scope !== null) {
+        let existing = combined.get(mat.scope);
+        if (!existing) {
+          existing = this.initInjection(layer, mat.language, reused);
+          combined.set(mat.scope, existing);
+        }
+        child = existing;
+      } else {
+        child = this.initInjection(layer, mat.language, reused);
+      }
       if (!child.flags.touched) {
         child.flags.touched = true;
         parseLayer(child);
       }
       if (child.flags.reused) {
         child.flags.modified ||= !reused || reused.matchedNodeRange[0] !== matched[0] || reused.matchedNodeRange[1] !== matched[1] || reused.layer !== child;
+      } else if (reused) {
+        child.flags.reused = true;
+        child.flags.modified = true;
+        const tree = reused.layer.tree?.copy() ?? null;
+        child.tree?.delete();
+        child.tree = tree;
       }
-      const added = [];
-      for (const range of intersectRanges(matched, mat.excluded, parentRanges)) {
+      const oldLen = injections.length;
+      for (const range of intersectRanges(mat.includeChildren, mat.node, parentRanges)) {
         child.ranges.push(range);
-        added.push({ range, layer: child, matchedNodeRange: matched });
+        injections.push({ range, layer: child, matchedNodeRange: matched });
       }
-      injections.splice(insertPosition, 0, ...added);
+      if (oldLen !== insertPosition) {
+        const inserted = injections.length - oldLen;
+        rotateRight(injections, insertPosition, inserted);
+        if (insertPosition <= child.ranges.length && inserted <= child.ranges.length - insertPosition)
+          rotateRight(child.ranges, insertPosition, inserted);
+      }
     }
     for (;oi < old.length; oi++)
       old[oi].layer.flags.modified = true;
+    layer.ranges = parentRanges;
     layer.injections = injections;
   }
   initInjection(parent, language, reuse) {
@@ -9568,48 +10492,28 @@ class Syntax {
     this.layers.add(layer);
     return layer;
   }
-  matches(query, root) {
-    const found = query.matches(root);
-    found.sort((a, b) => a.start - b.start || a.pattern - b.pattern);
-    const result = [];
-    for (const match of found) {
-      if (match.end <= match.start)
-        continue;
-      const language = this.resolve(query, match);
-      if (language)
-        result.push({ ...match, language });
-    }
-    return result;
-  }
-  resolve(query, match) {
-    const languages = this.loader.languages;
-    if (match.languageRange) {
-      const text = this.slice(match.languageRange[0], match.languageRange[1]);
-      const exact = languages.find((l) => l.id === text);
-      if (exact)
-        return exact;
-      let best = null;
-      let bestLength = 0;
-      for (const language of languages) {
-        const found = language.injectionRegex?.exec(text);
-        if (found && found[0].length > bestLength) {
-          best = language;
-          bestLength = found[0].length;
-        }
-      }
-      return best;
-    }
-    if (match.shebang)
-      return null;
-    const name = query.properties(match.pattern)["injection.language"];
-    return typeof name === "string" ? languages.find((l) => l.id === name) ?? null : null;
-  }
+}
+function rotateRight(items, from, count) {
+  if (count === 0)
+    return;
+  const moved = items.splice(items.length - count, count);
+  items.splice(from, 0, ...moved);
 }
 function rangesIntersect(a, b) {
   return a[0] === b[0] || a[1] > b[0] && b[1] > a[0];
 }
-function intersectRanges(range, excluded, parentRanges) {
-  const parents = excludeRanges(parentRanges.filter((r) => r[1] > range[0]), excluded);
+function intersectRanges(includeChildren, node, parentRanges) {
+  const range = [node.startByte, node.endByte];
+  const excluded = [];
+  if (includeChildren !== "all") {
+    for (const child of node.children) {
+      if (includeChildren === "unnamed" && !child.isNamed)
+        continue;
+      excluded.push([child.startByte, child.endByte]);
+    }
+  }
+  const i = parentRanges.findIndex((r) => r[1] > range[0]);
+  const parents = excludeRanges(i < 0 ? [] : parentRanges.slice(i), excluded);
   const merged = [];
   for (const r of parents) {
     const prev = merged[merged.length - 1];
@@ -9685,11 +10589,17 @@ class SyntaxCursor {
   gotoParent() {
     if (this.cursor.gotoParent())
       return true;
-    const parent = this.current.parent;
-    if (!parent)
-      return false;
-    this.use(parent, this.syntax.treeOf(parent));
-    return true;
+    let layer = this.current;
+    for (;; ) {
+      const parent = layer.parent;
+      if (!parent)
+        return false;
+      layer = parent;
+      if (layer.tree) {
+        this.use(layer, layer.tree);
+        return true;
+      }
+    }
   }
   gotoParentWith(predicate) {
     while (this.gotoParent()) {
@@ -9701,8 +10611,8 @@ class SyntaxCursor {
   gotoFirstChild() {
     const node = this.cursor.currentNode;
     const injection = this.syntax.injectionAtByteIdx(this.current, node.startByte);
-    if (injection && injection.range[1] >= node.endByte) {
-      this.use(injection.layer, this.syntax.treeOf(injection.layer));
+    if (injection && injection.range[1] >= node.endByte && injection.layer.tree) {
+      this.use(injection.layer, injection.layer.tree);
       return true;
     }
     return this.cursor.gotoFirstChild();
@@ -9714,8 +10624,8 @@ class SyntaxCursor {
     return this.cursor.gotoPreviousSibling();
   }
   resetToByteRange(start, end) {
-    const layer = this.syntax.layerForByteRange(start, end);
-    this.use(layer, this.syntax.treeOf(layer));
+    const [layer, tree] = this.syntax.layerAndTreeForByteRange(start, end);
+    this.use(layer, tree);
     for (;; ) {
       const node = this.cursor.currentNode;
       if (start < node.startByte || end > node.endByte) {
@@ -9741,8 +10651,42 @@ class SyntaxCursor {
 }
 
 // src/syntax/languages.ts
-var MARKDOWN_INJECTIONS = `
-(fenced_code_block
+var MARKDOWN_LANGUAGES = `[[language]]
+name = "markdown"
+scope = "source.md"
+injection-regex = "md|markdown"
+file-types = ["md", "livemd", "markdown", "mdx", "mkd", "mkdn", "mdwn", "mdown", "markdn", "mdtxt", "mdtext", "workbook", { glob = "PULLREQ_EDITMSG" }]
+indent = { tab-width = 2, unit = "  " }
+block-comment-tokens = { start = "<!--", end = "-->" }
+word-completion.trigger-length = 4
+
+[language.auto-pairs]
+'(' = ')'
+'{' = '}'
+'[' = ']'
+'"' = '"'
+"'" = "'"
+'\`' = '\`'
+'‘' = '’'
+'«' = '»'
+'“' = '”'
+
+[[grammar]]
+name = "markdown"
+source = { git = "https://github.com/tree-sitter-grammars/tree-sitter-markdown", rev = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5", subpath = "tree-sitter-markdown" }
+
+[[language]]
+name = "markdown.inline"
+scope = "source.markdown.inline"
+injection-regex = "markdown\\\\.inline"
+file-types = []
+grammar = "markdown_inline"
+
+[[grammar]]
+name = "markdown_inline"
+source = { git = "https://github.com/tree-sitter-grammars/tree-sitter-markdown", rev = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5", subpath = "tree-sitter-markdown-inline" }
+`;
+var MARKDOWN_INJECTIONS = `(fenced_code_block
   (code_fence_content) @injection.shebang @injection.content
   (#set! injection.include-unnamed-children))
 
@@ -9763,21 +10707,25 @@ var MARKDOWN_INJECTIONS = `
 
 ((inline) @injection.content (#set! injection.language "markdown.inline") (#set! injection.include-unnamed-children))
 `;
-async function createLoader(binary) {
+var MARKDOWN_INLINE_INJECTIONS = `((html_tag) @injection.content
+  (#set! injection.language "html")
+  (#set! injection.include-unnamed-children)
+  (#set! injection.combined))
+
+((latex_block) @injection.content (#set! injection.language "latex") (#set! injection.include-children))
+`;
+async function createLoader(binary, options = {}) {
   const rt = await Runtime.load(binary);
-  const markdown = new Language(rt, rt.x.hm_language(0));
-  const markdownInline = new Language(rt, rt.x.hm_language(1));
-  return {
-    rt,
-    parser: new Parser(rt),
-    languages: [
-      { id: "markdown", injectionRegex: /md|markdown/, grammar: markdown, injections: new InjectionQuery(rt, new Query(rt, markdown, MARKDOWN_INJECTIONS)) },
-      { id: "markdown.inline", injectionRegex: /markdown\.inline/, grammar: markdownInline, injections: null }
-    ]
-  };
-}
-function markdownSyntax(loader, text) {
-  return new Syntax(loader, text, loader.languages[0]);
+  const config = parseLanguagesToml(...options.languages ?? [MARKDOWN_LANGUAGES]);
+  const grammars = new Map([
+    ["markdown", new Language(rt, rt.x.hm_language(0))],
+    ["markdown_inline", new Language(rt, rt.x.hm_language(1))]
+  ]);
+  const queries = new Map([
+    ["markdown", { "injections.scm": MARKDOWN_INJECTIONS }],
+    ["markdown.inline", { "injections.scm": MARKDOWN_INLINE_INJECTIONS }]
+  ]);
+  return new LanguageLoader(rt, options.regex ?? null, config, { grammars, queries }, options.source ?? null);
 }
 
 class SyntaxSessions {
@@ -9788,11 +10736,43 @@ class SyntaxSessions {
   constructor(loader, schedule = null) {
     this.loader = loader;
     this.schedule = schedule;
+    loader.onLoad(() => {
+      for (const entry of this.entries.values()) {
+        this.latest(entry);
+        entry.syntax?.delete();
+        entry.syntax = null;
+        entry.failed = false;
+      }
+      this.scheduleIdle();
+    });
   }
-  open(key, doc) {
+  latest(entry) {
+    const last = entry.pending[entry.pending.length - 1];
+    if (last)
+      entry.doc = last.newDoc;
+    entry.pending = [];
+  }
+  defaultLanguage() {
+    return this.loader.languageForName("markdown");
+  }
+  open(key, doc, language = this.defaultLanguage()) {
     if (this.entries.has(key))
       return;
-    this.entries.set(key, { doc, syntax: null, pending: [] });
+    this.entries.set(key, { doc, language, syntax: null, failed: false, pending: [] });
+    this.scheduleIdle();
+  }
+  languageOf(key) {
+    return this.entries.get(key)?.language ?? null;
+  }
+  setLanguage(key, language) {
+    const entry = this.entries.get(key);
+    if (!entry)
+      return;
+    this.latest(entry);
+    entry.syntax?.delete();
+    entry.syntax = null;
+    entry.failed = false;
+    entry.language = language;
     this.scheduleIdle();
   }
   change(key, oldDoc, changes, newDoc) {
@@ -9801,8 +10781,13 @@ class SyntaxSessions {
       return;
     const last = entry.pending.length > 0 ? entry.pending[entry.pending.length - 1].newDoc : entry.doc;
     if (last !== oldDoc) {
+      const language = entry.language;
       this.close(key);
-      this.open(key, newDoc);
+      this.open(key, newDoc, language);
+      return;
+    }
+    if (!entry.syntax && (entry.language === null || entry.failed)) {
+      entry.doc = newDoc;
       return;
     }
     entry.pending.push({ changes, newDoc });
@@ -9813,8 +10798,9 @@ class SyntaxSessions {
     if (entry)
       this.flush(entry);
     if (!entry || entry.doc !== doc) {
+      const language = entry ? entry.language : this.defaultLanguage();
       this.close(key);
-      this.open(key, doc);
+      this.open(key, doc, language);
       entry = this.entries.get(key);
       this.flush(entry);
     }
@@ -9830,7 +10816,19 @@ class SyntaxSessions {
     this.entries.clear();
   }
   flush(entry) {
-    entry.syntax ??= markdownSyntax(this.loader, entry.doc.toString());
+    if (!entry.syntax) {
+      if (entry.language === null || entry.failed) {
+        this.latest(entry);
+        return null;
+      }
+      try {
+        entry.syntax = new Syntax(this.loader, entry.doc.toString(), entry.language);
+      } catch {
+        entry.failed = true;
+        this.latest(entry);
+        return null;
+      }
+    }
     for (const { changes, newDoc } of entry.pending.splice(0)) {
       entry.syntax.applyChanges(changes, newDoc);
       entry.doc = newDoc;
@@ -9965,6 +10963,23 @@ class RustRegexEngine {
     const h = this.hay(doc);
     return this.x.rx_is_match(regex, h.ptr, h.len, h.byteOf(from), h.byteOf(to)) !== 0;
   }
+  isMatchBytes(regex, bytes) {
+    const ptr = this.x.rx_alloc(bytes.length);
+    new Uint8Array(this.x.memory.buffer).set(bytes, ptr);
+    const found = this.x.rx_is_match(regex, ptr, bytes.length, 0, bytes.length) !== 0;
+    this.x.rx_free(ptr, bytes.length);
+    return found;
+  }
+  findBytes(regex, bytes) {
+    const ptr = this.x.rx_alloc(bytes.length);
+    new Uint8Array(this.x.memory.buffer).set(bytes, ptr);
+    const found = this.x.rx_find(regex, ptr, bytes.length, 0, bytes.length, this.out);
+    this.x.rx_free(ptr, bytes.length);
+    if (!found)
+      return null;
+    const words = new Uint32Array(this.x.memory.buffer, this.out, 2);
+    return [words[0], words[1]];
+  }
 }
 
 // src/view/wasm.ts
@@ -9990,9 +11005,9 @@ async function loadRegex(source) {
 }
 
 // src/view/syntax.ts
-async function loadSyntax(win, source) {
-  const bytes = source === undefined ? await unpack((await import("./tree-sitter-wasm.js")).default) : await wasmBytes(source);
-  return new SyntaxSessions(await createLoader(bytes), (work) => {
+async function loadSyntax(win, wasm, options = {}) {
+  const bytes = wasm === undefined ? await unpack((await import("./tree-sitter-wasm.js")).default) : await wasmBytes(wasm);
+  return new SyntaxSessions(await createLoader(bytes, options), (work) => {
     if (typeof win.requestIdleCallback === "function")
       win.requestIdleCallback(work, { timeout: 2000 });
     else
@@ -11140,13 +12155,17 @@ function helix2(options = {}) {
       return;
     started = true;
     const win = view.dom.ownerDocument.defaultView ?? window;
-    loadRegex(options.regex).then((engine) => {
+    const regex = loadRegex(options.regex).then((engine) => {
       editor.regex = engine;
-    }).catch(() => editor.setError("the regex engine failed to load"));
-    if (options.syntax === false)
+      return engine;
+    });
+    regex.catch(() => editor.setError("the regex engine failed to load"));
+    const syntax = options.syntax;
+    if (syntax === false)
       return;
-    loadSyntax(win, options.syntax).then((loadedSessions) => {
+    regex.catch(() => null).then((engine) => loadSyntax(win, syntax, { regex: engine })).then((loadedSessions) => {
       sessions = loadedSessions;
+      editor.languages = loadedSessions.loader;
       for (const open of views)
         loadedSessions.open(open, open.state.doc);
       editor.syntax = (host) => host.view ? loadedSessions.get(host.view, host.state.doc) : null;

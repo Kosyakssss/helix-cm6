@@ -60,15 +60,19 @@ export function helix(options: HelixOptions = {}): Extension {
     if (started) return;
     started = true;
     const win = view.dom.ownerDocument.defaultView ?? window;
-    void loadRegex(options.regex)
-      .then((engine) => {
-        editor.regex = engine;
-      })
-      .catch(() => editor.setError("the regex engine failed to load"));
-    if (options.syntax === false) return;
-    void loadSyntax(win, options.syntax)
+    const regex = loadRegex(options.regex).then((engine) => {
+      editor.regex = engine;
+      return engine;
+    });
+    regex.catch(() => editor.setError("the regex engine failed to load"));
+    const syntax = options.syntax;
+    if (syntax === false) return;
+    void regex
+      .catch(() => null)
+      .then((engine) => loadSyntax(win, syntax, { regex: engine }))
       .then((loadedSessions) => {
         sessions = loadedSessions;
+        editor.languages = loadedSessions.loader;
         for (const open of views) loadedSessions.open(open, open.state.doc);
         editor.syntax = (host) => (host.view ? loadedSessions.get(host.view, host.state.doc) : null);
       })

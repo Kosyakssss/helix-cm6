@@ -1,16 +1,7 @@
 import type { ChangeSet, Text } from "@codemirror/state";
-import type { InjectionQuery, Language, Node, Parser, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
-export interface LanguageConfig {
-    id: string;
-    injectionRegex: RegExp | null;
-    grammar: Language;
-    injections: InjectionQuery | null;
-}
-export interface Loader {
-    rt: Runtime;
-    parser: Parser;
-    languages: LanguageConfig[];
-}
+import type { LanguageId } from "./injections";
+import type { LanguageLoader } from "./loader";
+import type { Node, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
 type ByteRange = [number, number];
 interface Injection {
     range: ByteRange;
@@ -29,21 +20,36 @@ export interface Edit {
     newEnd: number;
 }
 export declare class Layer {
-    readonly language: LanguageConfig;
+    readonly language: LanguageId;
     readonly parent: Layer | null;
     tree: Tree | null;
     injections: Injection[];
     ranges: ByteRange[];
     flags: Flags;
-    constructor(language: LanguageConfig, parent: Layer | null);
+    constructor(language: LanguageId, parent: Layer | null);
+}
+declare class Source {
+    private readonly rt;
+    readonly text: string;
+    readonly utf8: Uint8Array;
+    private readonly decoder;
+    readonly ptr: number;
+    private maps;
+    constructor(rt: Runtime, text: string);
+    private build;
+    byteOf(pos: number): number;
+    posOf(byte: number): number;
+    slice(start: number, end: number): string;
+    free(): void;
 }
 export declare class Syntax {
-    private readonly loader;
+    readonly loader: LanguageLoader;
     readonly root: Layer;
     private readonly layers;
     private readonly cursors;
     private source;
-    constructor(loader: Loader, text: string, language: LanguageConfig);
+    constructor(loader: LanguageLoader, text: string, language: LanguageId);
+    get input(): Source;
     byteOf(pos: number): number;
     posOf(byte: number): number;
     slice(start: number, end: number): string;
@@ -52,6 +58,7 @@ export declare class Syntax {
     private update;
     private parse;
     treeOf(layer: Layer): Tree;
+    layerAndTreeForByteRange(start: number, end: number): [Layer, Tree];
     injectionAtByteIdx(layer: Layer, idx: number): Injection | null;
     layersForByteRange(start: number, end: number): Generator<Layer>;
     layerForByteRange(start: number, end: number): Layer;
@@ -65,8 +72,6 @@ export declare class Syntax {
     private mapInjections;
     private runInjectionQuery;
     private initInjection;
-    private matches;
-    private resolve;
 }
 export declare class SyntaxCursor {
     private readonly syntax;

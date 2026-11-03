@@ -13,6 +13,7 @@ import { setSel } from "../commands/util";
 import { getOption, setOption, toggleOption } from "./options";
 import { runComments, type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
+import type { LanguageLoader } from "../syntax/loader";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
 
@@ -111,6 +112,7 @@ export class HelixEditor {
   jumpLabels = new Map<string, JumpLabel[]>();
   commentTokens: ((host: Host, pos: number) => CommentTokens) | null = null;
   syntax: ((host: Host) => Syntax | null) | null = null;
+  languages: LanguageLoader | null = null;
   regex: RustRegexEngine | null = null;
   pathCompleter: ((prefix: string) => string[]) | null = null;
   shell: ShellRunner | null = null;

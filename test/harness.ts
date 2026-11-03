@@ -13,7 +13,7 @@ import { RustRegexEngine } from "../src/core/rx";
 
 const root = resolve(import.meta.dir, "..");
 const regexEngine = await RustRegexEngine.load(readFileSync(resolve(root, "regex/regex.wasm")));
-const syntaxSessions = new SyntaxSessions(await createLoader(readFileSync(resolve(root, "tree-sitter/tree-sitter.wasm"))));
+const syntaxSessions = new SyntaxSessions(await createLoader(readFileSync(resolve(root, "tree-sitter/tree-sitter.wasm")), { regex: regexEngine }));
 
 export interface RunResult {
   text?: string;
@@ -55,6 +55,7 @@ export function run(markup: string, keys: string, editor = makeEditor(), lang?: 
   syntaxSessions.clear();
   if (lang) {
     syntaxSessions.open(host, host.state.doc);
+    editor.languages = syntaxSessions.loader;
     editor.syntax = (h) => syntaxSessions.get(h, h.state.doc);
   }
   host.onChanges = (changes, oldDoc) => {

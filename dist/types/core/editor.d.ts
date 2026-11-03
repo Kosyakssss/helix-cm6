@@ -8,6 +8,7 @@ import type { ShellRunner } from "../commands/shell";
 import type { Variable } from "../commands/expansion";
 import { type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
+import type { LanguageLoader } from "../syntax/loader";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
 export type OnKeyCallback = (cx: Context, key: string) => void;
@@ -101,6 +102,7 @@ export declare class HelixEditor {
     jumpLabels: Map<string, JumpLabel[]>;
     commentTokens: ((host: Host, pos: number) => CommentTokens) | null;
     syntax: ((host: Host) => Syntax | null) | null;
+    languages: LanguageLoader | null;
     regex: RustRegexEngine | null;
     pathCompleter: ((prefix: string) => string[]) | null;
     shell: ShellRunner | null;

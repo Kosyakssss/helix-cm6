@@ -15,4 +15,6 @@ export declare class RustRegexEngine {
     findLast(regex: number, doc: Text, from: number, to: number): [number, number] | null;
     findAll(regex: number, doc: Text, from: number, to: number): [number, number][];
     isMatch(regex: number, doc: Text, from: number, to: number): boolean;
+    isMatchBytes(regex: number, bytes: Uint8Array): boolean;
+    findBytes(regex: number, bytes: Uint8Array): [number, number] | null;
 }

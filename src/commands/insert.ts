@@ -31,34 +31,30 @@ import {
 import type { CommandFn } from "./motion";
 import { commitHistoryNow } from "./jumps";
 
-const MARKDOWN_AUTO_PAIRS: [string, string][] = [
-  ["(", ")"],
-  ["{", "}"],
-  ["[", "]"],
-  ['"', '"'],
-  ["'", "'"],
-  ["`", "`"],
-  ["‘", "’"],
-  ["«", "»"],
-  ["“", "”"],
-];
+function languagePairs(editor: HelixEditor): [string, string][][] {
+  const loader = editor.languages;
+  if (!loader) return [];
+  const out: [string, string][][] = [];
+  for (const data of loader.languages) if (data.syntax && data.config.autoPairs) out.push(data.config.autoPairs);
+  return out;
+}
 
 export function autoPairsFor(
   editor: HelixEditor,
   host: Host,
-  differs: (global: AutoPairs, markdown: AutoPairs) => boolean = () => true,
+  differs: (global: AutoPairs, language: AutoPairs) => boolean = () => true,
 ): AutoPairs | null {
   const pairs = editor.config.autoPairs;
   if (!pairs || !editor.helixAutoPairs) return null;
   const global = makeAutoPairs(pairs);
   if (!editor.syntax) return global;
-  const markdown = makeAutoPairs(MARKDOWN_AUTO_PAIRS);
-  if (!differs(global, markdown)) return global;
+  if (!languagePairs(editor).some((p) => differs(global, makeAutoPairs(p)))) return global;
   const syntax = editor.syntax(host);
   if (!syntax) return global;
   const primary = selection(host).primary();
   const layer = syntax.layerForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
-  return layer.language.id === "markdown" ? markdown : global;
+  const own = syntax.loader.language(layer.language).config.autoPairs;
+  return own ? makeAutoPairs(own) : global;
 }
 
 export function insertDiffers(doc: Text, ranges: readonly Range[], ch: string) {
@@ -70,7 +66,7 @@ export function mayAutoPair(editor: HelixEditor, ch: string): boolean {
   const pairs = editor.config.autoPairs;
   if (!pairs || !editor.helixAutoPairs) return false;
   const has = (list: [string, string][]) => list.some(([open, close]) => open === ch || close === ch);
-  return has(pairs) || (editor.syntax !== null && has(MARKDOWN_AUTO_PAIRS)) || isWhitespace(ch);
+  return has(pairs) || (editor.syntax !== null && languagePairs(editor).some(has)) || isWhitespace(ch);
 }
 
 export function autoPairsOf(cx: Context) {

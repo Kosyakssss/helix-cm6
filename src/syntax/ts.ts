@@ -10,17 +10,8 @@ interface Exports {
   hm_symbol_name(language: number, symbol: number): number;
   hm_parse(language: number, text: number, length: number, ranges: number, count: number, oldTree: number): number;
   hm_tree_edit(tree: number, start: number, oldEnd: number, newEnd: number): void;
-  hm_injection_matches(
-    query: number,
-    node: number,
-    modes: number,
-    content: number,
-    language: number,
-    shebang: number,
-    buffer: number,
-    capacity: number,
-  ): number;
   hm_tree_delete(tree: number): void;
+  hm_tree_copy(tree: number): number;
   hm_tree_root(tree: number, out: number): void;
   hm_node_start(node: number): number;
   hm_node_end(node: number): number;
@@ -40,7 +31,18 @@ interface Exports {
   hm_cursor_next_sibling(cursor: number): number;
   hm_cursor_prev_sibling(cursor: number): number;
   hm_cursor_first_child_for_byte(cursor: number, goal: number): number;
-  hm_query_new(language: number, source: number, length: number): number;
+  hm_query_new(language: number, source: number, length: number, error: number): number;
+  hm_query_delete(query: number): void;
+  hm_query_string_count(query: number): number;
+  hm_query_start_byte(query: number, pattern: number): number;
+  hm_query_disable_capture(query: number, name: number, length: number): void;
+  hm_qc_new(): number;
+  hm_qc_delete(cursor: number): void;
+  hm_qc_exec(cursor: number, query: number, node: number, start: number, end: number, limit: number): void;
+  hm_qc_next_match(cursor: number, out: number): number;
+  hm_qc_next_capture(cursor: number, out: number): number;
+  hm_qc_remove_match(cursor: number, id: number): void;
+  hm_qc_exceeded(cursor: number): number;
   hm_query_capture_count(query: number): number;
   hm_query_pattern_count(query: number): number;
   hm_query_capture_name(query: number, index: number, length: number): number;
@@ -296,6 +298,10 @@ export class Tree {
     this.rt.x.hm_tree_edit(this.ptr, start, oldEnd, newEnd);
   }
 
+  copy(): Tree {
+    return new Tree(this.rt, this.rt.x.hm_tree_copy(this.ptr));
+  }
+
   get rootNode(): Node {
     this.rt.x.hm_tree_root(this.ptr, this.rt.outPtr);
     return this.rt.readNode(this.rt.outPtr)!;
@@ -368,116 +374,5 @@ export class Parser {
     const tree = rt.x.hm_parse(language.ptr, text, length, rangesPtr, ranges?.length ?? 0, oldTree?.ptr ?? 0);
     if (rangesPtr) rt.x.hm_free(rangesPtr);
     return tree ? new Tree(rt, tree) : null;
-  }
-}
-
-export class Query {
-  readonly ptr: number;
-  readonly captureNames: string[] = [];
-  private readonly properties: Record<string, string | null>[] = [];
-
-  constructor(
-    readonly rt: Runtime,
-    language: Language,
-    source: string,
-  ) {
-    const bytes = new TextEncoder().encode(source);
-    const src = rt.alloc(bytes);
-    this.ptr = rt.x.hm_query_new(language.ptr, src, bytes.length);
-    rt.x.hm_free(src);
-    if (!this.ptr) throw new Error("invalid tree-sitter query");
-    const lenWord = rt.lenPtr >> 2;
-    const text = (ptr: number) => rt.string(ptr, rt.u32()[lenWord]!);
-    const captureCount = rt.x.hm_query_capture_count(this.ptr);
-    for (let i = 0; i < captureCount; i++) this.captureNames.push(text(rt.x.hm_query_capture_name(this.ptr, i, rt.lenPtr)));
-    const patternCount = rt.x.hm_query_pattern_count(this.ptr);
-    for (let pattern = 0; pattern < patternCount; pattern++) {
-      const steps = rt.x.hm_query_predicates(this.ptr, pattern, rt.lenPtr);
-      const count = rt.u32()[lenWord]!;
-      const words = rt.u32().slice(steps >> 2, (steps >> 2) + count * 2);
-      const props: Record<string, string | null> = {};
-      let predicate: number[] = [];
-      for (let i = 0; i < count; i++) {
-        const type = words[i * 2]!;
-        const value = words[i * 2 + 1]!;
-        if (type !== 0) {
-          predicate.push(type === 2 ? value : -1);
-          continue;
-        }
-        const [name, key, val] = predicate.map((id) => (id < 0 ? "" : text(rt.x.hm_query_string(this.ptr, id, rt.lenPtr))));
-        if (name === "set!" && key !== undefined) props[key] = val ?? null;
-        predicate = [];
-      }
-      this.properties.push(props);
-    }
-  }
-
-  patternProperties(): Record<string, string | null>[] {
-    return this.properties;
-  }
-}
-
-export interface InjectionMatch {
-  pattern: number;
-  start: number;
-  end: number;
-  languageRange: [number, number] | null;
-  shebang: boolean;
-  excluded: [number, number][];
-}
-
-export class InjectionQuery {
-  private readonly modes: number;
-  private readonly ids: [number, number, number];
-  private buffer = 0;
-  private capacity = 0;
-
-  constructor(
-    readonly rt: Runtime,
-    readonly query: Query,
-  ) {
-    const props = query.patternProperties();
-    this.modes = rt.alloc(
-      new Uint8Array(props.map((p) => ("injection.include-children" in p ? 1 : "injection.include-unnamed-children" in p ? 2 : 0))),
-    );
-    const id = (name: string) => {
-      const i = query.captureNames.indexOf(name);
-      return i < 0 ? 0xffffffff : i;
-    };
-    this.ids = [id("injection.content"), id("injection.language"), id("injection.shebang")];
-  }
-
-  properties(pattern: number): Record<string, string | null> {
-    return this.query.patternProperties()[pattern] ?? {};
-  }
-
-  matches(node: Node): InjectionMatch[] {
-    const rt = this.rt;
-    let used: number;
-    for (;;) {
-      rt.writeNode(rt.inPtr, node);
-      used = rt.x.hm_injection_matches(this.query.ptr, rt.inPtr, this.modes, this.ids[0], this.ids[1], this.ids[2], this.buffer, this.capacity);
-      if (used <= this.capacity) break;
-      if (this.buffer) rt.x.hm_free(this.buffer);
-      this.capacity = used * 2;
-      this.buffer = rt.x.hm_malloc(this.capacity * 4);
-    }
-    const words = rt.u32().slice(this.buffer >> 2, (this.buffer >> 2) + used);
-    const out: InjectionMatch[] = [];
-    for (let i = 0; i < used; ) {
-      const count = words[i + 6]!;
-      const excluded: [number, number][] = [];
-      for (let e = 0; e < count; e++) excluded.push([words[i + 8 + e * 2]!, words[i + 9 + e * 2]!]);
-      out.push({
-        pattern: words[i]!,
-        start: words[i + 1]!,
-        end: words[i + 2]!,
-        languageRange: words[i + 3] === 0xffffffff ? null : [words[i + 3]!, words[i + 4]!],
-        shebang: words[i + 5] === 1,
-        excluded,
-      });
-      i += 8 + count * 2;
-    }
-    return out;
   }
 }

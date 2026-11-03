@@ -135,4 +135,22 @@ export class RustRegexEngine {
     const h = this.hay(doc);
     return this.x.rx_is_match(regex, h.ptr, h.len, h.byteOf(from), h.byteOf(to)) !== 0;
   }
+
+  isMatchBytes(regex: number, bytes: Uint8Array): boolean {
+    const ptr = this.x.rx_alloc(bytes.length);
+    new Uint8Array(this.x.memory.buffer).set(bytes, ptr);
+    const found = this.x.rx_is_match(regex, ptr, bytes.length, 0, bytes.length) !== 0;
+    this.x.rx_free(ptr, bytes.length);
+    return found;
+  }
+
+  findBytes(regex: number, bytes: Uint8Array): [number, number] | null {
+    const ptr = this.x.rx_alloc(bytes.length);
+    new Uint8Array(this.x.memory.buffer).set(bytes, ptr);
+    const found = this.x.rx_find(regex, ptr, bytes.length, 0, bytes.length, this.out);
+    this.x.rx_free(ptr, bytes.length);
+    if (!found) return null;
+    const words = new Uint32Array(this.x.memory.buffer, this.out, 2);
+    return [words[0]!, words[1]!];
+  }
 }
