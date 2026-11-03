@@ -47,6 +47,7 @@ function extendLineImpl(cx: Context, extend: "above" | "below"): void {
       return new Range(anchor, head);
     }),
   );
+  cx.editor.wholeLineSelection = selOf(cx);
 }
 
 function selectLineImpl(cx: Context, extend: "above" | "below"): void {
@@ -96,6 +97,7 @@ function selectLineImpl(cx: Context, extend: "above" | "below"): void {
       return new Range(anchor, head);
     }),
   );
+  cx.editor.wholeLineSelection = selOf(cx);
 }
 
 export function splitOnNewline(doc: Text, sel: Selection): Selection {
@@ -520,6 +522,7 @@ export const selectCommands: Record<string, CommandFn> = {
         return new Range(start, end).withDirection(range.direction());
       }),
     );
+    cx.editor.wholeLineSelection = selOf(cx);
   },
   shrink_to_line_bounds: (cx) => {
     const doc = docOf(cx);
@@ -536,7 +539,10 @@ export const selectCommands: Record<string, CommandFn> = {
       }),
     );
   },
-  select_all: (cx) => setSel(cx, Selection.single(0, docOf(cx).length)),
+  select_all: (cx) => {
+    setSel(cx, Selection.single(0, docOf(cx).length));
+    cx.editor.wholeLineSelection = selOf(cx);
+  },
   split_selection_on_newline: (cx) => setSel(cx, splitOnNewline(docOf(cx), selOf(cx))),
   merge_selections: (cx) => setSel(cx, mergeRanges(selOf(cx))),
   merge_consecutive_selections: (cx) => setSel(cx, mergeConsecutiveRanges(selOf(cx))),

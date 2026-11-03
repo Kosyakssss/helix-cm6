@@ -128,6 +128,31 @@ async function run(type: BrowserType): Promise<string[]> {
     if (!pasted.includes("from another app")) fails.push(`space p pastes text copied outside the editor: got ${JSON.stringify(pasted)}`);
   }
 
+  type Extra = { doc: string; head: number; anchor: number; edges: { direction: string; count: number; extend: boolean }[]; entered: string[]; status: string | null };
+  const extra = (name: string, keys: string) => page.evaluate(([n, k]) => (window as unknown as { helixExtra(a: string, b: string): Extra }).helixExtra(n!, k!), [name, keys]);
+  const check = (what: string, got: unknown, want: unknown) => {
+    if (JSON.stringify(got) !== JSON.stringify(want)) fails.push(`${what}: got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+  };
+  check("edge up at the first line", (await extra("edges", "k")).edges.map((e) => [e.direction, e.count]), [["up", 1]]);
+  check("edge left at the start", (await extra("edges", "h")).edges.map((e) => [e.direction, e.count]), [["left", 1]]);
+  check("edge down with the rest of a count", (await extra("edges", "5j")).edges.map((e) => [e.direction, e.count]), [["down", 3]]);
+  check("edge right stops before the end of the document", (await extra("cell", "5l")).edges.map((e) => [e.direction, e.count, e.extend]), [["right", 3, false]]);
+  const skipped = await extra("ranges", "j");
+  check("j skips a skip range", skipped.head, 18);
+  check("j lands on the start of a row range", (await extra("ranges", "j")).head, 22);
+  check("j leaves a row range in one step", (await extra("ranges", "j")).head, 38);
+  const stopped = await extra("ranges", "j");
+  check("j stops before an enter range and asks the app", [stopped.head, stopped.entered], [38, ["44-50:down:1"]]);
+  check("k from a row range's next line lands on its start", (await extra("ranges", "k")).head, 22);
+  check("k skips backward over a skip range", (await extra("ranges", "kk")).head, 0);
+  check("a command hook replaces a command", await extra("command", "l").then((r) => [r.head, r.status]), [0, "overridden"]);
+  await page.evaluate(() => (window as unknown as { helixRunIn(a: string, b: string): boolean }).helixRunIn("command", "move_line_down"));
+  check("helixRun runs a command", (await extra("command", "")).head, 4);
+  check("x on a last line without a newline pastes above as a line", (await extra("final1", "jxyP")).doc, "one\ntwo\ntwo");
+  check("x and p on a last line without a newline pastes below as a line", (await extra("final2", "jxyp")).doc, "one\ntwo\ntwo");
+  check("p of a line after a last line without a newline adds a line", (await extra("final3", "xyjp")).doc, "one\ntwo\none");
+  check("e on a whole last line stays charwise", (await extra("final4", "jeyP")).doc, "one\ntwotwo");
+
   await browser.close();
   if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));
   return fails.map((f) => `${type.name()}: ${f}`);

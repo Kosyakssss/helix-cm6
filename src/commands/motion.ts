@@ -12,6 +12,7 @@ import {
   movePrevParagraph,
   moveVertically,
   moveVisualVertically,
+  type VerticalProgress,
   aimAt,
   restoreVisualRows,
   type Aim,
@@ -23,6 +24,7 @@ import { Range, Selection, type Direction } from "../selection";
 import { charAt, lineIndex, nextCharPos, prevCharPos } from "../core/text";
 import { docOf, firstNonWhitespaceChar, lineEndCharIndex, lineToChar, modeOf, selOf, setSel } from "./util";
 import { pushJump } from "./jumps";
+import { hooksOf, rangeAt, type HelixEdge, type MotionRange } from "../hooks";
 
 export type CommandFn = (cx: Context, arg?: string) => void;
 
@@ -43,22 +45,77 @@ function moveImpl(
   f: (doc: Text, range: Range, dir: Direction, count: number, behaviour: Movement) => Range,
   dir: Direction,
   behaviour: Movement,
+  count: number = cx.count(),
 ): void {
-  const count = cx.count();
   const doc = docOf(cx);
   setSel(cx, selOf(cx).transform((r) => f(doc, r, dir, count, behaviour)));
+}
+
+function edgeOf(dir: Direction, vertical: boolean, behaviour: Movement, count: number, goalColumn: number | undefined): HelixEdge {
+  const direction = vertical ? (dir === "forward" ? "down" : "up") : dir === "forward" ? "right" : "left";
+  return { direction, extend: behaviour === "extend", count, goalColumn };
+}
+
+function moveHorizontal(cx: Context, dir: Direction, behaviour: Movement): void {
+  const hooks = hooksOf(cx.host);
+  const ranges = hooks.motionRanges?.(cx.host) ?? [];
+  if (selOf(cx).ranges.length > 1 || (!hooks.edge && ranges.length === 0)) return moveImpl(cx, moveHorizontally, dir, behaviour);
+  const count = cx.count();
+  for (let i = 0; i < count; i++) {
+    const doc = docOf(cx);
+    const primary = selOf(cx).primary();
+    const next = moveHorizontally(doc, primary, dir, 1, behaviour);
+    const cursor = next.cursor(doc);
+    const edge = edgeOf(dir, false, behaviour, count - i, primary.goalColumn);
+    const atEnd = hooks.stopBeforeEnd === true && dir === "forward" && behaviour === "move" && cursor >= doc.length && doc.length > 0;
+    if (cursor === primary.cursor(doc) || atEnd) {
+      hooks.edge?.(edge, cx.host);
+      return;
+    }
+    const hit = rangeAt(ranges, cursor);
+    if (!hit) {
+      setSel(cx, selOf(cx).transform(() => next));
+      continue;
+    }
+    if (hit.kind === "enter" && hooks.enter?.(hit, edge, cx.host)) return;
+    const inside = rangeAt(ranges, primary.cursor(doc)) === hit;
+    const target = hit.kind !== "skip" && !inside ? hit.from : dir === "forward" ? hit.to : hit.from - 1;
+    if (target < 0 || target > doc.length) {
+      hooks.edge?.(edge, cx.host);
+      return;
+    }
+    setSel(cx, selOf(cx).transform((r) => r.putCursor(doc, target, behaviour === "extend")));
+  }
+}
+
+function moveVertical(cx: Context, dir: Direction, behaviour: Movement): void {
+  const view = cx.host.view;
+  if (!view || !cx.editor.visualLines) return moveImpl(cx, logical(cx), dir, behaviour);
+  const hooks = hooksOf(cx.host);
+  const count = cx.count();
+  const ranges = hooks.motionRanges?.(cx.host) ?? [];
+  const single = selOf(cx).ranges.length === 1;
+  let left = 0;
+  let stoppedAt: MotionRange | null = null;
+  moveVisualSelection(cx, view, behaviour, (r) => {
+    const progress: VerticalProgress = { left: 0, stoppedAt: null };
+    const target = moveVisualVertically(view, r, dir, count, behaviour, ranges, progress);
+    if (r === selOf(cx).primary()) {
+      left = progress.left;
+      stoppedAt = progress.stoppedAt;
+    }
+    return target;
+  });
+  if (!single) return;
+  const primary = selOf(cx).primary();
+  const stopped = stoppedAt as MotionRange | null;
+  if (stopped) hooks.enter?.(stopped, edgeOf(dir, true, behaviour, left, primary.goalColumn), cx.host);
+  else if (left > 0) hooks.edge?.(edgeOf(dir, true, behaviour, left, primary.goalColumn), cx.host);
 }
 
 function logical(cx: Context) {
   return (doc: Text, range: Range, dir: Direction, count: number, behaviour: Movement) =>
     moveVertically(doc, range, dir, count, behaviour, cx.editor.indent(cx.host).tabWidth);
-}
-
-function moveVisual(cx: Context, dir: Direction, behaviour: Movement): void {
-  const view = cx.host.view;
-  if (!view || !cx.editor.visualLines) return moveImpl(cx, logical(cx), dir, behaviour);
-  const count = cx.count();
-  moveVisualSelection(cx, view, behaviour, (r) => moveVisualVertically(view, r, dir, count, behaviour));
 }
 
 export function moveVisualSelection(
@@ -84,18 +141,18 @@ export function moveVisualSelection(
 }
 
 export const motionCommands: Record<string, CommandFn> = {
-  move_char_left: (cx) => moveImpl(cx, moveHorizontally, "backward", "move"),
-  move_char_right: (cx) => moveImpl(cx, moveHorizontally, "forward", "move"),
+  move_char_left: (cx) => moveHorizontal(cx, "backward", "move"),
+  move_char_right: (cx) => moveHorizontal(cx, "forward", "move"),
   move_line_up: (cx) => moveImpl(cx, logical(cx), "backward", "move"),
   move_line_down: (cx) => moveImpl(cx, logical(cx), "forward", "move"),
-  move_visual_line_up: (cx) => moveVisual(cx, "backward", "move"),
-  move_visual_line_down: (cx) => moveVisual(cx, "forward", "move"),
-  extend_char_left: (cx) => moveImpl(cx, moveHorizontally, "backward", "extend"),
-  extend_char_right: (cx) => moveImpl(cx, moveHorizontally, "forward", "extend"),
+  move_visual_line_up: (cx) => moveVertical(cx, "backward", "move"),
+  move_visual_line_down: (cx) => moveVertical(cx, "forward", "move"),
+  extend_char_left: (cx) => moveHorizontal(cx, "backward", "extend"),
+  extend_char_right: (cx) => moveHorizontal(cx, "forward", "extend"),
   extend_line_up: (cx) => moveImpl(cx, logical(cx), "backward", "extend"),
   extend_line_down: (cx) => moveImpl(cx, logical(cx), "forward", "extend"),
-  extend_visual_line_up: (cx) => moveVisual(cx, "backward", "extend"),
-  extend_visual_line_down: (cx) => moveVisual(cx, "forward", "extend"),
+  extend_visual_line_up: (cx) => moveVertical(cx, "backward", "extend"),
+  extend_visual_line_down: (cx) => moveVertical(cx, "forward", "extend"),
   goto_line_end: (cx) => gotoLineEnd(cx, modeOf(cx) === "select" ? "extend" : "move"),
   extend_to_line_end: (cx) => gotoLineEnd(cx, "extend"),
   goto_line_end_newline: (cx) => gotoLineEndNewline(cx, modeOf(cx) === "select" ? "extend" : "move"),

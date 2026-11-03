@@ -1,3 +1,4 @@
+import { type MotionRange } from "./hooks";
 import { type Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { Range, type Direction } from "./selection";
@@ -7,7 +8,11 @@ export declare function graphemeWidth(g: string): number;
 export declare function tabWidthAt(visualX: number, tabWidth: number): number;
 export declare function visualColumn(doc: Text, lineFrom: number, pos: number, tabWidth: number): number;
 export declare function moveVertically(doc: Text, range: Range, dir: Direction, count: number, behaviour: Movement, tabWidth: number): Range;
-export declare function moveVisualVertically(view: EditorView, range: Range, dir: Direction, count: number, behaviour: Movement): Range;
+export interface VerticalProgress {
+    left: number;
+    stoppedAt: MotionRange | null;
+}
+export declare function moveVisualVertically(view: EditorView, range: Range, dir: Direction, count: number, behaviour: Movement, ranges?: readonly MotionRange[], progress?: VerticalProgress | null): Range;
 export interface Aim {
     range: Range;
     offset: number | null;

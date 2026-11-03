@@ -13,11 +13,12 @@ for (const file of ["regex/regex.wasm", "tree-sitter/tree-sitter.wasm"]) {
 }
 
 const result = await Bun.build({
-  entrypoints: [resolve(root, "src/index.ts"), resolve(root, "src/languages.ts")],
+  entrypoints: [resolve(root, "src/index.ts"), resolve(root, "src/engine.ts"), resolve(root, "src/languages.ts")],
   outdir: out,
   format: "esm",
   target: "browser",
-  naming: "[name].js",
+  splitting: true,
+  naming: { entry: "[name].js", chunk: "chunk-[hash].js" },
   external: ["@codemirror/state", "@codemirror/view", "@codemirror/commands", "smol-toml"],
   minify: false,
   plugins: [

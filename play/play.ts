@@ -1,6 +1,6 @@
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { helix, helixDocument, helixEditor, helixStatus, type Context, type GrammarSource, type HelixEditor } from "../src/index";
+import { helix, helixDocument, helixEditor, helixStatus, type Context, type GrammarSource, type HelixEditor } from "../src/engine";
 import { languagesToml } from "../src/languages";
 import notes from "./samples/notes.md.txt" with { type: "text" };
 import markdownEdges from "./samples/markdown-edges.md.txt" with { type: "text" };

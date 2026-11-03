@@ -13,6 +13,10 @@
       "types": "./dist/types/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./engine": {
+      "types": "./dist/types/engine.d.ts",
+      "default": "./dist/engine.js"
+    },
     "./languages": {
       "types": "./dist/types/languages.d.ts",
       "default": "./dist/languages.js"

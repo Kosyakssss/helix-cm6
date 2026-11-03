@@ -210,7 +210,7 @@ function deleteSelectionImpl(cx: Context, op: "delete" | "change", yank: boolean
   if (cx.register !== "_" && yank) {
     const reg = cx.register ?? cx.editor.config.defaultYankRegister;
     try {
-      cx.editor.registers.write(reg, fragments(doc, sel));
+      cx.editor.registers.write(reg, yankFragments(cx));
     } catch (err) {
       cx.editor.setError((err as Error).message);
       return;
@@ -247,8 +247,16 @@ function switchCaseImpl(cx: Context, f: (s: string) => string): void {
   exitSelectMode(cx);
 }
 
+function yankFragments(cx: Context): string[] {
+  const doc = docOf(cx);
+  const sel = selOf(cx);
+  const values = fragments(doc, sel);
+  if (!cx.editor.finalLineIsLine || cx.editor.wholeLineSelection !== sel) return values;
+  return values.map((value, i) => (sel.ranges[i]!.to() === doc.length && !value.endsWith("\n") ? `${value}\n` : value));
+}
+
 function yankImpl(cx: Context, register: string): void {
-  const values = fragments(docOf(cx), selOf(cx));
+  const values = yankFragments(cx);
   const n = values.length;
   try {
     cx.editor.registers.write(register, values);
@@ -259,7 +267,7 @@ function yankImpl(cx: Context, register: string): void {
 }
 
 function yankJoinedImpl(cx: Context, separator: string, register: string): void {
-  const values = fragments(docOf(cx), selOf(cx));
+  const values = yankFragments(cx);
   const n = values.length;
   try {
     cx.editor.registers.write(register, [values.join(separator)]);
@@ -307,9 +315,15 @@ export function pasteImpl(cx: Context, values: string[], action: PastePos, count
     } else if (action === "before") pos = range.from();
     else if (action === "after") pos = range.to();
     else pos = range.cursor(doc);
-    const value = mapped[i] ?? lastValue;
-    const anchor = offset + pos;
-    ranges.push(new Range(anchor, anchor + value.length).withDirection(range.direction()));
+    let value = mapped[i] ?? lastValue;
+    let anchor = offset + pos;
+    let length = value.length;
+    if (cx.editor.finalLineIsLine && linewise && action === "after" && pos === doc.length && doc.length > 0 && doc.sliceString(pos - 1, pos) !== "\n") {
+      value = `\n${value.replace(/\n$/, "")}`;
+      anchor += 1;
+      length = value.length - 1;
+    }
+    ranges.push(new Range(anchor, anchor + length).withDirection(range.direction()));
     offset += value.length;
     changes.push([pos, pos, value]);
   });
@@ -894,7 +908,7 @@ export const editCommands: Record<string, CommandFn> = {
     cx.editor.macroReplaying.push(reg);
     const count = cx.count();
     cx.callbacks.push(() => {
-      for (let i = 0; i < count; i++) for (const key of keys) cx.editor.handleKey(cx.host, key);
+      for (let i = 0; i < count; i++) for (const key of keys) cx.editor.handleKey(cx.editor.focusedHost(cx.host), key);
       cx.editor.macroReplaying.pop();
     });
   },

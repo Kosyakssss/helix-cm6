@@ -1,9 +1,10 @@
 import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
-import { HelixEditor } from "./core/editor";
+import { Context, HelixEditor, type Workspace } from "./core/editor";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
 import { loadConfig } from "./config-loader";
+import { executeCommand, runTypable } from "./commands";
 import { buildKeymaps } from "./keymap";
 import { Registers } from "./registers";
 import type { SyntaxSessions } from "./syntax/languages";
@@ -29,6 +30,7 @@ export interface HelixOptions {
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
+  workspace?: Workspace;
 }
 
 export interface HelixDocument {
@@ -41,6 +43,27 @@ export function helixStatus(view: EditorView): HelixStatus | null {
   const editor = view.state.facet(helixEditor);
   const host = editor ? hostOf.get(view) : undefined;
   return editor && host ? statusOf(editor, host, view.hasFocus) : null;
+}
+
+export function helixRun(view: EditorView, command: string): boolean {
+  const editor = view.state.facet(helixEditor);
+  const host = editor ? hostOf.get(view) : undefined;
+  if (!editor || !host) return false;
+  const cx = new Context(editor, host, null, null);
+  if (command.startsWith(":")) runTypable(cx, command.slice(1));
+  else if (command.startsWith("@")) executeCommand(cx, { kind: "macro", keys: command.slice(1) });
+  else executeCommand(cx, { kind: "static", name: command });
+  for (const callback of cx.callbacks) callback();
+  editor.ui.render?.(host);
+  return true;
+}
+
+export function helixKeys(view: EditorView, keys: string): boolean {
+  const editor = view.state.facet(helixEditor);
+  const host = editor ? hostOf.get(view) : undefined;
+  if (!editor || !host) return false;
+  editor.feedKeys(host, keys);
+  return true;
 }
 
 const hostOf = new WeakMap<EditorView, Host>();
@@ -74,6 +97,7 @@ export function helix(options: HelixOptions = {}): Extension {
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
+  editor.workspace = options.workspace ?? null;
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);

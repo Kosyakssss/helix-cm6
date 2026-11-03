@@ -1,3 +1,4 @@
+import { hooksOf } from "../hooks";
 import { keyChar, keySequenceFormat, parseMacro } from "../keys";
 import { Keymaps, type KeymapResult, type MappableCommand, type TrieNode } from "../keymap/trie";
 import { MemoryClipboard, Registers, type RegisterEnv } from "../registers";
@@ -110,6 +111,8 @@ export class HelixEditor {
   viewOps: ViewOps | null = null;
   activePrompt: Prompt | null = null;
   visualLines = false;
+  finalLineIsLine = false;
+  wholeLineSelection: Selection | null = null;
   helixAutoPairs = true;
   continueLists = false;
   jumpLabels = new Map<string, JumpLabel[]>();
@@ -302,6 +305,10 @@ export class HelixEditor {
     return this.languageConfig(host)?.languageId ?? null;
   }
 
+  focusedHost(host: Host): Host {
+    return hooksOf(host).focused?.(host) ?? host;
+  }
+
   isBusy(): boolean {
     return this.busy > 0;
   }
@@ -467,9 +474,11 @@ export class HelixEditor {
       const times = this.count ?? 1;
       for (let i = 0; i < times; i++) {
         executeCommand(cx, this.lastInsert.command);
+        const focused = this.focusedHost(cx.host);
+        const insert = focused === cx.host ? cx : new Context(this, focused, null, null);
         for (const k of [...this.lastInsert.keys]) {
-          if (this.replayKeyHook?.(cx.host, k)) continue;
-          this.insertMode(cx, k, {});
+          if (this.replayKeyHook?.(focused, k)) continue;
+          this.insertMode(insert, k, {});
         }
       }
       this.count = null;

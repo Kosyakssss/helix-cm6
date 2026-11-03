@@ -1,3 +1,4 @@
+import { rangeAt, type MotionRange } from "./hooks";
 import { EditorSelection, type Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import {
@@ -127,26 +128,60 @@ export function moveVertically(
   return range.putCursor(doc, newPos, behaviour === "extend").withOldVisual([newRow, newCol]);
 }
 
+export interface VerticalProgress {
+  left: number;
+  stoppedAt: MotionRange | null;
+}
+
 export function moveVisualVertically(
   view: EditorView,
   range: Range,
   dir: Direction,
   count: number,
   behaviour: Movement,
+  ranges: readonly MotionRange[] = [],
+  progress: VerticalProgress | null = null,
 ): Range {
   const doc = view.state.doc;
+  const forward = dir === "forward";
   let pos = range.cursor(doc);
   let goal = range.goalColumn;
   for (let i = 0; i < count; i++) {
-    const start = EditorSelection.cursor(pos, 1, undefined, goal);
-    const moved = view.moveVertically(start, dir === "forward");
-    if (sameVisualRow(view, pos, moved.head)) break;
-    pos = moved.head;
+    const inside = rangeAt(ranges, pos);
+    const from = inside?.kind === "row" ? (forward ? doc.lineAt(Math.max(inside.from, inside.to - 1)).from : inside.from) : pos;
+    const moved = view.moveVertically(EditorSelection.cursor(from, 1, undefined, goal), forward);
+    let next: number | null = sameVisualRow(view, from, moved.head) ? null : moved.head;
+    let hit = next === null ? null : rangeAt(ranges, next);
+    while (next !== null && hit?.kind === "skip") {
+      const beyond: number = forward ? hit.to : hit.from - 1;
+      next = beyond < 0 || beyond > doc.length ? null : atGoal(view, beyond, moved.goalColumn);
+      hit = next === null ? null : rangeAt(ranges, next);
+    }
+    if (next === null || hit?.kind === "enter") {
+      if (progress) {
+        progress.left = count - i;
+        progress.stoppedAt = hit;
+      }
+      break;
+    }
+    pos = hit?.kind === "row" ? hit.from : next;
     goal = moved.goalColumn;
   }
   const line = doc.lineAt(pos);
   if (behaviour === "extend" && line.number === doc.lines && line.length === 0) return range;
   return range.putCursor(doc, pos, behaviour === "extend").withGoal(goal);
+}
+
+function atGoal(view: EditorView, pos: number, goal: number | undefined): number {
+  const line = view.state.doc.lineAt(pos);
+  const coords = view.coordsAtPos(line.from, 1);
+  if (goal === undefined || !coords) return line.from;
+  const x = view.contentDOM.getBoundingClientRect().left + goal;
+  for (let at = line.from; at < line.to; at++) {
+    const next = view.coordsAtPos(at + 1, -1);
+    if (!next || next.top > coords.top + 1 || next.right > x) return at;
+  }
+  return line.to;
 }
 
 export interface Aim {

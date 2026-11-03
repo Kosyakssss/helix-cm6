@@ -8,6 +8,7 @@ import { miscCommands, UNSUPPORTED } from "./misc";
 import { shellCommands } from "./shell";
 import { syntaxCommands } from "./syntax";
 import { executeCommandLine } from "./typed";
+import { hooksOf } from "../hooks";
 
 export const STATIC_COMMANDS: Record<string, CommandFn> = {
   ...motionCommands,
@@ -26,6 +27,7 @@ export function isKnownCommand(name: string): boolean {
 export function executeCommand(cx: Context, command: MappableCommand, arg?: string): void {
   switch (command.kind) {
     case "static": {
+      if (hooksOf(cx.host).command?.(command.name, cx)) return;
       const fn = STATIC_COMMANDS[command.name];
       if (fn) fn(cx, arg);
       else if (UNSUPPORTED.includes(command.name)) cx.editor.setStatus(`${command.name} is not available`);
@@ -49,7 +51,7 @@ export function executeCommand(cx: Context, command: MappableCommand, arg?: stri
       }
       cx.editor.macroReplaying.push("@");
       cx.callbacks.push(() => {
-        for (const key of keys) cx.editor.handleKey(cx.host, key);
+        for (const key of keys) cx.editor.handleKey(cx.editor.focusedHost(cx.host), key);
         cx.editor.macroReplaying.pop();
       });
     }

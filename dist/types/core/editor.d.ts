@@ -100,6 +100,8 @@ export declare class HelixEditor {
     viewOps: ViewOps | null;
     activePrompt: Prompt | null;
     visualLines: boolean;
+    finalLineIsLine: boolean;
+    wholeLineSelection: Selection | null;
     helixAutoPairs: boolean;
     continueLists: boolean;
     jumpLabels: Map<string, JumpLabel[]>;
@@ -155,6 +157,7 @@ export declare class HelixEditor {
     };
     detectIndent(host: Host): void;
     languageName(host: Host): string | null;
+    focusedHost(host: Host): Host;
     isBusy(): boolean;
     whileBusy(work: void | Promise<void>): void | Promise<void>;
     handleKey(host: Host, key: string, options?: HandleKeyOptions): boolean;
