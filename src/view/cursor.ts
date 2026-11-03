@@ -1,5 +1,5 @@
-import type { Extension } from "@codemirror/state";
-import { layer, type EditorView, type LayerMarker } from "@codemirror/view";
+import { StateEffect, type Extension } from "@codemirror/state";
+import { ViewPlugin, layer, type EditorView, type LayerMarker } from "@codemirror/view";
 import type { HelixEditor } from "../core/editor";
 import { nextGraphemeBoundary, prevGraphemeBoundary } from "../graphemes";
 import type { Range as HelixRange } from "../selection";
@@ -469,8 +469,39 @@ function cellMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] {
   return out;
 }
 
+const remeasure = StateEffect.define<null>();
+
+const layoutWatcher = ViewPlugin.fromClass(
+  class {
+    private frame: number | null = null;
+    private readonly observer: MutationObserver;
+
+    constructor(readonly view: EditorView) {
+      this.observer = new MutationObserver((records) => {
+        if (records.some((r) => (r.target as Element).classList.contains("cm-line") && r.oldValue !== (r.target as Element).getAttribute("style"))) this.schedule();
+      });
+      this.observer.observe(view.contentDOM, { subtree: true, attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+    }
+
+    private schedule(): void {
+      const win = this.view.dom.ownerDocument.defaultView;
+      if (!win || this.frame !== null) return;
+      this.frame = win.requestAnimationFrame(() => {
+        this.frame = null;
+        if (this.view.dom.isConnected) this.view.dispatch({ effects: remeasure.of(null) });
+      });
+    }
+
+    destroy(): void {
+      this.observer.disconnect();
+      if (this.frame !== null) this.view.dom.ownerDocument.defaultView?.cancelAnimationFrame(this.frame);
+    }
+  },
+);
+
 export function cursorLayers(editor: HelixEditor): Extension {
   return [
+    layoutWatcher,
     layer({
       above: false,
       class: "hx-selections",

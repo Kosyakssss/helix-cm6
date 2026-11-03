@@ -11970,13 +11970,14 @@ import { EditorState as EditorState3, Prec, RangeSetBuilder } from "@codemirror/
 import {
   Decoration,
   EditorView as EditorView2,
-  ViewPlugin,
+  ViewPlugin as ViewPlugin2,
   WidgetType,
   showPanel
 } from "@codemirror/view";
 
 // src/view/cursor.ts
-import { layer } from "@codemirror/view";
+import { StateEffect as StateEffect3 } from "@codemirror/state";
+import { ViewPlugin, layer } from "@codemirror/view";
 
 // src/view/dom.ts
 function make(doc, tag, cls, text) {
@@ -12423,8 +12424,38 @@ function cellMarkers(view, editor) {
   }
   return out;
 }
+var remeasure = StateEffect3.define();
+var layoutWatcher = ViewPlugin.fromClass(class {
+  view;
+  frame = null;
+  observer;
+  constructor(view) {
+    this.view = view;
+    this.observer = new MutationObserver((records) => {
+      if (records.some((r) => r.target.classList.contains("cm-line") && r.oldValue !== r.target.getAttribute("style")))
+        this.schedule();
+    });
+    this.observer.observe(view.contentDOM, { subtree: true, attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+  }
+  schedule() {
+    const win = this.view.dom.ownerDocument.defaultView;
+    if (!win || this.frame !== null)
+      return;
+    this.frame = win.requestAnimationFrame(() => {
+      this.frame = null;
+      if (this.view.dom.isConnected)
+        this.view.dispatch({ effects: remeasure.of(null) });
+    });
+  }
+  destroy() {
+    this.observer.disconnect();
+    if (this.frame !== null)
+      this.view.dom.ownerDocument.defaultView?.cancelAnimationFrame(this.frame);
+  }
+});
 function cursorLayers(editor) {
   return [
+    layoutWatcher,
     layer({
       above: false,
       class: "hx-selections",
@@ -12609,7 +12640,7 @@ function helixExtension(env) {
       return onKey(event, view);
     }
   }));
-  const stuckComposition = ViewPlugin.fromClass(class {
+  const stuckComposition = ViewPlugin2.fromClass(class {
     view;
     constructor(view) {
       this.view = view;
@@ -12669,7 +12700,7 @@ function helixExtension(env) {
     });
     return true;
   }));
-  const decorations = ViewPlugin.fromClass(class {
+  const decorations = ViewPlugin2.fromClass(class {
     view;
     decorations;
     constructor(view) {
@@ -12704,7 +12735,7 @@ function helixExtension(env) {
       env.onViewClose(this.view);
     }
   }, { decorations: (v) => v.decorations });
-  const cursorLine = ViewPlugin.fromClass(class {
+  const cursorLine = ViewPlugin2.fromClass(class {
     lines;
     constructor(view) {
       this.lines = cursorLineDecorations(view, env);
