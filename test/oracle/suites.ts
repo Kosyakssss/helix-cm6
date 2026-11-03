@@ -65,7 +65,7 @@ const EDITS = [
   ":set-register a %{cursor_line}:%{cursor_column}<ret>\"ap", ":set-register a %{selection}<ret>\"aP", ":set-register a %u{25CF}<ret>\"ap",
   ":set-register a \"l%{selection_line_start}-%{selection_line_end}\"<ret>\"ap", "x:set-register a %{selection_line_end}<ret>\"ap",
   ":set-register a '%{cursor_line}'<ret>\"ap", ":set-register a `x``y`<ret>\"ap", ":set-register a %%<ret>\"ap", ":set-register a %sh{printf hi}<ret>\"ap",
-  ":set-register a %reg{a}x<ret>\"ap", ":set-register a a\\ b<ret>\"ap", ":set-register a %{nope}<ret>\"ap", ":set-register a %q{x}<ret>\"ap",
+  ":set-register a a\\ b<ret>\"ap", ":set-register a %{nope}<ret>\"ap", ":set-register a %q{x}<ret>\"ap",
   ":sort --reverse<ret>", "%<A-s>:sort -r -i<ret>", ":sort -x<ret>", ":sort -r -r<ret>", ":reflow 1 2<ret>", ":echo<ret>", ":goto 2<ret>",
   "!printf %{cursor_line}<ret>", "|printf '%%s' x<ret>", "!printf \"a b\"<ret>",
   ":pipe rev<ret>", ":insert-output printf x<ret>", ":append-output echo y<ret>", ":pipe-to cat<ret>",

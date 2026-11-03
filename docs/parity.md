@@ -14,9 +14,9 @@ States:
 
 - An IME composition in normal or select mode, or in a prompt, is cancelled, so composed text (for example Japanese in a search) cannot be typed there. Text input without a composition, such as the emoji picker or dictation, works.
 
-## Helix bugs the port keeps
+## Helix bugs the port fixes
 
-- An expansion that gives an empty string at the start of a quoted or raw argument leaves the argument unexpanded: with register `a` empty, `:set-register b %reg{a}x` stores `%reg{a}x`, not `x` (`expand_inner` in `helix-view/src/expansion.rs`). Not filed upstream yet.
+- An expansion that gives an empty string at the start of a quoted or raw argument leaves the argument unexpanded in Helix: with register `a` empty, `:set-register b %reg{a}x` stores `%reg{a}x`, not `x` (`expand_inner` in `helix-view/src/expansion.rs`). The port stores `x`.
 
 ## Commands
 

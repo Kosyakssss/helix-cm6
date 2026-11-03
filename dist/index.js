@@ -5859,7 +5859,7 @@ function expandInner(cx, content) {
     for (;; ) {
       const idx = content.indexOf("%", start);
       if (idx < 0)
-        return escaped === "" ? content : escaped + content.slice(start);
+        return escaped + content.slice(start);
       if (content[idx + 1] === "%") {
         escaped += content.slice(start, idx + 1);
         start = idx + 2;

@@ -94,7 +94,7 @@ function expandInner(cx: Context, content: string): Expanded {
   const step = (start: number, escaped: string): Expanded => {
     for (;;) {
       const idx = content.indexOf("%", start);
-      if (idx < 0) return escaped === "" ? content : escaped + content.slice(start);
+      if (idx < 0) return escaped + content.slice(start);
       if (content[idx + 1] === "%") {
         escaped += content.slice(start, idx + 1);
         start = idx + 2;

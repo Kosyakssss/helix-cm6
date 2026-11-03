@@ -4,6 +4,7 @@ import { handSuite, markdownSuite } from "./oracle/suites";
 import { fuzzSuite, markdownFuzzSuite } from "./oracle/fuzz";
 import { oracleGraphemes } from "./oracle/oracle";
 import { segmentGraphemes } from "../src/graphemes";
+import { run } from "./harness";
 
 const describe = (f: { c: { keys: string; in: string }; expected: { out?: string }; actual: { out: string; error?: string } }) =>
   `${JSON.stringify(f.c.keys)} in ${JSON.stringify(f.c.in)}: want ${JSON.stringify(f.expected.out)} got ${JSON.stringify(f.actual.out)} ${f.actual.error ?? ""}`;
@@ -48,3 +49,8 @@ test("grapheme clusters match unicode-segmentation", () => {
   const failures = strings.filter((s, i) => JSON.stringify(segmentGraphemes(s).map((g) => [...g].length)) !== JSON.stringify(want[i]));
   expect(failures.map((s) => [...s].map((c) => c.codePointAt(0)!.toString(16)).join(" "))).toEqual([]);
 }, 600_000);
+
+test("an expansion that gives an empty string still expands the rest of the argument", () => {
+  expect(run("#[a|]#", ':set-register b %reg{c}x<ret>"bp').out).toBe("a#[x|]#");
+  expect(run("#[a|]#", ':set-register b %reg{c}%%<ret>"bp').out).toBe("a#[%|]#");
+});
