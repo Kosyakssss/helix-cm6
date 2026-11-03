@@ -1,11 +1,12 @@
 import type { ChangeSet, Text } from "@codemirror/state";
+import { runLocalQuery, type Locals } from "./highlight";
 import type { IncludedChildren, InjectionScope, LanguageId } from "./injections";
 import type { LanguageLoader } from "./loader";
 import type { Node, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
 
 type ByteRange = [number, number];
 
-interface Injection {
+export interface Injection {
   range: ByteRange;
   layer: Layer;
   matchedNodeRange: ByteRange;
@@ -35,6 +36,7 @@ export class Layer {
   injections: Injection[] = [];
   ranges: ByteRange[] = [];
   flags: Flags = freshFlags();
+  locals: Locals | null = null;
   constructor(
     readonly language: LanguageId,
     readonly parent: Layer | null,
@@ -187,6 +189,7 @@ export class Syntax {
         this.layers.delete(layer);
       }
       layer.flags = freshFlags();
+      layer.locals = null;
     }
   }
 
@@ -205,6 +208,15 @@ export class Syntax {
     if (!tree) throw new Error("tree-sitter parse failed");
     layer.tree?.delete();
     layer.tree = tree;
+  }
+
+  allLayers(): Iterable<Layer> {
+    return this.layers;
+  }
+
+  localsOf(layer: Layer): Locals {
+    layer.locals ??= runLocalQuery(this, layer);
+    return layer.locals;
   }
 
   treeOf(layer: Layer): Tree {

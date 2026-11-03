@@ -1,4 +1,4 @@
-import { EditorState, Prec, RangeSetBuilder, type Extension } from "@codemirror/state";
+import { EditorState, Facet, Prec, RangeSetBuilder, type Extension } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -24,6 +24,7 @@ import { changeByAndWithSelection } from "../commands/util";
 import { pasteImpl } from "../commands/edit";
 import { exitSelectMode } from "../commands/util";
 import { Context } from "../core/editor";
+import { diagnosticsField } from "../diagnostics";
 
 export interface ViewEnv {
   editor: HelixEditor;
@@ -40,6 +41,8 @@ export interface ViewEnv {
   statusBar?(view: EditorView): HTMLElement | null;
   joinStatus?(view: EditorView, joined: boolean): void;
 }
+
+export const helixEnv = Facet.define<ViewEnv, ViewEnv | null>({ combine: (values) => values[0] ?? null });
 
 class LabelWidget extends WidgetType {
   constructor(readonly text: string) {
@@ -343,8 +346,10 @@ export function helixExtension(env: ViewEnv): Extension {
   });
 
   return [
+    helixEnv.of(env),
     EditorState.allowMultipleSelections.of(true),
     helixField,
+    diagnosticsField,
     historyField,
     syncNativeSelection,
     keyHandler,

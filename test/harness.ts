@@ -10,6 +10,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createLoader, SyntaxSessions } from "../src/syntax/languages";
 import { RustRegexEngine } from "../src/core/rx";
+import { HIGHLIGHT_LANGUAGES } from "./oracle/suites";
+import type { LanguageLoader } from "../src/syntax/loader";
+import type { LanguageId } from "../src/syntax/injections";
+import { Syntax } from "../src/syntax/syntax";
 
 const root = resolve(import.meta.dir, "..");
 const regexEngine = await RustRegexEngine.load(readFileSync(resolve(root, "regex/regex.wasm")));
@@ -45,6 +49,35 @@ async function sessionsFor(lang: string): Promise<SyntaxSessions> {
     codeSessions.set(lang, sessions);
   }
   return sessions;
+}
+
+export async function highlightLoader(): Promise<LanguageLoader> {
+  return createLoader(treeSitter, {
+    regex: regexEngine,
+    languages: [languagesToml],
+    only: HIGHLIGHT_LANGUAGES,
+    source: {
+      grammar: (name) => {
+        const file = resolve(grammarDir, "grammars", `${name}.wasm`);
+        return existsSync(file) ? readFileSync(file) : null;
+      },
+      query: (language, file) => {
+        const path = resolve(grammarDir, "queries", language, file);
+        return existsSync(path) ? readFileSync(path, "utf8") : null;
+      },
+    },
+  });
+}
+
+export async function loadLayers(loader: LanguageLoader, text: string, id: LanguageId): Promise<void> {
+  for (let pass = 0; pass < 5; pass++) {
+    const pending = new Set<LanguageId>();
+    const syntax = new Syntax(loader, text, id);
+    for (const layer of syntax.allLayers()) if (!loader.isLoaded(layer.language)) pending.add(layer.language);
+    syntax.delete();
+    if (pending.size === 0) return;
+    for (const language of pending) await loader.load(language);
+  }
 }
 
 export async function prepareLanguages(langs: Iterable<string>): Promise<void> {

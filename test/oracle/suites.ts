@@ -281,3 +281,44 @@ export function codeSuite(): Case[] {
   }
   return cases;
 }
+
+export const HIGHLIGHT_LANGUAGES = ["markdown", "markdown.inline", "rust", "python", "typescript", "json", "go", "toml", "html", "bash"];
+
+const FENCED = [
+  "# Title *em* **bold** `code`",
+  "",
+  "A [link](https://x.y) and <b>tag</b>.",
+  "",
+  "```rust",
+  "fn main() { let x = 1; println!(\"{}\", x); }",
+  "```",
+  "",
+  "```python",
+  "def f(a):\n    return a + 1",
+  "```",
+  "",
+  "| a | b |",
+  "| - | - |",
+  "| 1 | *2* |",
+  "",
+  "<div>",
+  "  <script>let a = 1;</script>",
+  "</div>",
+  "",
+  "---",
+  "",
+  "> quote",
+  "",
+  "- item",
+  "",
+].join("\n");
+
+export function highlightSuite(scopes: readonly string[]): Case[] {
+  const keys = `<highlight>${scopes.join(",")}`;
+  const cases: Case[] = [];
+  for (const [lang, text] of Object.entries(CODE_TEXTS)) cases.push({ id: `highlight#${lang}`, in: text, keys, lang });
+  cases.push({ id: "highlight#markdown", in: FENCED, keys, lang: "markdown" });
+  cases.push({ id: "highlight#locals", in: "fn add(a: i32, b: i32) -> i32 {\n    let c = a + b;\n    let f = |a| a + c;\n    f(c)\n}\nfn other(x: u8) { let a = x; a }\n", keys, lang: "rust" });
+  cases.push({ id: "highlight#html-js", in: "<div class=\"x\">\n<script>\nfunction f(a) { return a; }\n</script>\n<style>\na { color: red; }\n</style>\n</div>\n", keys, lang: "html" });
+  return cases;
+}

@@ -48,7 +48,53 @@ mod test {
         helix_core::syntax::Loader::new(lang.try_into().unwrap()).unwrap()
     }
 
+    fn highlight_case(input: &str, lang: &str, scopes: Vec<String>) -> Value {
+        use helix_core::syntax::Syntax;
+        let mut config = helix_loader::config::default_lang_config();
+        let keep = ["markdown", "markdown.inline", "rust", "python", "typescript", "json", "go", "toml", "html", "bash"];
+        if let Some(languages) = config.get_mut("language").and_then(|v| v.as_array_mut()) {
+            languages.retain(|l| l.get("name").and_then(|n| n.as_str()).is_some_and(|n| keep.contains(&n)));
+            for language in languages.iter_mut() {
+                language.as_table_mut().unwrap().insert("language-servers".into(), toml::Value::Array(Vec::new()));
+            }
+        }
+        let loader = helix_core::syntax::Loader::new(config.try_into().unwrap()).unwrap();
+        loader.set_scopes(scopes);
+        let rope = helix_core::Rope::from(input);
+        let Some(language) = loader.language_for_name(lang) else { return json!({ "error": "no language" }) };
+        let Ok(syntax) = Syntax::new(rope.slice(..), language, &loader) else { return json!({ "error": "no syntax" }) };
+        let mut highlighter = syntax.highlighter(rope.slice(..), &loader, ..);
+        let mut spans: Vec<Value> = Vec::new();
+        let end = rope.len_bytes() as u32;
+        let mut pos = 0u32;
+        loop {
+            let next = highlighter.next_event_offset().min(end);
+            if next > pos {
+                let active: Vec<u32> = highlighter.active_highlights().map(|h| h.get()).collect();
+                if !active.is_empty() {
+                    spans.push(json!([pos, next, active]));
+                }
+                pos = next;
+            }
+            if next >= end {
+                break;
+            }
+            highlighter.advance();
+        }
+        let rainbow: Vec<Value> = match syntax.rainbow_highlights(rope.slice(..), 6, &loader, ..) {
+            helix_core::syntax::OverlayHighlights::Heterogenous { highlights } => highlights
+                .iter()
+                .map(|(h, range)| json!([range.start, range.end, h.get()]))
+                .collect(),
+            _ => Vec::new(),
+        };
+        json!({ "spans": spans, "rainbow": rainbow })
+    }
+
     async fn run_case(input: &str, keys: &str, lang: Option<&str>) -> Value {
+        if let (Some(scopes), Some(lang)) = (keys.strip_prefix("<highlight>"), lang) {
+            return highlight_case(input, lang, scopes.split(',').map(str::to_string).collect());
+        }
         let (text, selection) = test::print(input);
         let builder = match lang {
             Some(name) => AppBuilder::new().with_lang_loader(lang_loader(name)),

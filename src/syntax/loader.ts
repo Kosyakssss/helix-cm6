@@ -1,7 +1,8 @@
 import type { RustRegexEngine } from "../core/rx";
 import type { LanguageConfiguration, LanguagesConfiguration } from "./config";
 import { InjectionsQuery, type InjectionLoader, type InjectionLanguageMarker, type LanguageId, type SyntaxConfig } from "./injections";
-import { Query } from "./query";
+import { HighlightQuery, LocalsQuery, RainbowQuery } from "./highlight";
+import { Query, type UserPredicate } from "./query";
 import { Language, Parser, type Runtime } from "./ts";
 
 export type QueryFile = "highlights.scm" | "injections.scm" | "locals.scm" | "textobjects.scm" | "indents.scm" | "rainbows.scm" | "tags.scm";
@@ -242,6 +243,10 @@ export class LanguageLoader implements InjectionLoader {
 
   private async loadData(data: LanguageData): Promise<void> {
     const name = data.config.grammar ?? data.config.languageId;
+    if (this.builtins.queries.has(data.config.languageId) && this.builtins.grammars.has(name)) {
+      this.getConfig(data.id);
+      return;
+    }
     let grammar: Language | null = this.builtins.grammars.get(name) ?? null;
     if (!grammar && this.source) {
       try {
@@ -264,6 +269,46 @@ export class LanguageLoader implements InjectionLoader {
       }),
     );
     this.compileSyntax(data, grammar);
+  }
+
+  newQuery(grammar: Language, text: string, custom: (pattern: number, predicate: UserPredicate) => void): Query {
+    return new Query(this.rt, grammar, text, custom, this.regex);
+  }
+
+  highlightQuery(id: LanguageId): HighlightQuery | null {
+    const data = this.language(id);
+    return data.query("highlights.scm", (text) => {
+      try {
+        return new HighlightQuery(this, data.syntax!.grammar, text, data.queries.get("locals.scm") ?? "");
+      } catch (err) {
+        this.errors.push(`Failed to compile highlights queries for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    });
+  }
+
+  localsQuery(id: LanguageId): LocalsQuery | null {
+    const data = this.language(id);
+    return data.query("locals.scm", (text) => {
+      try {
+        return new LocalsQuery(this, data.syntax!.grammar, text);
+      } catch (err) {
+        this.errors.push(`Failed to compile locals queries for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    });
+  }
+
+  rainbowQuery(id: LanguageId): RainbowQuery | null {
+    const data = this.language(id);
+    return data.query("rainbows.scm", (text) => {
+      try {
+        return new RainbowQuery(this, data.syntax!.grammar, text);
+      } catch (err) {
+        this.errors.push(`Failed to compile rainbows queries for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    });
   }
 
   textobjectQuery(id: LanguageId): Query | null {

@@ -1,3 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { highlightSpans, rainbowSpans } from "../src/syntax/highlight";
+import { Syntax } from "../src/syntax/syntax";
+import { parseTheme } from "../src/ui/theme";
+import { oracleAsync } from "./oracle/oracle";
+import { highlightSuite } from "./oracle/suites";
+import { highlightLoader, loadLayers } from "./harness";
 import { expect, test } from "bun:test";
 import { compare } from "./oracle/diff";
 import { codeSuite, handSuite, markdownSuite } from "./oracle/suites";
@@ -29,6 +37,32 @@ test("markdown suite matches Helix with the markdown syntax tree", async () => {
 test("code suite matches Helix with each language's grammar and queries", async () => {
   const { failures } = await compare(codeSuite());
   expect(failures.map(describe)).toEqual([]);
+}, 1_800_000);
+
+test("syntax highlighting matches Helix", async () => {
+  const scopes = parseTheme("default", readFileSync(resolve(import.meta.dir, "../../helix/theme.toml"), "utf8")).scopes;
+  const cases = highlightSuite(scopes);
+  const results = await oracleAsync(cases);
+  const loader = await highlightLoader();
+  const wrong: string[] = [];
+  for (const c of cases) {
+    const want = results.get(c.id)!;
+    expect(want.error).toBeUndefined();
+    const id = loader.languageForName(c.lang!)!;
+    await loader.load(id);
+    await loadLayers(loader, c.in, id);
+    const syntax = new Syntax(loader, c.in, id);
+    const got = highlightSpans(syntax, scopes, 0, syntax.byteLength).map((s) => [s.from, s.to, s.scopes]);
+    const toChar = (byte: number) => [...c.in.slice(0, syntax.posOf(byte))].length;
+    const rainbow = rainbowSpans(syntax, 6, 0, syntax.byteLength).map((s) => [toChar(s.from), toChar(s.to), s.highlight]);
+    syntax.delete();
+    if (JSON.stringify(rainbow) !== JSON.stringify(want.rainbow)) wrong.push(`${c.id} rainbow: got ${JSON.stringify(rainbow).slice(0, 200)}, want ${JSON.stringify(want.rainbow).slice(0, 200)}`);
+    if (JSON.stringify(got) !== JSON.stringify(want.spans)) {
+      const at = got.findIndex((g, i) => JSON.stringify(g) !== JSON.stringify(want.spans![i]));
+      wrong.push(`${c.id}: span ${at}: got ${JSON.stringify(got[at])} ${JSON.stringify((got[at]?.[2] as number[] | undefined)?.map((h) => scopes[h]))}, want ${JSON.stringify(want.spans![at])} ${JSON.stringify(want.spans![at]?.[2].map((h) => scopes[h]))}`);
+    }
+  }
+  expect(wrong).toEqual([]);
 }, 1_800_000);
 
 for (const seed of [1, 2, 3]) {

@@ -17,6 +17,8 @@ export interface OracleResult {
   mode?: string;
   register?: string[] | null;
   error?: string;
+  spans?: [number, number, number[]][];
+  rainbow?: [number, number, number][];
 }
 
 const HELIX = process.env.HELIX_DIR ?? resolve(import.meta.dir, "../../../helix");

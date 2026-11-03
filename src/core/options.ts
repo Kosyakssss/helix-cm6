@@ -54,7 +54,39 @@ export const OPTIONS: Record<string, [Getter, Setter]> = {
     (c) => c.jumpLabelAlphabet.join(""),
     (c, v) => (c.jumpLabelAlphabet = [...String(v)]),
   ],
-  "indent-guides.render": [(c) => c.indentGuides ?? true, (c, v) => (c.indentGuides = bool(v))],
+  "indent-guides.render": [(c) => c.indentGuides ?? false, (c, v) => (c.indentGuides = bool(v))],
+  "indent-guides.character": [(c) => c.indentGuideCharacter, (c, v) => (c.indentGuideCharacter = String(v))],
+  "indent-guides.skip-levels": [(c) => c.indentGuideSkipLevels, (c, v) => (c.indentGuideSkipLevels = num(v))],
+  cursorcolumn: [(c) => c.cursorcolumn, (c, v) => (c.cursorcolumn = bool(v))],
+  "rainbow-brackets": [(c) => c.rainbowBrackets, (c, v) => (c.rainbowBrackets = bool(v))],
+  "soft-wrap.enable": [(c) => c.softWrap.enable, (c, v) => (c.softWrap.enable = bool(v))],
+  "soft-wrap.max-wrap": [(c) => c.softWrap.maxWrap, (c, v) => (c.softWrap.maxWrap = num(v))],
+  "soft-wrap.max-indent-retain": [(c) => c.softWrap.maxIndentRetain, (c, v) => (c.softWrap.maxIndentRetain = num(v))],
+  "soft-wrap.wrap-indicator": [(c) => c.softWrap.wrapIndicator, (c, v) => (c.softWrap.wrapIndicator = String(v))],
+  "soft-wrap.wrap-at-text-width": [(c) => c.softWrap.wrapAtTextWidth, (c, v) => (c.softWrap.wrapAtTextWidth = bool(v))],
+  rulers: [(c) => c.rulers, (c, v) => (c.rulers = (Array.isArray(v) ? v : JSON.parse(String(v)) as unknown[]).map(num))],
+  bufferline: [
+    (c) => c.bufferline,
+    (c, v) => {
+      if (v !== "never" && v !== "always" && v !== "multiple") throw new Error("invalid bufferline");
+      c.bufferline = v;
+    },
+  ],
+  "statusline.separator": [(c) => c.statusline.separator, (c, v) => (c.statusline.separator = String(v))],
+  "whitespace.render": [
+    (c) => (c.whitespace.render.space ? "all" : "none"),
+    (c, v) => {
+      if (v !== "all" && v !== "none") throw new Error("invalid whitespace.render");
+      for (const key of ["space", "nbsp", "nnbsp", "tab", "newline"] as const) c.whitespace.render[key] = v === "all";
+    },
+  ],
+  "auto-completion": [(c) => c.autoCompletion, (c, v) => (c.autoCompletion = bool(v))],
+  "completion-trigger-len": [(c) => c.completionTriggerLen, (c, v) => (c.completionTriggerLen = num(v))],
+  "idle-timeout": [(c) => c.idleTimeout, (c, v) => (c.idleTimeout = num(v))],
+  "popup-border": [(c) => c.popupBorder, (c, v) => (c.popupBorder = String(v) as "none" | "all" | "popup" | "menu")],
+  "end-of-line-diagnostics": [(c) => c.endOfLineDiagnostics, (c, v) => (c.endOfLineDiagnostics = String(v))],
+  "inline-diagnostics.cursor-line": [(c) => c.inlineDiagnostics.cursorLine, (c, v) => (c.inlineDiagnostics.cursorLine = String(v))],
+  "inline-diagnostics.other-lines": [(c) => c.inlineDiagnostics.otherLines, (c, v) => (c.inlineDiagnostics.otherLines = String(v))],
 };
 
 function parseValue(raw: string): unknown {

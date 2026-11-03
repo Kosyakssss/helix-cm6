@@ -20,6 +20,9 @@ import type { LanguageLoader } from "../syntax/loader";
 import { autoDetectIndentStyle, indentStyleFromStr, type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
+import type { Theme } from "../ui/theme";
+import { diagnosticsOf, type Diagnostic } from "../diagnostics";
+import { historyField } from "../state";
 
 export type OnKeyCallback = (cx: Context, key: string) => void;
 export type OnKeyKind = "pseudoPending" | "fallback";
@@ -77,6 +80,8 @@ export interface UiHooks {
 }
 
 export interface Workspace {
+  diagnostics?(host: Host): readonly Diagnostic[];
+  cwd?(host: Host): string;
   run(cx: Context, name: string, args: string[]): void;
   openJump?(cx: Context, jump: Jump): void;
   variable?(cx: Context, name: Variable): string | null;
@@ -303,6 +308,35 @@ export class HelixEditor {
 
   languageName(host: Host): string | null {
     return this.languageConfig(host)?.languageId ?? null;
+  }
+
+  private savedRevisions = new Map<string, number>();
+  theme: Theme | null = null;
+  themes: { names(): string[]; load(name: string): Theme | null } | null = null;
+  onThemeChanged: (() => void) | null = null;
+  busyLabel: string | null = null;
+
+  isModified(host: Host): boolean {
+    const history = host.state.field(historyField, false);
+    if (!history) return false;
+    return history.pending !== null || history.current !== (this.savedRevisions.get(host.id) ?? 0);
+  }
+
+  markSaved(host: Host): void {
+    const history = host.state.field(historyField, false);
+    if (history) this.savedRevisions.set(host.id, history.current);
+  }
+
+  busyFrame(): string | null {
+    return this.busyLabel;
+  }
+
+  workspaceDiagnostics(host: Host): readonly Diagnostic[] {
+    return this.workspace?.diagnostics?.(host) ?? diagnosticsOf(host.state);
+  }
+
+  workingDirectory(host: Host): string {
+    return this.workspace?.cwd?.(host) ?? "";
   }
 
   focusedHost(host: Host): Host {
