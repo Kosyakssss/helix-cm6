@@ -1,5 +1,5 @@
 // src/codemirror.ts
-import { Facet as Facet2 } from "@codemirror/state";
+import { Facet as Facet3 } from "@codemirror/state";
 import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
 
 // src/keys.ts
@@ -419,6 +419,7 @@ function defaultConfig() {
     textWidth: 80,
     tabWidth: 4,
     indentStyle: { kind: "tabs" },
+    indentHeuristic: "hybrid",
     autoPairs: DEFAULT_AUTO_PAIRS,
     autoInfo: true,
     smartTab: { enable: true, supersedeMenu: false },
@@ -445,12 +446,6 @@ function defaultConfig() {
     },
     continueComments: true
   };
-}
-function indentUnit(config) {
-  return config.indentStyle.kind === "tabs" ? "\t" : " ".repeat(config.indentStyle.width);
-}
-function indentWidth(config) {
-  return config.indentStyle.kind === "tabs" ? config.tabWidth : config.indentStyle.width;
 }
 
 // src/core/host.ts
@@ -1970,7 +1965,7 @@ function moveImpl(cx, f, dir, behaviour) {
   setSel(cx, selOf(cx).transform((r) => f(doc, r, dir, count, behaviour)));
 }
 function logical(cx) {
-  return (doc, range, dir, count, behaviour) => moveVertically(doc, range, dir, count, behaviour, cx.editor.config.tabWidth);
+  return (doc, range, dir, count, behaviour) => moveVertically(doc, range, dir, count, behaviour, cx.editor.indent(cx.host).tabWidth);
 }
 function moveVisual(cx, dir, behaviour) {
   const view = cx.host.view;
@@ -2505,7 +2500,7 @@ function posAtVisualCoords(doc, row, col, tabWidth) {
 function alignSelections(cx) {
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tabWidth = cx.editor.config.tabWidth;
+  const tabWidth = cx.editor.indent(cx.host).tabWidth;
   const columnWidths = [];
   const coordinates = [];
   let previousLine = -1;
@@ -2559,7 +2554,7 @@ function copySelectionOnLine(cx, direction) {
   const count = cx.count();
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tabWidth = cx.editor.config.tabWidth;
+  const tabWidth = cx.editor.indent(cx.host).tabWidth;
   const ranges = [...sel.ranges];
   let primaryIndex = 0;
   for (const range of sel.ranges) {
@@ -2847,6 +2842,2074 @@ function rotateSelections(cx, direction) {
   const index = sel.primaryIndex;
   const next = direction === "forward" ? (index + count) % len : (index + Math.max(0, len - count) % len) % len;
   setSel(cx, new Selection(sel.ranges, next));
+}
+
+// src/commands/comments.ts
+var DEFAULT_LINE = "#";
+var DEFAULT_BLOCK = { start: "/*", end: "*/" };
+function firstNonWs(s) {
+  let off = 0;
+  for (const ch of s) {
+    if (!isWhitespace(ch))
+      return off;
+    off += ch.length;
+  }
+  return null;
+}
+function lastNonWs(s) {
+  const chars = [...s];
+  let off = s.length;
+  for (let i = chars.length - 1;i >= 0; i--) {
+    off -= chars[i].length;
+    if (!isWhitespace(chars[i]))
+      return off;
+  }
+  return null;
+}
+function getCommentToken(doc, tokens, line) {
+  const text = lineWithEnding(doc, line);
+  const start = firstNonWs(text);
+  if (start === null)
+    return null;
+  let best = null;
+  for (const t of tokens)
+    if (text.slice(start).startsWith(t) && (best === null || t.length > best.length))
+      best = t;
+  return best;
+}
+function toggleLineComments(doc, sel, token) {
+  const tok = token ?? DEFAULT_LINE;
+  const comment = `${tok} `;
+  const lines = [];
+  let minNext = 0;
+  for (const range of sel.ranges) {
+    const [s, e] = lineRange(doc, range);
+    const start = Math.min(Math.max(s, minNext), doc.lines);
+    const end = Math.min(e + 1, doc.lines);
+    for (let l = start;l < end; l++)
+      lines.push(l);
+    minNext = end;
+  }
+  let commented = true;
+  const toChange = [];
+  let min = Number.MAX_SAFE_INTEGER;
+  let margin = 1;
+  for (const line of lines) {
+    const text = lineWithEnding(doc, line);
+    const pos = firstNonWs(text);
+    if (pos === null)
+      continue;
+    min = Math.min(min, pos);
+    if (text.slice(pos, Math.min(pos + tok.length, text.length)) !== tok)
+      commented = false;
+    if (text[pos + tok.length] !== " ")
+      margin = 0;
+    toChange.push(line);
+  }
+  return toChange.map((line) => {
+    const pos = lineToChar(doc, line) + min;
+    return commented ? [pos, pos + tok.length + margin, null] : [pos, pos, comment];
+  });
+}
+function findBlockComments(tokens, doc, sel) {
+  let commented = true;
+  let onlyWhitespace = true;
+  const changes = [];
+  const defaults = tokens[0] ?? DEFAULT_BLOCK;
+  let startToken = defaults.start;
+  let endToken = defaults.end;
+  const sorted = [...tokens].sort((a, b) => a.start.length === b.start.length ? b.end.length - a.end.length : b.start.length - a.start.length);
+  for (const range of sel.ranges) {
+    const slice = doc.sliceString(range.from(), range.to());
+    const startPos = firstNonWs(slice);
+    const endPos = lastNonWs(slice);
+    if (startPos === null || endPos === null) {
+      changes.push({ kind: "whitespace", range });
+      continue;
+    }
+    let lineCommented = false;
+    let afterStart = 0;
+    let beforeEnd = 0;
+    const len = endPos + 1 - startPos;
+    for (const { start, end } of sorted) {
+      afterStart = startPos + start.length;
+      beforeEnd = Math.max(0, endPos - end.length);
+      if (len >= start.length + end.length) {
+        if (slice.slice(startPos, afterStart) === start && slice.slice(beforeEnd + 1, endPos + 1) === end) {
+          startToken = start;
+          endToken = end;
+          lineCommented = true;
+          break;
+        }
+      }
+    }
+    if (!lineCommented) {
+      changes.push({ kind: "uncommented", range, startPos, endPos, startToken: defaults.start, endToken: defaults.end });
+      commented = false;
+    } else {
+      changes.push({
+        kind: "commented",
+        range,
+        startPos,
+        endPos,
+        startMargin: slice[afterStart] === " ",
+        endMargin: afterStart !== beforeEnd && slice[beforeEnd] === " ",
+        startToken,
+        endToken
+      });
+    }
+    onlyWhitespace = false;
+  }
+  if (onlyWhitespace)
+    commented = false;
+  return [commented, changes];
+}
+function createBlockCommentTransaction(sel, commented, comments) {
+  const changes = [];
+  const ranges = [];
+  let offs = 0;
+  for (const c of comments) {
+    if (commented) {
+      if (c.kind === "commented") {
+        const from = c.range.from();
+        changes.push([from + c.startPos, from + c.startPos + c.startToken.length + (c.startMargin ? 1 : 0), null]);
+        changes.push([from + c.endPos - c.endToken.length - (c.endMargin ? 1 : 0) + 1, from + c.endPos + 1, null]);
+      }
+    } else if (c.kind === "uncommented") {
+      const from = c.range.from();
+      changes.push([from + c.startPos, from + c.startPos, `${c.startToken} `]);
+      changes.push([from + c.endPos + 1, from + c.endPos + 1, ` ${c.endToken}`]);
+      const offset = c.startToken.length + c.endToken.length + 2;
+      ranges.push(new Range(from + offs, from + offs + c.endPos + 1 + offset).withDirection(c.range.direction()));
+      offs += offset;
+    } else {
+      ranges.push(new Range(c.range.from() + offs, c.range.to() + offs));
+    }
+  }
+  return [changes, ranges];
+}
+function splitLinesOfSelection(doc, sel) {
+  const ranges = [];
+  for (const range of sel.ranges) {
+    const [ls, le] = lineRange(doc, range);
+    for (let l = ls;l <= le; l++) {
+      const start = lineToChar(doc, l);
+      const end = lineToChar(doc, l + 1);
+      ranges.push(new Range(start, end));
+    }
+    const sliceStart = lineToChar(doc, ls);
+    const sliceEnd = lineToChar(doc, le + 1);
+    if (sliceEnd > sliceStart && doc.sliceString(sliceEnd - 1, sliceEnd) === `
+`)
+      ranges.push(new Range(sliceEnd, sliceEnd));
+  }
+  return new Selection(ranges, 0);
+}
+function continuedLineCommentToken(cx, doc, line) {
+  const text = lineWithEnding(doc, line);
+  const fnw = firstNonWs(text);
+  if (fnw === null)
+    return null;
+  const pos = lineToChar(doc, line) + fnw;
+  if (cx.editor.commentTokens) {
+    const tokens = cx.editor.commentTokens(cx.host, pos).line;
+    return tokens ? getCommentToken(doc, tokens, line) : null;
+  }
+  const syntax = syntaxOf(cx);
+  const loader = cx.editor.languages;
+  if (syntax && loader) {
+    const byte = syntax.byteOf(pos);
+    let token = null;
+    for (const layer of syntax.layersForByteRange(byte, byte)) {
+      const tokens = loader.language(layer.language).config.commentTokens;
+      if (tokens)
+        token = getCommentToken(doc, tokens, line) ?? token;
+    }
+    return token;
+  }
+  const tokens = cx.editor.languageConfig(cx.host)?.commentTokens;
+  return tokens ? getCommentToken(doc, tokens, line) : null;
+}
+function languageCommentTokens(cx, pos) {
+  const loader = cx.editor.languages;
+  const syntax = syntaxOf(cx);
+  let config = null;
+  if (syntax && loader) {
+    const byte = syntax.byteOf(pos);
+    let lineLayer = null;
+    let blockLayer = null;
+    for (const layer of syntax.layersForByteRange(byte, byte)) {
+      const own = loader.language(layer.language).config;
+      if (own.commentTokens)
+        lineLayer = own;
+      if (own.blockCommentTokens)
+        blockLayer = own;
+    }
+    config = lineLayer ?? blockLayer;
+  }
+  config ??= cx.editor.languageConfig(cx.host);
+  return { line: config?.commentTokens ?? null, block: config?.blockCommentTokens ?? null };
+}
+function runComments(cx, kind) {
+  const doc = docOf(cx);
+  const sel = selOf(cx);
+  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : languageCommentTokens(cx, sel.primary().cursor(doc));
+  const cursorLine = lineIndex(doc, sel.primary().cursor(doc));
+  const lineToken = tokens.line ? getCommentToken(doc, tokens.line, cursorLine) ?? tokens.line[0] ?? null : null;
+  const blockTokens = tokens.block;
+  let changes;
+  let ranges = null;
+  const blockToggle = (s, bt) => {
+    const [commented, cc] = findBlockComments(bt, doc, s);
+    const [ch, rs] = createBlockCommentTransaction(s, commented, cc);
+    return { ch, rs: commented ? null : rs };
+  };
+  if (kind === "toggle") {
+    if (lineToken !== null && blockTokens === null) {
+      changes = toggleLineComments(doc, sel, lineToken);
+    } else {
+      const split = splitLinesOfSelection(doc, sel);
+      const bt = blockTokens ?? [DEFAULT_BLOCK];
+      const [lineCommented, lineChanges] = findBlockComments(bt, doc, split);
+      if (lineCommented) {
+        changes = createBlockCommentTransaction(split, true, lineChanges)[0];
+      } else {
+        const [blockCommented, blockChanges] = findBlockComments(bt, doc, sel);
+        if (blockCommented)
+          changes = createBlockCommentTransaction(sel, true, blockChanges)[0];
+        else if (lineToken === null && blockTokens !== null)
+          changes = createBlockCommentTransaction(split, false, lineChanges)[0];
+        else
+          changes = toggleLineComments(doc, sel, lineToken);
+      }
+    }
+  } else if (kind === "line") {
+    if (lineToken === null && blockTokens !== null) {
+      const r = blockToggle(splitLinesOfSelection(doc, sel), blockTokens);
+      changes = r.ch;
+      ranges = r.rs;
+    } else {
+      changes = toggleLineComments(doc, sel, lineToken);
+    }
+  } else if (lineToken !== null && blockTokens === null) {
+    changes = toggleLineComments(doc, sel, lineToken);
+  } else {
+    const r = blockToggle(sel, blockTokens ?? [DEFAULT_BLOCK]);
+    changes = r.ch;
+    ranges = r.rs;
+  }
+  apply(cx, changeSetOf(doc, changes), ranges ? new Selection(ranges, sel.primaryIndex) : null);
+  exitSelectMode(cx);
+}
+
+// src/auto-pairs.ts
+function makeAutoPairs(pairs) {
+  const map = new Map;
+  for (const [open, close] of pairs) {
+    const pair = { open, close };
+    map.set(open, pair);
+    if (open !== close)
+      map.set(close, pair);
+  }
+  return map;
+}
+function same(pair) {
+  return pair.open === pair.close;
+}
+function nextIsNotAlpha(doc, range) {
+  const next = charAt(doc, range.cursor(doc));
+  return next === null || !isAlphanumeric(next);
+}
+function prevIsNotAlpha(doc, range) {
+  const prev = charBefore(doc, range.cursor(doc));
+  return prev === null || !isAlphanumeric(prev);
+}
+function shouldClose(pair, doc, range) {
+  let result = nextIsNotAlpha(doc, range);
+  if (same(pair))
+    result = result && prevIsNotAlpha(doc, range);
+  return result;
+}
+function isSingleGrapheme(doc, range) {
+  if (range.isEmpty())
+    return false;
+  return nextGraphemeBoundary(doc, range.from()) === range.to();
+}
+function hookInsert(doc, range, ch, pairs) {
+  const pair = pairs.get(ch);
+  if (pair) {
+    if (same(pair))
+      return handleInsertSame(doc, range, pair);
+    if (pair.open === ch)
+      return handleInsertOpen(doc, range, pair);
+    if (pair.close === ch)
+      return handleInsertClose(doc, range, pair);
+  } else if (isWhitespace(ch)) {
+    return handleInsertWhitespace(doc, range, ch, pairs);
+  }
+  return null;
+}
+function hookDelete(doc, range, pairs) {
+  const cursor = range.cursor(doc);
+  const cur = charAt(doc, cursor);
+  const prev = charBefore(doc, cursor);
+  if (cur === null || prev === null)
+    return null;
+  if (doc.length >= 4 && isWhitespace(prev) && isWhitespace(cur)) {
+    const secondPrev = charAt(doc, nthPrevGraphemeBoundary(doc, cursor, 2));
+    const secondNext = charAt(doc, nextGraphemeBoundary(doc, cursor));
+    if (secondPrev === null || secondNext === null)
+      return null;
+    const pair = pairs.get(secondPrev);
+    if (pair && pair.open === secondPrev && pair.close === secondNext)
+      return handleDelete(doc, range);
+  }
+  const pair = pairs.get(cur);
+  if (!pair)
+    return null;
+  if (pair.open !== prev || pair.close !== cur)
+    return null;
+  return handleDelete(doc, range);
+}
+function handleDelete(doc, range) {
+  const cursor = range.cursor(doc);
+  const endNext = nextGraphemeBoundary(doc, cursor);
+  const endPrev = prevGraphemeBoundary(doc, cursor);
+  const sizeDelete = endNext - endPrev;
+  const nextHead = nextGraphemeBoundary(doc, range.head) - sizeDelete;
+  const single = isSingleGrapheme(doc, range);
+  let nextAnchor;
+  if (range.direction() === "forward")
+    nextAnchor = single ? range.anchor - (endNext - cursor) : range.anchor;
+  else
+    nextAnchor = single ? range.anchor - (cursor - endPrev) : range.anchor - sizeDelete;
+  return [[endPrev, endNext], new Range(nextAnchor, nextHead)];
+}
+function handleInsertWhitespace(doc, range, ch, pairs) {
+  const cursor = range.cursor(doc);
+  const cur = charAt(doc, cursor);
+  const prev = charBefore(doc, cursor);
+  if (cur === null || prev === null)
+    return null;
+  const pair = pairs.get(cur);
+  if (!pair || pair.open !== prev || pair.close !== cur)
+    return null;
+  return handleInsertSame(doc, range, { open: ch, close: ch });
+}
+function getNextRange(doc, start, lenInserted) {
+  if (start.head === doc.length && start.anchor === doc.length) {
+    return new Range(start.anchor + 1, start.head + 1);
+  }
+  const single = isSingleGrapheme(doc, start);
+  if (lenInserted === 0) {
+    const endAnchor = single ? nextGraphemeBoundary(doc, start.anchor) : start.anchor;
+    return new Range(endAnchor, nextGraphemeBoundary(doc, start.head));
+  }
+  if (lenInserted === 1) {
+    const endAnchor = single || start.direction() === "backward" ? start.anchor + 1 : start.anchor;
+    return new Range(endAnchor, start.head + 1);
+  }
+  const endHead = start.head === 0 || start.direction() === "backward" ? start.head + 1 : prevGraphemeBoundary(doc, start.head) + lenInserted;
+  const len = start.to() - start.from();
+  let endAnchor;
+  if (len === 0)
+    endAnchor = endHead;
+  else if (len === 1 && start.direction() === "forward")
+    endAnchor = endHead - 1;
+  else if (len === 1)
+    endAnchor = endHead + 1;
+  else if (start.direction() === "forward") {
+    endAnchor = single ? prevGraphemeBoundary(doc, start.head) + 1 : start.anchor;
+  } else {
+    endAnchor = single ? prevGraphemeBoundary(doc, start.anchor) + lenInserted : start.anchor + lenInserted;
+  }
+  return new Range(endAnchor, endHead);
+}
+function handleInsertOpen(doc, range, pair) {
+  const cursor = range.cursor(doc);
+  const next = charAt(doc, cursor);
+  if (next !== null && !shouldClose(pair, doc, range))
+    return null;
+  const text = pair.open + pair.close;
+  return [[cursor, cursor, text], getNextRange(doc, range, text.length)];
+}
+function handleInsertClose(doc, range, pair) {
+  const cursor = range.cursor(doc);
+  if (charAt(doc, cursor) !== pair.close)
+    return null;
+  return [[cursor, cursor, null], getNextRange(doc, range, 0)];
+}
+function handleInsertSame(doc, range, pair) {
+  const cursor = range.cursor(doc);
+  const next = charAt(doc, cursor);
+  if (next === pair.open)
+    return [[cursor, cursor, null], getNextRange(doc, range, 0)];
+  if (!shouldClose(pair, doc, range))
+    return null;
+  const text = pair.open + pair.close;
+  return [[cursor, cursor, text], getNextRange(doc, range, text.length)];
+}
+
+// src/syntax/ts.ts
+function readLeb(bytes, at) {
+  let result = 0;
+  let shift = 0;
+  for (;; ) {
+    const byte = bytes[at.pos++];
+    result |= (byte & 127) << shift;
+    if ((byte & 128) === 0)
+      return result >>> 0;
+    shift += 7;
+  }
+}
+function dylinkInfo(module) {
+  const section = WebAssembly.Module.customSections(module, "dylink.0")[0];
+  if (!section)
+    throw new Error("not a tree-sitter grammar module: no dylink.0 section");
+  const bytes = new Uint8Array(section);
+  const at = { pos: 0 };
+  while (at.pos < bytes.length) {
+    const type = bytes[at.pos++];
+    const size = readLeb(bytes, at);
+    const end = at.pos + size;
+    if (type === 1) {
+      const memorySize = readLeb(bytes, at);
+      const memoryAlign = readLeb(bytes, at);
+      const tableSize = readLeb(bytes, at);
+      return { memorySize, memoryAlign, tableSize };
+    }
+    at.pos = end;
+  }
+  return { memorySize: 0, memoryAlign: 0, tableSize: 0 };
+}
+function alignUp(value, align) {
+  return Math.ceil(value / align) * align;
+}
+var NODE_WORDS = 6;
+var NODE_BYTES = NODE_WORDS * 4;
+var ENOSYS = 52;
+
+class Runtime {
+  x;
+  scratch;
+  words;
+  bytes;
+  constructor(x) {
+    this.x = x;
+    this.scratch = x.hm_malloc(NODE_BYTES * 2 + 16);
+    this.words = new Uint32Array(x.memory.buffer);
+    this.bytes = new Uint8Array(x.memory.buffer);
+  }
+  async loadLanguage(binary, name) {
+    const module = await WebAssembly.compile(binary);
+    const info = dylinkInfo(module);
+    const x = this.x;
+    const align = 2 ** info.memoryAlign;
+    const memoryBase = info.memorySize > 0 ? alignUp(x.calloc(1, info.memorySize + align), align) : 0;
+    const table = x.__indirect_function_table;
+    const tableBase = table.length;
+    if (info.tableSize > 0)
+      table.grow(info.tableSize);
+    const env = {
+      memory: x.memory,
+      __indirect_function_table: table,
+      __stack_pointer: x.__stack_pointer,
+      __memory_base: new WebAssembly.Global({ value: "i32", mutable: false }, memoryBase),
+      __table_base: new WebAssembly.Global({ value: "i32", mutable: false }, tableBase)
+    };
+    const own = x;
+    for (const imp of WebAssembly.Module.imports(module)) {
+      if (imp.module !== "env")
+        throw new Error(`grammar ${name} imports ${imp.module}.${imp.name}`);
+      if (imp.name in env)
+        continue;
+      const value = imp.kind === "function" ? own[imp.name] : undefined;
+      if (value === undefined)
+        throw new Error(`grammar ${name} imports ${imp.name}, which tree-sitter does not export`);
+      env[imp.name] = value;
+    }
+    const instance = await WebAssembly.instantiate(module, { env });
+    const exports = instance.exports;
+    exports.__wasm_apply_data_relocs?.();
+    exports.__wasm_call_ctors?.();
+    const entry = exports[`tree_sitter_${name.replace(/[-.]/g, "_")}`];
+    if (!entry)
+      throw new Error(`grammar ${name} has no tree_sitter_${name} function`);
+    return entry();
+  }
+  static async load(binary) {
+    const stub = () => ENOSYS;
+    const { instance } = await WebAssembly.instantiate(binary, {
+      wasi_snapshot_preview1: { fd_close: stub, fd_seek: stub, fd_write: stub }
+    });
+    const x = instance.exports;
+    x._initialize();
+    return new Runtime(x);
+  }
+  u32() {
+    if (this.words.buffer !== this.x.memory.buffer)
+      this.words = new Uint32Array(this.x.memory.buffer);
+    return this.words;
+  }
+  u8() {
+    if (this.bytes.buffer !== this.x.memory.buffer)
+      this.bytes = new Uint8Array(this.x.memory.buffer);
+    return this.bytes;
+  }
+  get inPtr() {
+    return this.scratch;
+  }
+  get outPtr() {
+    return this.scratch + NODE_BYTES;
+  }
+  get lenPtr() {
+    return this.scratch + NODE_BYTES * 2;
+  }
+  writeNode(ptr, node) {
+    this.u32().set(node.raw, ptr >> 2);
+  }
+  readNode(ptr) {
+    const words = this.u32();
+    const raw = words.slice(ptr >> 2, (ptr >> 2) + NODE_WORDS);
+    return raw[4] === 0 ? null : new Node(this, raw);
+  }
+  string(ptr, length) {
+    return new TextDecoder().decode(this.u8().subarray(ptr, ptr + length));
+  }
+  cString(ptr) {
+    const bytes = this.u8();
+    let end = ptr;
+    while (bytes[end] !== 0)
+      end++;
+    return new TextDecoder().decode(bytes.subarray(ptr, end));
+  }
+  alloc(data) {
+    const ptr = this.x.hm_malloc(Math.max(1, data.length));
+    this.u8().set(data, ptr);
+    return ptr;
+  }
+  nodeCall(node, f) {
+    this.writeNode(this.inPtr, node);
+    f(this.inPtr, this.outPtr);
+    return this.readNode(this.outPtr);
+  }
+  nodeValue(node, f) {
+    this.writeNode(this.inPtr, node);
+    return f(this.inPtr);
+  }
+}
+
+class Language {
+  rt;
+  ptr;
+  names = new Map;
+  constructor(rt, ptr) {
+    this.rt = rt;
+    this.ptr = ptr;
+  }
+  symbolName(symbol) {
+    let name = this.names.get(symbol);
+    if (name === undefined) {
+      name = this.rt.cString(this.rt.x.hm_symbol_name(this.ptr, symbol));
+      this.names.set(symbol, name);
+    }
+    return name;
+  }
+}
+
+class Node {
+  rt;
+  raw;
+  constructor(rt, raw) {
+    this.rt = rt;
+    this.raw = raw;
+  }
+  get id() {
+    return this.raw[4];
+  }
+  walk() {
+    return new TreeCursor(this.rt, this);
+  }
+  get startByte() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_start(p));
+  }
+  get endByte() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_end(p));
+  }
+  get symbol() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_symbol(p));
+  }
+  get isNamed() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_named(p)) !== 0;
+  }
+  get childCount() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_child_count(p));
+  }
+  child(index) {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_child(p, index, o));
+  }
+  get children() {
+    const out = [];
+    const count = this.childCount;
+    for (let i = 0;i < count; i++)
+      out.push(this.child(i));
+    return out;
+  }
+  get parent() {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_parent(p, o));
+  }
+  get nextSibling() {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_next_sibling(p, o));
+  }
+  get previousSibling() {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_prev_sibling(p, o));
+  }
+  descendantForByteRange(start, end) {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_descendant(p, start, end, 0, o));
+  }
+  namedDescendantForByteRange(start, end) {
+    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_descendant(p, start, end, 1, o));
+  }
+  equals(other) {
+    return this.raw[4] === other.raw[4] && this.raw[5] === other.raw[5];
+  }
+}
+
+class Tree {
+  rt;
+  ptr;
+  constructor(rt, ptr) {
+    this.rt = rt;
+    this.ptr = ptr;
+  }
+  edit(start, oldEnd, newEnd) {
+    this.rt.x.hm_tree_edit(this.ptr, start, oldEnd, newEnd);
+  }
+  copy() {
+    return new Tree(this.rt, this.rt.x.hm_tree_copy(this.ptr));
+  }
+  get rootNode() {
+    this.rt.x.hm_tree_root(this.ptr, this.rt.outPtr);
+    return this.rt.readNode(this.rt.outPtr);
+  }
+  walk() {
+    return new TreeCursor(this.rt, this.rootNode);
+  }
+  delete() {
+    this.rt.x.hm_tree_delete(this.ptr);
+  }
+}
+
+class TreeCursor {
+  rt;
+  ptr;
+  constructor(rt, node) {
+    this.rt = rt;
+    this.ptr = rt.nodeValue(node, (p) => rt.x.hm_cursor_new(p));
+  }
+  get currentNode() {
+    this.rt.x.hm_cursor_node(this.ptr, this.rt.outPtr);
+    return this.rt.readNode(this.rt.outPtr);
+  }
+  gotoParent() {
+    return this.rt.x.hm_cursor_parent(this.ptr) !== 0;
+  }
+  gotoFirstChild() {
+    return this.rt.x.hm_cursor_first_child(this.ptr) !== 0;
+  }
+  gotoNextSibling() {
+    return this.rt.x.hm_cursor_next_sibling(this.ptr) !== 0;
+  }
+  gotoPreviousSibling() {
+    return this.rt.x.hm_cursor_prev_sibling(this.ptr) !== 0;
+  }
+  gotoFirstChildForByte(goal) {
+    return this.rt.x.hm_cursor_first_child_for_byte(this.ptr, goal) !== 0;
+  }
+  delete() {
+    if (this.ptr)
+      this.rt.x.hm_cursor_delete(this.ptr);
+    this.ptr = 0;
+  }
+}
+
+class Parser {
+  rt;
+  constructor(rt) {
+    this.rt = rt;
+  }
+  parse(language, text, length, ranges, oldTree = null) {
+    const rt = this.rt;
+    let rangesPtr = 0;
+    if (ranges && ranges.length > 0) {
+      rangesPtr = rt.x.hm_malloc(ranges.length * 24);
+      const words = rt.u32();
+      ranges.forEach((range, i) => {
+        const base = (rangesPtr >> 2) + i * 6;
+        words.set([0, 0, 0, 0, range.start, range.end], base);
+      });
+    }
+    const tree = rt.x.hm_parse(language.ptr, text, length, rangesPtr, ranges?.length ?? 0, oldTree?.ptr ?? 0);
+    if (rangesPtr)
+      rt.x.hm_free(rangesPtr);
+    return tree ? new Tree(rt, tree) : null;
+  }
+}
+
+// src/syntax/query.ts
+class InvalidPredicateError extends Error {
+}
+function unknownPredicate(predicate) {
+  if (predicate.kind === "other")
+    return new InvalidPredicateError(`unknown predicate #${predicate.predicate.name}`);
+  return new InvalidPredicateError(`unknown property '${predicate.key}'`);
+}
+
+class QueryParseError extends Error {
+}
+var ERROR_KINDS = ["none", "syntax", "node-type", "field", "capture", "structure", "language"];
+function bytesEqual(a, b) {
+  if (a.length !== b.length)
+    return false;
+  for (let i = 0;i < a.length; i++)
+    if (a[i] !== b[i])
+      return false;
+  return true;
+}
+function argOf(query, type, value) {
+  return type === 1 ? { kind: "capture", capture: value } : { kind: "string", value: query.stringValue(value) };
+}
+function checkArgCount(p, n) {
+  if (p.args.length !== n)
+    throw new InvalidPredicateError(`expected ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function checkMinArgCount(p, n) {
+  if (n > p.args.length)
+    throw new InvalidPredicateError(`expected at least ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function checkMaxArgCount(p, n) {
+  if (p.args.length > n)
+    throw new InvalidPredicateError(`expected at most ${n} arguments for #${p.name}, got ${p.args.length}`);
+}
+function strArg(query, p, i) {
+  const arg = p.args[i];
+  if (arg.kind === "string")
+    return arg.value;
+  throw new InvalidPredicateError(`${i}. argument to #${p.name} must be a literal, got capture @${JSON.stringify(query.captureName(arg.capture))}`);
+}
+function captureArg(p, i) {
+  const arg = p.args[i];
+  if (arg.kind === "capture")
+    return arg.capture;
+  throw new InvalidPredicateError(`${i}. argument to #${p.name} expected a capture, got literal ${JSON.stringify(arg.value)}`);
+}
+function parseProperty(query, p) {
+  checkMinArgCount(p, 1);
+  checkMaxArgCount(p, 2);
+  const key = strArg(query, p, 0);
+  const val = p.args.length === 2 ? strArg(query, p, 1) : null;
+  return { key, val };
+}
+
+class Query {
+  rt;
+  language;
+  regex;
+  ptr;
+  captureNames = [];
+  strings = [];
+  textPredicates = [];
+  regexes = [];
+  constructor(rt, language, source, custom, regex = null) {
+    this.rt = rt;
+    this.language = language;
+    this.regex = regex;
+    const bytes = new TextEncoder().encode(source);
+    const src = rt.alloc(bytes);
+    const error = rt.lenPtr;
+    this.ptr = rt.x.hm_query_new(language.ptr, src, bytes.length, error);
+    rt.x.hm_free(src);
+    if (!this.ptr) {
+      const words = rt.u32();
+      const offset = new TextDecoder().decode(bytes.subarray(0, words[error >> 2])).length;
+      const kind = ERROR_KINDS[words[(error >> 2) + 1]] ?? "syntax";
+      throw new QueryParseError(`invalid ${kind} in query at ${offset}`);
+    }
+    const captureCount = rt.x.hm_query_capture_count(this.ptr);
+    for (let i = 0;i < captureCount; i++)
+      this.captureNames.push(this.read(rt.x.hm_query_capture_name(this.ptr, i, rt.lenPtr)));
+    const stringCount = rt.x.hm_query_string_count(this.ptr);
+    for (let i = 0;i < stringCount; i++)
+      this.strings.push(this.read(rt.x.hm_query_string(this.ptr, i, rt.lenPtr)));
+    const patternCount = rt.x.hm_query_pattern_count(this.ptr);
+    try {
+      for (let pattern = 0;pattern < patternCount; pattern++)
+        this.textPredicates.push(this.parsePatternPredicates(pattern, custom));
+    } catch (err) {
+      this.delete();
+      if (err instanceof InvalidPredicateError) {
+        const start = new TextDecoder().decode(bytes.subarray(0, rt.x.hm_query_start_byte(this.ptr, this.textPredicates.length))).length;
+        throw new QueryParseError(`${err.message} in the pattern at ${start}`);
+      }
+      throw err;
+    }
+  }
+  read(ptr) {
+    return this.rt.string(ptr, this.rt.u32()[this.rt.lenPtr >> 2]);
+  }
+  stringValue(id) {
+    return this.strings[id];
+  }
+  captureName(capture) {
+    return this.captureNames[capture];
+  }
+  getCapture(name) {
+    const i = this.captureNames.indexOf(name);
+    return i < 0 ? null : i;
+  }
+  get patternCount() {
+    return this.textPredicates.length;
+  }
+  startByteForPattern(pattern) {
+    return this.rt.x.hm_query_start_byte(this.ptr, pattern);
+  }
+  disableCapture(name) {
+    const bytes = new TextEncoder().encode(name);
+    const ptr = this.rt.alloc(bytes);
+    this.rt.x.hm_query_disable_capture(this.ptr, ptr, bytes.length);
+    this.rt.x.hm_free(ptr);
+  }
+  delete() {
+    for (const regex of this.regexes)
+      this.regex?.drop(regex);
+    this.regexes.length = 0;
+    this.rt.x.hm_query_delete(this.ptr);
+  }
+  compileRegex(pattern) {
+    if (!this.regex)
+      throw new InvalidPredicateError(`invalid regex '${pattern}', no regex engine`);
+    try {
+      const regex = this.regex.compile(`(?-m)${pattern}`, false);
+      this.regexes.push(regex);
+      return regex;
+    } catch (err) {
+      throw new InvalidPredicateError(`invalid regex '${pattern}', ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  parsePatternPredicates(pattern, custom) {
+    const rt = this.rt;
+    const steps = rt.x.hm_query_predicates(this.ptr, pattern, rt.lenPtr);
+    const count = rt.u32()[rt.lenPtr >> 2];
+    const words = rt.u32().slice(steps >> 2, (steps >> 2) + count * 2);
+    const out = [];
+    let current = [];
+    const predicates = [];
+    for (let i = 0;i < count; i++) {
+      const type = words[i * 2];
+      const value = words[i * 2 + 1];
+      if (type === 0) {
+        if (current.length > 0)
+          predicates.push(current);
+        current = [];
+      } else
+        current.push([type, value]);
+    }
+    if (current.length > 0)
+      predicates.push(current);
+    const encode = (s) => new TextEncoder().encode(s);
+    for (const steps of predicates) {
+      const [headType, headValue] = steps[0];
+      if (headType !== 2) {
+        throw new InvalidPredicateError(`expected predicate to start with a function name. Got @${this.captureName(headValue)}.`);
+      }
+      const p = { name: this.stringValue(headValue), args: steps.slice(1).map(([t, v]) => argOf(this, t, v)) };
+      switch (p.name) {
+        case "eq?":
+        case "not-eq?":
+        case "any-eq?":
+        case "any-not-eq?": {
+          checkArgCount(p, 2);
+          const capture = captureArg(p, 0);
+          const arg2 = p.args[1];
+          const negated = ["not-eq?", "not-any-eq?"].includes(p.name);
+          const matchAll = p.name === "eq?" || p.name === "not-eq?";
+          const kind = arg2.kind === "capture" ? { kind: "eq-capture", capture: arg2.capture } : { kind: "eq-string", value: encode(arg2.value) };
+          out.push({ capture, kind, negated, matchAll });
+          break;
+        }
+        case "match?":
+        case "not-match?":
+        case "any-match?":
+        case "any-not-match?": {
+          checkArgCount(p, 2);
+          const capture = captureArg(p, 0);
+          const source = strArg(this, p, 1);
+          const negated = p.name === "not-match?" || p.name === "any-not-match?";
+          const matchAll = p.name === "match?" || p.name === "not-match?";
+          out.push({ capture, kind: { kind: "match-string", regex: this.compileRegex(source) }, negated, matchAll });
+          break;
+        }
+        case "set!": {
+          const { key, val } = parseProperty(this, p);
+          custom(pattern, { kind: "set-property", key, val });
+          break;
+        }
+        case "is-not?":
+        case "is?": {
+          const { key, val } = parseProperty(this, p);
+          custom(pattern, { kind: "is-property-set", negate: p.name === "is-not?", key, val });
+          break;
+        }
+        case "any-of?":
+        case "not-any-of?": {
+          checkMinArgCount(p, 1);
+          const capture = captureArg(p, 0);
+          const values = [];
+          for (let i = 1;i < p.args.length; i++)
+            values.push(encode(strArg(this, p, i)));
+          out.push({ capture, kind: { kind: "any-string", values }, negated: p.name === "not-any-of?", matchAll: false });
+          break;
+        }
+        default:
+          custom(pattern, { kind: "other", predicate: p });
+      }
+    }
+    return out;
+  }
+  satisfies(pattern, nodes, input) {
+    const predicates = this.textPredicates[pattern];
+    for (const predicate of predicates)
+      if (!this.satisfied(predicate, nodes, input))
+        return false;
+    return true;
+  }
+  satisfied(p, nodes, input) {
+    const text = (node) => input.utf8.subarray(node.startByte, node.endByte);
+    const helper = (results) => {
+      if (p.matchAll) {
+        for (const matched of results)
+          if (matched === p.negated)
+            return false;
+        return true;
+      }
+      for (const matched of results)
+        if (matched !== p.negated)
+          return true;
+      return false;
+    };
+    const captured = nodes.filter((n) => n.capture === p.capture);
+    const kind = p.kind;
+    switch (kind.kind) {
+      case "eq-string":
+        return helper(captured.map((n) => bytesEqual(text(n.node), kind.value)));
+      case "eq-capture": {
+        const others = nodes.filter((n) => n.capture === kind.capture);
+        const pairs = Math.min(captured.length, others.length);
+        const results = [];
+        for (let i = 0;i < pairs; i++)
+          results.push(bytesEqual(text(captured[i].node), text(others[i].node)));
+        const res = helper(results);
+        if (!p.matchAll)
+          return res;
+        return res && captured.length - pairs <= 1 && others.length === pairs;
+      }
+      case "match-string":
+        return helper(captured.map((n) => this.regex.isMatchBytes(kind.regex, text(n.node))));
+      case "any-string":
+        return helper(captured.map((n) => {
+          const bytes = text(n.node);
+          return kind.values.some((value) => bytesEqual(value, bytes));
+        }));
+    }
+  }
+}
+var TREE_SITTER_MATCH_LIMIT = 256;
+var MAX = 4294967295;
+
+class QueryCursor {
+  query;
+  input;
+  ptr;
+  out;
+  constructor(query, node, input, range = [0, MAX], limit = MAX) {
+    this.query = query;
+    this.input = input;
+    const rt = query.rt;
+    this.ptr = rt.x.hm_qc_new();
+    this.out = rt.x.hm_malloc(24);
+    rt.writeNode(rt.inPtr, node);
+    rt.x.hm_qc_exec(this.ptr, query.ptr, rt.inPtr, range[0], range[1], limit);
+  }
+  readMatch() {
+    const rt = this.query.rt;
+    const words = rt.u32();
+    const base = this.out >> 2;
+    const id = words[base];
+    const pattern = words[base + 1];
+    const count = words[base + 2];
+    const captures = words[base + 3] >> 2;
+    const nodes = [];
+    for (let i = 0;i < count; i++) {
+      const at = captures + i * 7;
+      nodes.push({ node: new Node(rt, words.slice(at, at + 6)), capture: words[at + 6] });
+    }
+    return { id, pattern, nodes };
+  }
+  nextMatch() {
+    const rt = this.query.rt;
+    for (;; ) {
+      if (!rt.x.hm_qc_next_match(this.ptr, this.out))
+        return null;
+      const match = this.readMatch();
+      if (this.query.satisfies(match.pattern, match.nodes, this.input))
+        return match;
+    }
+  }
+  nextMatchedNode() {
+    const rt = this.query.rt;
+    for (;; ) {
+      if (!rt.x.hm_qc_next_capture(this.ptr, this.out))
+        return null;
+      const match = this.readMatch();
+      const index = rt.u32()[(this.out >> 2) + 4];
+      if (this.query.satisfies(match.pattern, match.nodes, this.input))
+        return [match, index];
+      rt.x.hm_qc_remove_match(this.ptr, match.id);
+    }
+  }
+  removeMatch(id) {
+    this.query.rt.x.hm_qc_remove_match(this.ptr, id);
+  }
+  didExceedMatchLimit() {
+    return this.query.rt.x.hm_qc_exceeded(this.ptr) !== 0;
+  }
+  delete() {
+    if (!this.ptr)
+      return;
+    this.query.rt.x.hm_qc_delete(this.ptr);
+    this.query.rt.x.hm_free(this.out);
+    this.ptr = 0;
+  }
+}
+
+// src/syntax/indent.ts
+var MAX_INDENT = 16;
+function indentStyleStr(style) {
+  return style.kind === "tabs" ? "\t" : " ".repeat(Math.min(Math.max(style.width, 1), MAX_INDENT));
+}
+function indentStyleWidth(style, tabWidth) {
+  return style.kind === "tabs" ? tabWidth : style.width;
+}
+function indentStyleFromStr(indent) {
+  return indent.startsWith(" ") ? { kind: "spaces", width: Math.min(Math.max(indent.length, 1), MAX_INDENT) } : { kind: "tabs" };
+}
+function isLineEnding(c) {
+  return c === `
+` || c === "\r" || c === "\v" || c === "\f" || c === "" || c === "\u2028" || c === "\u2029";
+}
+function isWhitespaceChar(c) {
+  return /^\p{White_Space}$/u.test(c) && !isLineEnding(c);
+}
+function autoDetectIndentStyle(doc) {
+  const histogram = new Array(MAX_INDENT + 1).fill(0);
+  let prevIsTabs = false;
+  let prevCount = 0;
+  const lines = Math.min(doc.lines, 1000);
+  outer:
+    for (let n = 1;n <= lines; n++) {
+      const line = doc.line(n);
+      const text = n < doc.lines ? `${line.text}
+` : line.text;
+      const chars = [...text];
+      const first = chars[0];
+      let isTabs;
+      if (first === "\t")
+        isTabs = true;
+      else if (first === " ")
+        isTabs = false;
+      else if (first !== undefined && isLineEnding(first))
+        continue;
+      else {
+        prevIsTabs = false;
+        prevCount = 0;
+        continue;
+      }
+      let count = 1;
+      let done = false;
+      for (let i = 1;i < chars.length; i++) {
+        const c = chars[i];
+        if (c === "\t" && isTabs && !done)
+          count++;
+        else if (c === " " && !isTabs && !done)
+          count++;
+        else if (isWhitespaceChar(c))
+          done = true;
+        else if (isLineEnding(c))
+          continue outer;
+        else
+          break;
+        if (count > 256)
+          continue outer;
+      }
+      if ((prevIsTabs === isTabs || prevCount === 0) && prevCount < count) {
+        if (isTabs)
+          histogram[0]++;
+        else {
+          const amount = count - prevCount;
+          if (amount <= MAX_INDENT)
+            histogram[amount]++;
+        }
+      }
+      prevIsTabs = isTabs;
+      prevCount = count;
+    }
+  histogram[0] *= 2;
+  if (histogram[1] > 1)
+    histogram[1] = Math.floor(histogram[1] / 2);
+  let indent = 0;
+  for (let i = 0;i < histogram.length; i++)
+    if (histogram[i] >= histogram[indent])
+      indent = i;
+  const freq = histogram[indent];
+  let freq2 = 0;
+  for (let i = 0;i < histogram.length; i++)
+    if (i !== indent)
+      freq2 = Math.max(freq2, histogram[i]);
+  if (freq >= 1 && freq2 / freq < 0.66)
+    return indent === 0 ? { kind: "tabs" } : { kind: "spaces", width: indent };
+  return null;
+}
+function tabWidthAt2(col, tabWidth) {
+  return tabWidth - col % tabWidth;
+}
+function indentLevelForLine(line, tabWidth, indentWidth) {
+  let len = 0;
+  for (const ch of line) {
+    if (ch === "\t")
+      len += tabWidthAt2(len, tabWidth);
+    else if (ch === " ")
+      len += 1;
+    else
+      break;
+  }
+  return Math.floor(len / indentWidth);
+}
+function whitespaceWithSameWidth(text) {
+  let s = "";
+  for (const g of segmentGraphemes(text))
+    s += g === "\t" ? "\t" : " ".repeat(graphemeWidth(g));
+  return s;
+}
+function visualCol(text, tabWidth) {
+  let col = 0;
+  for (const g of segmentGraphemes(text))
+    col += g === "\t" ? tabWidth - col % tabWidth : graphemeWidth(g);
+  return col;
+}
+function posAtVisualCol(text, col, tabWidth) {
+  let offset = 0;
+  let remaining = col;
+  for (const g of segmentGraphemes(text)) {
+    const w = g === "\t" ? tabWidth - (col - remaining) % tabWidth : graphemeWidth(g);
+    if (w > remaining)
+      break;
+    remaining -= w;
+    offset += g.length;
+  }
+  return offset;
+}
+function addIndentLevel(base, added, style, tabWidth) {
+  if (added >= 0)
+    return base + indentStyleStr(style).repeat(added);
+  const width = visualCol(base, tabWidth);
+  const target = Math.max(0, width - -added * indentStyleWidth(style, tabWidth));
+  return base.slice(0, posAtVisualCol(base, target, tabWidth));
+}
+
+class IndentQuery {
+  query;
+  headerPatterns = new Set;
+  predicates = new Map;
+  captures;
+  constructor(grammar, source, regex) {
+    const entry = (pattern) => {
+      let p = this.predicates.get(pattern);
+      if (!p) {
+        p = { notKindEq: [], sameLine: null, oneLine: null };
+        this.predicates.set(pattern, p);
+      }
+      return p;
+    };
+    this.query = new Query(grammar.rt, grammar, source, (pattern, predicate) => {
+      if (predicate.kind === "set-property" && predicate.key === "scope") {
+        if (predicate.val === "header")
+          this.headerPatterns.add(pattern);
+        else if (predicate.val !== null)
+          throw new InvalidPredicateError(`unknown scope (#set! scope "${predicate.val}")`);
+        else
+          throw new InvalidPredicateError("missing scope value (#set! scope ...)");
+        return;
+      }
+      if (predicate.kind !== "other")
+        throw unknownPredicate(predicate);
+      const p = predicate.predicate;
+      const capture = (i) => {
+        const arg = p.args[i];
+        if (arg.kind !== "capture")
+          throw new InvalidPredicateError(`${i}. argument to #${p.name} expected a capture, got literal ${JSON.stringify(arg.value)}`);
+        return arg.capture;
+      };
+      const count = (n) => {
+        if (p.args.length !== n)
+          throw new InvalidPredicateError(`expected ${n} arguments for #${p.name}, got ${p.args.length}`);
+      };
+      switch (p.name) {
+        case "not-kind-eq?": {
+          count(2);
+          const arg = p.args[1];
+          if (arg.kind !== "string")
+            throw new InvalidPredicateError(`1. argument to #${p.name} must be a literal`);
+          entry(pattern).notKindEq.push([capture(0), arg.value]);
+          return;
+        }
+        case "same-line?":
+        case "not-same-line?":
+          count(2);
+          entry(pattern).sameLine = [capture(0), capture(1), p.name === "not-same-line?"];
+          return;
+        case "one-line?":
+        case "not-one-line?":
+          count(1);
+          entry(pattern).oneLine = [capture(0), p.name === "not-one-line?"];
+          return;
+        default:
+          throw unknownPredicate(predicate);
+      }
+    }, regex);
+    const q = this.query;
+    this.captures = {
+      indent: q.getCapture("indent"),
+      indentAlways: q.getCapture("indent.always"),
+      outdent: q.getCapture("outdent"),
+      outdentAlways: q.getCapture("outdent.always"),
+      align: q.getCapture("align"),
+      anchor: q.getCapture("anchor"),
+      extend: q.getCapture("extend"),
+      extendPreventOnce: q.getCapture("extend.prevent-once"),
+      opaque: q.getCapture("opaque")
+    };
+  }
+}
+function emptyIndentation() {
+  return { indent: 0, indentAlways: 0, outdent: 0, outdentAlways: 0, align: null };
+}
+function netIndent(i) {
+  return i.indent + i.indentAlways - (i.outdent + i.outdentAlways);
+}
+function relativeIndent(self, other, otherLeading, style, tabWidth) {
+  if (self.align !== other.align)
+    return null;
+  return addIndentLevel(otherLeading, netIndent(self) - netIndent(other), style, tabWidth);
+}
+function indentationString(i, style, tabWidth) {
+  return addIndentLevel(i.align === null ? "" : whitespaceWithSameWidth(i.align), netIndent(i), style, tabWidth);
+}
+
+class DocText {
+  doc;
+  syntax;
+  constructor(doc, syntax) {
+    this.doc = doc;
+    this.syntax = syntax;
+  }
+  byteToLine(byte) {
+    return this.doc.lineAt(this.syntax.posOf(byte)).number - 1;
+  }
+  lineToByte(line) {
+    return this.syntax.byteOf(this.doc.line(line + 1).from);
+  }
+  line(line) {
+    const l = this.doc.line(line + 1);
+    return line + 1 < this.doc.lines ? `${l.text}
+` : l.text;
+  }
+  get lines() {
+    return this.doc.lines;
+  }
+}
+function firstNonWhitespace(line) {
+  let off = 0;
+  for (const ch of line) {
+    if (!/^\p{White_Space}$/u.test(ch))
+      return off;
+    off += ch.length;
+  }
+  return null;
+}
+function nodeStartLine(text, node, newLineBytePos) {
+  let line = text.byteToLine(node.startByte);
+  if (newLineBytePos !== null && node.startByte >= newLineBytePos)
+    line++;
+  return line;
+}
+function nodeEndLine(text, node, newLineBytePos) {
+  let line = text.byteToLine(node.endByte);
+  if (newLineBytePos !== null && node.endByte > newLineBytePos)
+    line++;
+  return line;
+}
+function areSatisfied(preds, m, text, newLineBytePos, grammar) {
+  const first = (capture) => m.nodes.find((n) => n.capture === capture)?.node ?? null;
+  for (const [capture, kind] of preds.notKindEq) {
+    const node = first(capture);
+    if (node && grammar.symbolName(node.symbol) === kind)
+      return false;
+  }
+  if (preds.sameLine) {
+    const [c1, c2, negated] = preds.sameLine;
+    const n1 = first(c1);
+    const n2 = first(c2);
+    const ok = !!n1 && !!n2 && nodeStartLine(text, n1, newLineBytePos) === nodeStartLine(text, n2, newLineBytePos) !== negated;
+    if (!ok)
+      return false;
+  }
+  if (preds.oneLine) {
+    const [capture, negated] = preds.oneLine;
+    const node = first(capture);
+    const ok = !!node && nodeEndLine(text, node, newLineBytePos) === nodeStartLine(text, node, newLineBytePos) !== negated;
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+function queryIndents(query, root, text, range, newLineBytePos) {
+  const indentCaptures = new Map;
+  const extendCaptures = new Map;
+  const opaqueRanges = [];
+  const push = (map, id, value) => {
+    const list = map.get(id);
+    if (list)
+      list.push(value);
+    else
+      map.set(id, [value]);
+  };
+  const c = query.captures;
+  const cursor = new QueryCursor(query.query, root, text.syntax.input, range, TREE_SITTER_MATCH_LIMIT);
+  try {
+    for (let m = cursor.nextMatch();m; m = cursor.nextMatch()) {
+      const preds = query.predicates.get(m.pattern);
+      if (preds && !areSatisfied(preds, m, text, newLineBytePos, query.query.language))
+        continue;
+      const added = [];
+      let anchor = null;
+      for (const matched of m.nodes) {
+        const id = matched.node.id;
+        const capture = matched.capture;
+        let type;
+        if (capture === c.indent)
+          type = { kind: "indent" };
+        else if (capture === c.indentAlways)
+          type = { kind: "indent-always" };
+        else if (capture === c.outdent)
+          type = { kind: "outdent" };
+        else if (capture === c.outdentAlways)
+          type = { kind: "outdent-always" };
+        else if (capture === c.align)
+          type = { kind: "align", text: "" };
+        else if (capture === c.anchor) {
+          anchor ??= matched.node;
+          continue;
+        } else if (capture === c.extend) {
+          push(extendCaptures, id, "extend");
+          continue;
+        } else if (capture === c.extendPreventOnce) {
+          push(extendCaptures, id, "prevent-once");
+          continue;
+        } else if (capture === c.opaque) {
+          opaqueRanges.push([matched.node.startByte, matched.node.endByte]);
+          continue;
+        } else
+          continue;
+        added.push([id, { type, header: query.headerPatterns.has(m.pattern) }]);
+      }
+      for (const [id, capture] of added) {
+        if (capture.type.kind === "align") {
+          if (!anchor)
+            continue;
+          const line = text.byteToLine(anchor.startByte);
+          capture.type = { kind: "align", text: text.syntax.slice(text.lineToByte(line), anchor.startByte) };
+        }
+        push(indentCaptures, id, capture);
+      }
+    }
+  } finally {
+    cursor.delete();
+  }
+  return { indentCaptures, extendCaptures, opaqueRanges };
+}
+function extendNodes(node, deepestPreceding, extendCaptures, text, line, tabWidth, indentWidth) {
+  let stopExtend = false;
+  let deepest = deepestPreceding;
+  while (deepest && !deepest.equals(node.value)) {
+    let extendNode = false;
+    let nodeCaptured = false;
+    const captures = extendCaptures.get(deepest.id);
+    if (captures) {
+      for (const capture of captures) {
+        if (capture === "prevent-once")
+          stopExtend = true;
+        else {
+          nodeCaptured = true;
+          if (text.byteToLine(deepest.endByte) === line)
+            extendNode = true;
+          else {
+            const cursorIndent = indentLevelForLine(text.line(line), tabWidth, indentWidth);
+            const nodeIndent = indentLevelForLine(text.line(text.byteToLine(deepest.startByte)), tabWidth, indentWidth);
+            if (cursorIndent > nodeIndent)
+              extendNode = true;
+          }
+        }
+      }
+    }
+    if (nodeCaptured && stopExtend)
+      stopExtend = false;
+    else if (extendNode && !stopExtend) {
+      node.value = deepest;
+      break;
+    }
+    deepest = deepest.parent;
+  }
+}
+function candidateBodyForNewLine(deepestPreceding, bytePos) {
+  let node = deepestPreceding;
+  for (let parent = node.parent;parent; parent = node.parent) {
+    if (node.endByte > bytePos)
+      break;
+    const cursor = parent.walk();
+    try {
+      if (cursor.gotoFirstChild()) {
+        for (;; ) {
+          if (cursor.currentNode.id === node.id) {
+            if (cursor.gotoNextSibling()) {
+              const child = cursor.currentNode;
+              if (child.startByte >= bytePos)
+                return child;
+            }
+            break;
+          }
+          if (!cursor.gotoNextSibling())
+            break;
+        }
+      }
+    } finally {
+      cursor.delete();
+    }
+    node = parent;
+  }
+  return null;
+}
+function initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos, newLineBytePos) {
+  const start = root.descendantForByteRange(bytePos, bytePos);
+  if (!start)
+    return null;
+  const node = { value: start };
+  let deepestPreceding = null;
+  for (const child of start.children)
+    if (child.endByte <= bytePos)
+      deepestPreceding = child;
+  if (deepestPreceding) {
+    let prec = deepestPreceding;
+    while (prec.childCount > 0)
+      prec = prec.child(prec.childCount - 1);
+    deepestPreceding = prec;
+  }
+  const candidateBody = newLineBytePos !== null && deepestPreceding ? candidateBodyForNewLine(deepestPreceding, bytePos) : null;
+  const upper = candidateBody ? candidateBody.endByte : bytePos + 1;
+  const range = deepestPreceding ? [deepestPreceding.endByte - 1, upper] : [bytePos, upper];
+  const result = queryIndents(query, root, text, range, newLineBytePos);
+  let descended = false;
+  if (candidateBody && result.indentCaptures.get(candidateBody.id)?.some((c) => c.header)) {
+    node.value = candidateBody;
+    descended = true;
+  }
+  if (deepestPreceding && !descended)
+    extendNodes(node, deepestPreceding, result.extendCaptures, text, line, tabWidth, indentWidth);
+  return [node.value, result.indentCaptures, result.opaqueRanges];
+}
+function opaqueHit(start, end, bytePos, text) {
+  return start <= bytePos && bytePos < end && text.byteToLine(start) < text.byteToLine(bytePos);
+}
+function containmentAccounting(query, root, text, tabWidth, indentWidth, line, bytePos, newLine) {
+  const newLineBytePos = newLine ? bytePos : null;
+  const init = initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos, newLineBytePos);
+  if (!init)
+    return null;
+  const [startNode, captures, opaqueRanges] = init;
+  if (opaqueRanges.some(([s, e]) => opaqueHit(s, e, bytePos, text)))
+    return [emptyIndentation(), true];
+  const targetLine = line + (newLine ? 1 : 0);
+  let indentLevels = 0;
+  let indentAlways = 0;
+  let outdent = 0;
+  let outdentAlways = 0;
+  let align = null;
+  const countedStartLines = [];
+  for (let node = startNode;node; node = node.parent) {
+    const defs = captures.get(node.id);
+    if (!defs)
+      continue;
+    let hasIndent = false;
+    let hasIndentAlways = false;
+    let hasOutdent = false;
+    let hasOutdentAlways = false;
+    let headerScoped = false;
+    let nodeAlign = null;
+    for (const def of defs) {
+      switch (def.type.kind) {
+        case "indent":
+          hasIndent = true;
+          headerScoped ||= def.header;
+          break;
+        case "indent-always":
+          hasIndentAlways = true;
+          headerScoped ||= def.header;
+          break;
+        case "outdent":
+          hasOutdent = true;
+          break;
+        case "outdent-always":
+          hasOutdentAlways = true;
+          break;
+        case "align":
+          nodeAlign = def.type.text;
+      }
+    }
+    const nodeStart = nodeStartLine(text, node, newLineBytePos);
+    const end = nodeEndLine(text, node, newLineBytePos);
+    const parent = headerScoped ? node.parent : null;
+    const start = parent ? nodeStartLine(text, parent, newLineBytePos) : nodeStart;
+    const contains = start < targetLine && targetLine <= end;
+    const opensTarget = nodeStart === targetLine;
+    if (!((hasIndent || hasIndentAlways) && (hasOutdent || hasOutdentAlways))) {
+      if (hasIndent && contains && !countedStartLines.includes(start)) {
+        countedStartLines.push(start);
+        indentLevels++;
+      }
+      if (hasIndentAlways && contains)
+        indentAlways++;
+      if (hasOutdent && opensTarget)
+        outdent++;
+      if (hasOutdentAlways && opensTarget)
+        outdentAlways++;
+    }
+    if (nodeAlign !== null && contains && align === null)
+      align = nodeAlign;
+  }
+  if (align !== null) {
+    indentLevels = 0;
+    indentAlways = 0;
+  }
+  return [{ indent: indentLevels, indentAlways, outdent, outdentAlways, align }, false];
+}
+function injectionBaseLevel(syntax, text, bytePos, tabWidth, indentWidth) {
+  const layer = syntax.layerForByteRange(bytePos, bytePos);
+  const inLayer = (line) => {
+    const fnw = firstNonWhitespace(text.line(line));
+    if (fnw === null)
+      return false;
+    const b = syntax.byteOf(text.doc.line(line + 1).from + fnw);
+    return syntax.layerForByteRange(b, b) === layer;
+  };
+  const bl = text.byteToLine(bytePos);
+  let first;
+  if (inLayer(bl)) {
+    first = bl;
+    while (first > 0 && inLayer(first - 1))
+      first--;
+  } else {
+    const total = text.lines;
+    first = bl + 1;
+    while (first + 1 < total && !inLayer(first))
+      first++;
+  }
+  return indentLevelForLine(text.line(first), tabWidth, indentWidth);
+}
+function indentQueryFor(loader, language) {
+  return loader.indentQuery(language, (grammar, source) => new IndentQuery(grammar, source, loader.regex));
+}
+function treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, line, pos, newLine) {
+  const text = new DocText(doc, syntax);
+  const bytePos = syntax.byteOf(pos);
+  const layer = syntax.layerForByteRange(bytePos, bytePos);
+  const injected = layer !== syntax.root && layer.language !== syntax.root.language ? indentQueryFor(syntax.loader, layer.language) : null;
+  const active = injected ?? query;
+  const tree = injected ? syntax.treeForByteRange(bytePos, bytePos) : syntax.root.tree;
+  const result = containmentAccounting(active, tree.rootNode, text, tabWidth, indentWidth, line, bytePos, newLine);
+  if (!result)
+    return null;
+  const [indentation, opaque] = result;
+  if (opaque) {
+    const lineText = text.line(line);
+    const first = firstNonWhitespace(lineText) ?? lineText.length;
+    return { ...emptyIndentation(), align: lineText.slice(0, first) };
+  }
+  if (injected)
+    indentation.indent += injectionBaseLevel(syntax, text, bytePos, tabWidth, indentWidth);
+  return indentation;
+}
+function indentForNewline(syntax, heuristic, style, tabWidth, doc, lineBefore, lineBeforeEndPos, currentLine) {
+  const indentWidth = indentStyleWidth(style, tabWidth);
+  const query = syntax && heuristic !== "simple" ? indentQueryFor(syntax.loader, syntax.root.language) : null;
+  if (syntax && query) {
+    const indent = treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, lineBefore, lineBeforeEndPos, true);
+    if (indent) {
+      if (heuristic === "hybrid") {
+        let attempts = 0;
+        for (let lineIdx = lineBefore;lineIdx >= 0; lineIdx--) {
+          const line = doc.line(lineIdx + 1);
+          const fnw = firstNonWhitespace(line.text);
+          if (fnw === null)
+            continue;
+          const computed = treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, lineIdx, line.from + fnw, false);
+          const relative = computed ? relativeIndent(indent, computed, line.text.slice(0, fnw), style, tabWidth) : null;
+          if (relative !== null)
+            return relative;
+          attempts++;
+          if (attempts === 4)
+            break;
+        }
+      }
+      return indentationString(indent, style, tabWidth);
+    }
+  }
+  const lineText = doc.line(currentLine + 1).text;
+  return indentStyleStr(style).repeat(indentLevelForLine(lineText, tabWidth, indentWidth));
+}
+
+// src/commands/insert.ts
+function languagePairs(editor) {
+  const loader = editor.languages;
+  if (!loader)
+    return [];
+  const out = [];
+  for (const data of loader.languages)
+    if (data.syntax && data.config.autoPairs)
+      out.push(data.config.autoPairs);
+  return out;
+}
+function autoPairsFor(editor, host, differs = () => true) {
+  const pairs = editor.config.autoPairs;
+  if (!pairs || !editor.helixAutoPairs)
+    return null;
+  const global = makeAutoPairs(pairs);
+  if (!editor.syntax)
+    return global;
+  if (!languagePairs(editor).some((p) => differs(global, makeAutoPairs(p))))
+    return global;
+  const syntax = editor.syntax(host);
+  if (!syntax)
+    return global;
+  const primary = selection(host).primary();
+  const layer = syntax.layerForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
+  const own = syntax.loader.language(layer.language).config.autoPairs;
+  return own ? makeAutoPairs(own) : global;
+}
+function insertDiffers(doc, ranges, ch) {
+  return (a, b) => ranges.some((r) => JSON.stringify(hookInsert(doc, r, ch, a)) !== JSON.stringify(hookInsert(doc, r, ch, b)));
+}
+function mayAutoPair(editor, ch) {
+  const pairs = editor.config.autoPairs;
+  if (!pairs || !editor.helixAutoPairs)
+    return false;
+  const has = (list) => list.some(([open, close]) => open === ch || close === ch);
+  return has(pairs) || editor.syntax !== null && languagePairs(editor).some(has) || isWhitespace(ch);
+}
+function autoPairsOf(cx) {
+  return autoPairsFor(cx.editor, cx.host);
+}
+function insertChar(cx, ch) {
+  const doc = docOf(cx);
+  const pairs = autoPairsFor(cx.editor, cx.host, insertDiffers(doc, selOf(cx).ranges, ch));
+  changeByAndWithSelection(cx, (range) => {
+    if (pairs) {
+      const hooked = hookInsert(doc, range, ch, pairs);
+      if (hooked)
+        return hooked;
+    }
+    const cursor = range.cursor(doc);
+    return [[cursor, cursor, ch], null];
+  });
+}
+function insertTabImpl(cx, count) {
+  const doc = docOf(cx);
+  const { style } = cx.editor.indent(cx.host);
+  const unit = indentStyleStr(style);
+  const changes = selOf(cx).ranges.map((range) => {
+    const cursor = range.cursor(doc);
+    let indent = unit.repeat(count);
+    if (style.kind === "spaces") {
+      const line = lineIndex(doc, cursor);
+      const offset = (cursor - lineToChar(doc, line)) % style.width;
+      indent = indent.slice(offset);
+    }
+    return [cursor, cursor, indent];
+  });
+  apply(cx, changeSetOf(doc, changes));
+}
+function smartTab(cx) {
+  const doc = docOf(cx);
+  if (cx.editor.config.smartTab.enable) {
+    const afterWhitespace = selOf(cx).ranges.every((range) => {
+      const cursor = range.cursor(doc);
+      const start = lineToChar(doc, lineIndex(doc, cursor));
+      return [...doc.sliceString(start, cursor)].every((c) => isWhitespace(c));
+    });
+    if (!afterWhitespace)
+      return;
+  }
+  insertTabImpl(cx, 1);
+}
+function newlineIndent(cx, doc, lineBefore, lineBeforeEndPos, currentLine) {
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  return indentForNewline(syntaxOf(cx), cx.editor.config.indentHeuristic, style, tabWidth, doc, lineBefore, lineBeforeEndPos, currentLine);
+}
+function lastNonWhitespace(s) {
+  const chars = [...s];
+  let offset = s.length;
+  for (let i = chars.length - 1;i >= 0; i--) {
+    offset -= chars[i].length;
+    if (!isWhitespace(chars[i]))
+      return offset;
+  }
+  return null;
+}
+function insertNewline(cx) {
+  const doc = docOf(cx);
+  const sel = selOf(cx);
+  const pairs = autoPairsOf(cx);
+  const unit = indentStyleStr(cx.editor.indent(cx.host).style);
+  const ranges = [];
+  const changes = [];
+  let globalOffs = 0;
+  let lastPos = 0;
+  for (const range of sel.ranges) {
+    let charsDeleted = 0;
+    const pos = range.cursor(doc);
+    const prev = pos === 0 ? " " : charBefore(doc, pos) ?? " ";
+    const curr = charAt(doc, pos) ?? " ";
+    const currentLine = lineIndex(doc, pos);
+    const lineStart = lineToChar(doc, currentLine);
+    let newText = "";
+    let from;
+    let to;
+    let localOffs;
+    const idx = lastNonWhitespace(doc.sliceString(lineStart, pos));
+    if (idx !== null) {
+      const lastCh = charAt(doc, lineStart + idx);
+      const firstTrailing = Math.min(Math.max(lineStart + idx + lastCh.length, lastPos), pos);
+      lastPos = pos;
+      const token = cx.editor.config.continueComments ? continuedLineCommentToken(cx, doc, currentLine) : null;
+      const lineText = doc.line(currentLine + 1).text;
+      const fnw = firstNonWhitespaceChar(doc, currentLine);
+      const indent = token !== null && fnw !== null ? lineText.slice(0, fnw) : newlineIndent(cx, doc, currentLine, pos, currentLine);
+      const pair = pairs?.get(prev);
+      const onAutoPair = !!pair && pair.open === prev && pair.close === curr;
+      if (token !== null) {
+        newText += `
+` + indent + token + " ";
+        localOffs = newText.length;
+      } else if (onAutoPair) {
+        newText += `
+` + indent + unit;
+        localOffs = newText.length;
+        newText += `
+` + indent;
+      } else {
+        newText += `
+` + indent;
+        localOffs = newText.length;
+      }
+      charsDeleted = pos - firstTrailing;
+      from = firstTrailing;
+      to = pos;
+      localOffs -= charsDeleted;
+    } else {
+      newText += `
+`;
+      from = lineStart;
+      to = lineStart;
+      localOffs = newText.length;
+    }
+    const newRange = range.cursor(doc) > range.anchor ? new Range(range.anchor + globalOffs, range.head + localOffs + globalOffs) : new Range(range.anchor + localOffs + globalOffs, range.head + localOffs + globalOffs);
+    ranges.push(newRange);
+    globalOffs += newText.length - charsDeleted;
+    changes.push([from, to, newText]);
+  }
+  apply(cx, changeSetOf(doc, changes), new Selection(ranges, sel.primaryIndex));
+}
+function dedent(cx, doc, range) {
+  const pos = range.cursor(doc);
+  const lineStart = lineToChar(doc, lineIndex(doc, pos));
+  const fragment = doc.sliceString(lineStart, pos);
+  if (fragment === "" || ![...fragment].every((c) => c === " " || c === "\t"))
+    return null;
+  if (charBefore(doc, pos) === "\t")
+    return [nthPrevGraphemeBoundary(doc, pos, 1), pos];
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  const width = [...fragment].reduce((sum, c) => sum + (c === "\t" ? tabWidth : 1), 0);
+  const iw = indentStyleWidth(style, tabWidth);
+  let drop = width % iw;
+  if (drop === 0)
+    drop = iw;
+  let start = pos;
+  const chars = [...fragment].reverse();
+  for (let i = 0;i < drop; i++) {
+    if (chars[i] === " ")
+      start -= 1;
+    else
+      break;
+  }
+  return [start, pos];
+}
+function deleteCharBackward(cx) {
+  const count = cx.count();
+  const doc = docOf(cx);
+  const pairs = autoPairsOf(cx);
+  deleteByAndWithSelection(cx, (range) => {
+    const pos = range.cursor(doc);
+    if (pos === 0)
+      return [[pos, pos], null];
+    const d = dedent(cx, doc, range);
+    if (d)
+      return [d, null];
+    if (pairs) {
+      const hooked = hookDelete(doc, range, pairs);
+      if (hooked)
+        return hooked;
+    }
+    return [[nthPrevGraphemeBoundary(doc, pos, count), pos], null];
+  });
+}
+function deleteBySelectionInsertMode(cx, f, direction) {
+  const doc = docOf(cx);
+  const sel = selOf(cx);
+  const ranges = [];
+  let insertNewline = false;
+  const deletions = [];
+  for (const r of sel.ranges) {
+    const [start, end] = f(doc, r);
+    if (direction === "forward") {
+      let range = r;
+      if (range.head > range.anchor) {
+        insertNewline = insertNewline || end === doc.length;
+        range = new Range(range.anchor, Math.min(range.head + 1, doc.length));
+      }
+      ranges.push(range);
+    }
+    deletions.push([start, end]);
+  }
+  let changes = deleteChanges(doc, deletions);
+  if (insertNewline) {
+    const newDocLen = changes.newLength;
+    changes = changes.compose(changeSetOf(changes.apply(doc), [[newDocLen, newDocLen, `
+`]]));
+  }
+  if (direction === "forward") {
+    const preset = new Selection(ranges, sel.primaryIndex);
+    const value = { selection: preset };
+    const mapped = value.selection.map(changes);
+    apply(cx, changes, mapped);
+  } else {
+    apply(cx, changes);
+  }
+}
+function excludeCursor(doc, range, cursor) {
+  if (range.to() === cursor.to() && doc.length !== cursor.to()) {
+    return new Range(range.from(), prevGraphemeBoundary(doc, cursor.to()));
+  }
+  return range;
+}
+var insertCommands = {
+  __insert_char: (cx, ch) => {
+    if (ch !== undefined)
+      insertChar(cx, ch);
+  },
+  insert_tab: (cx) => insertTabImpl(cx, 1),
+  smart_tab: smartTab,
+  insert_newline: insertNewline,
+  delete_char_backward: deleteCharBackward,
+  delete_char_forward: (cx) => {
+    const count = cx.count();
+    deleteBySelectionInsertMode(cx, (doc, range) => {
+      const pos = range.cursor(doc);
+      return [pos, nthNextGraphemeBoundary(doc, pos, count)];
+    }, "forward");
+  },
+  delete_word_backward: (cx) => {
+    const count = cx.count();
+    deleteBySelectionInsertMode(cx, (doc, range) => {
+      const anchor = wordMove(doc, range, count, "prevWordStart").from();
+      const next = new Range(anchor, range.cursor(doc));
+      const r = excludeCursor(doc, next, range);
+      return [r.from(), r.to()];
+    }, "backward");
+  },
+  delete_word_forward: (cx) => {
+    const count = cx.count();
+    deleteBySelectionInsertMode(cx, (doc, range) => [range.cursor(doc), wordMove(doc, range, count, "nextWordEnd").to()], "forward");
+  },
+  kill_to_line_start: (cx) => {
+    deleteBySelectionInsertMode(cx, (doc, range) => {
+      const line = lineIndex(doc, range.cursor(doc));
+      const firstChar = lineToChar(doc, line);
+      const anchor = range.cursor(doc);
+      let head;
+      if (anchor === firstChar && line !== 0)
+        head = lineEndCharIndex(doc, line - 1);
+      else {
+        const offset = firstNonWhitespaceChar(doc, line);
+        if (offset !== null && firstChar + offset < anchor)
+          head = firstChar + offset;
+        else
+          head = firstChar;
+      }
+      return [head, anchor];
+    }, "backward");
+  },
+  kill_to_line_end: (cx) => {
+    deleteBySelectionInsertMode(cx, (doc, range) => {
+      const line = lineIndex(doc, range.cursor(doc));
+      const lineEnd = lineEndCharIndex(doc, line);
+      const pos = range.cursor(doc);
+      if (pos === lineEnd)
+        return [pos, lineToChar(doc, line + 1)];
+      return [pos, lineEnd];
+    }, "forward");
+  },
+  commit_undo_checkpoint: (cx) => commitHistoryNow(cx.host),
+  insert_char_interactive: (cx) => {
+    const mode = modeOf(cx);
+    cx.editor.runStatic(cx, "insert_mode");
+    insertSelectionInteractive(cx, mode);
+  },
+  append_char_interactive: (cx) => {
+    const mode = modeOf(cx);
+    cx.editor.runStatic(cx, "append_mode");
+    insertSelectionInteractive(cx, mode);
+  }
+};
+function insertSelectionInteractive(cx, oldMode) {
+  const count = cx.count();
+  cx.onNextKey((cx, key) => {
+    if (key === "ret") {
+      if (count !== 1) {
+        cx.editor.setError("inserting multiple newlines not yet supported");
+        return;
+      }
+      insertNewline(cx);
+    } else if (key === "tab") {
+      insertTabImpl(cx, count);
+    } else {
+      const ch = cx.editor.keyChar(key);
+      if (ch !== null)
+        for (let i = 0;i < count; i++)
+          insertChar(cx, ch);
+    }
+    setModeOnly(cx, oldMode);
+  });
+}
+
+// src/syntax/textobject.ts
+function captureNodesAny(query, names, node, input) {
+  let capture = null;
+  for (const name of names) {
+    capture = query.getCapture(name);
+    if (capture !== null)
+      break;
+  }
+  if (capture === null)
+    return null;
+  const cursor = new QueryCursor(query, node, input, [0, 4294967295], TREE_SITTER_MATCH_LIMIT);
+  const out = [];
+  try {
+    for (let next = cursor.nextMatch();next; next = cursor.nextMatch()) {
+      const nodes = next.nodes.filter((n) => n.capture === capture).map((n) => n.node);
+      if (nodes.length === 0)
+        continue;
+      out.push({ start: nodes[0].startByte, end: nodes[nodes.length - 1].endByte });
+    }
+  } finally {
+    cursor.delete();
+  }
+  return out;
+}
+function queryAt(syntax, loader, bytePos) {
+  const layer = syntax.layerForByteRange(bytePos, bytePos);
+  const root = syntax.treeForByteRange(bytePos, bytePos).rootNode;
+  return [loader.textobjectQuery(layer.language), root];
+}
+function textobjectTreesitter(syntax, doc, range, textobject, objectName) {
+  const bytePos = syntax.byteOf(range.cursor(doc));
+  const [query, root] = queryAt(syntax, syntax.loader, bytePos);
+  if (!query)
+    return range;
+  const nodes = captureNodesAny(query, [`${objectName}.${textobject}`], root, syntax.input);
+  if (!nodes)
+    return range;
+  let best = null;
+  for (const node of nodes) {
+    if (!(node.start <= bytePos && bytePos < node.end))
+      continue;
+    if (!best || node.end - node.start < best.end - best.start)
+      best = node;
+  }
+  if (!best)
+    return range;
+  const len = syntax.byteLength;
+  if (best.start >= len || best.end >= len)
+    return range;
+  return new Range(syntax.posOf(best.start), syntax.posOf(best.end));
+}
+function gotoTreesitterObject(syntax, doc, range, objectName, dir, count) {
+  const getRange = (range) => {
+    const bytePos = syntax.byteOf(range.cursor(doc));
+    const [query, root] = queryAt(syntax, syntax.loader, bytePos);
+    if (!query)
+      return null;
+    const nodes = captureNodesAny(query, [`${objectName}.movement`, `${objectName}.around`, `${objectName}.inside`], root, syntax.input);
+    if (!nodes)
+      return null;
+    let node = null;
+    if (dir === "forward") {
+      for (const n of nodes) {
+        if (!(n.start > bytePos))
+          continue;
+        if (!node || n.start < node.start || n.start === node.start && n.end > node.end)
+          node = n;
+      }
+    } else {
+      for (const n of nodes) {
+        if (!(n.end < bytePos))
+          continue;
+        if (!node || n.end > node.end || n.end === node.end && n.start <= node.start)
+          node = n;
+      }
+    }
+    if (!node)
+      return null;
+    const len = syntax.byteLength;
+    if (node.start >= len || node.end >= len)
+      return null;
+    return new Range(syntax.posOf(node.start), syntax.posOf(node.end));
+  };
+  let last = range;
+  for (let i = 0;i < count; i++) {
+    const next = getRange(last);
+    if (!next || next.eq(last))
+      break;
+    last = next;
+  }
+  return last;
 }
 
 // src/match-brackets.ts
@@ -3873,7 +5936,7 @@ function insertWithIndent(cx, fallback) {
     const line = lineIndex(doc, range.cursor(doc));
     const lineStart = lineToChar(doc, line);
     if (lineEndCharIndex(doc, line) === lineStart) {
-      const indent = indentFor(cx, doc, line);
+      const indent = newlineIndent(cx, doc, line, lineStart, line);
       const pos = offs + lineStart;
       ranges.push(Range.point(pos + indent.length));
       offs += indent.length;
@@ -3892,20 +5955,6 @@ function insertWithIndent(cx, fallback) {
   }
   apply(cx, changeSetOf(doc, changes), new Selection(ranges, sel.primaryIndex));
 }
-function indentFor(cx, doc, line) {
-  const config = cx.editor.config;
-  const width = indentWidth(config);
-  let len = 0;
-  for (const ch of doc.line(line + 1).text) {
-    if (ch === "\t")
-      len += config.tabWidth - len % config.tabWidth;
-    else if (ch === " ")
-      len += 1;
-    else
-      break;
-  }
-  return indentUnit(config).repeat(Math.floor(len / width));
-}
 var LIST_MARKER = /^([ \t]*)((?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|>[ \t]?)/;
 function continuedListMarker(doc, line) {
   const m = LIST_MARKER.exec(doc.line(line + 1).text);
@@ -3918,7 +5967,7 @@ function continuedListMarker(doc, line) {
   marker = marker.replace(/\[[xX]\]/, "[ ]");
   return marker;
 }
-function openLines(cx, open) {
+function openLines(cx, open, comments = true) {
   const count = cx.count();
   enterInsertMode(cx);
   const doc = docOf(cx);
@@ -3931,10 +5980,12 @@ function openLines(cx, open) {
     const nextNewLine = open === "below" ? currLine + 1 : currLine;
     const aboveNext = Math.max(0, nextNewLine - 1);
     const [aboveEnd, aboveEndWidth] = nextNewLine === 0 ? [0, 0] : [lineEndCharIndex(doc, aboveNext), 1];
-    const continueToken = cx.editor.continueLists && open === "below" ? continuedListMarker(doc, currLine) : null;
+    const listToken = cx.editor.continueLists && open === "below" ? continuedListMarker(doc, currLine) : null;
+    const commentToken = listToken === null && comments && cx.editor.config.continueComments ? continuedLineCommentToken(cx, doc, currLine) : null;
+    const continueToken = listToken ?? (commentToken === null ? null : `${commentToken} `);
     const lineText = doc.line(currLine + 1).text;
     const firstNonWs = firstNonWhitespaceChar(doc, currLine);
-    const indent = continueToken !== null && firstNonWs !== null ? lineText.slice(0, firstNonWs) : indentFor(cx, doc, currLine);
+    const indent = continueToken !== null && firstNonWs !== null ? lineText.slice(0, firstNonWs) : newlineIndent(cx, doc, aboveNext, aboveEnd, currLine);
     const token = continueToken ?? "";
     let text;
     if (open === "above" && nextNewLine === 0)
@@ -3982,7 +6033,7 @@ function deleteSelectionImpl(cx, op, yank) {
   if (op === "delete")
     exitSelectMode(cx);
   else if (onlyWholeLines)
-    openLines(cx, "above");
+    openLines(cx, "above", false);
   else
     enterInsertMode(cx);
 }
@@ -4120,8 +6171,8 @@ function getLines(doc, sel) {
 function indentCommand(cx) {
   const count = cx.count();
   const doc = docOf(cx);
-  const config = cx.editor.config;
-  const indent = indentUnit(config).repeat(count);
+  const { style } = cx.editor.indent(cx.host);
+  const indent = indentStyleStr(style).repeat(count);
   const changes = [];
   for (const line of getLines(doc, selOf(cx))) {
     const text = doc.line(line + 1).text;
@@ -4129,8 +6180,8 @@ function indentCommand(cx) {
       continue;
     const pos = lineToChar(doc, line);
     let ind = indent;
-    if (config.indentStyle.kind === "spaces") {
-      const offset = (firstNonWhitespaceChar(doc, line) ?? 0) % config.indentStyle.width;
+    if (style.kind === "spaces") {
+      const offset = (firstNonWhitespaceChar(doc, line) ?? 0) % style.width;
       ind = indent.slice(offset);
     }
     changes.push([pos, pos, ind]);
@@ -4141,8 +6192,8 @@ function indentCommand(cx) {
 function unindentCommand(cx) {
   const count = cx.count();
   const doc = docOf(cx);
-  const config = cx.editor.config;
-  const width = count * indentWidth(config);
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  const width = count * indentStyleWidth(style, tabWidth);
   const changes = [];
   for (const lineIdx of getLines(doc, selOf(cx))) {
     const text = doc.line(lineIdx + 1).text;
@@ -4152,7 +6203,7 @@ function unindentCommand(cx) {
       if (ch === " ")
         w += 1;
       else if (ch === "\t")
-        w = (Math.floor(w / config.tabWidth) + 1) * config.tabWidth;
+        w = (Math.floor(w / tabWidth) + 1) * tabWidth;
       else
         break;
       pos += 1;
@@ -4383,9 +6434,8 @@ function selectTextobject(cx, objtype) {
         cx.editor.setStatus("Diff is not available in current buffer");
         return;
       }
-      if ("tfacTex".includes(ch))
-        return;
       const syntax = syntaxOf(cx);
+      const objects = { t: "class", f: "function", a: "parameter", c: "comment", T: "test", e: "entry", x: "xml-element" };
       setSel(cx, selOf(cx).transform((range) => {
         switch (ch) {
           case "w":
@@ -4396,6 +6446,14 @@ function selectTextobject(cx, objtype) {
             return textobjectParagraph(doc, range, objtype, count);
           case "m":
             return textobjectPairSurroundClosest(doc, range, objtype, count, syntax);
+          case "t":
+          case "f":
+          case "a":
+          case "c":
+          case "T":
+          case "e":
+          case "x":
+            return syntax ? textobjectTreesitter(syntax, doc, range, objtype, objects[ch]) : range;
           default:
             if (!/^[0-9A-Za-z]$/.test(ch))
               return textobjectPairSurround(doc, range, objtype, ch, count, syntax);
@@ -4668,490 +6726,6 @@ var editCommands = {
     });
   }
 };
-
-// src/auto-pairs.ts
-function makeAutoPairs(pairs) {
-  const map = new Map;
-  for (const [open, close] of pairs) {
-    const pair = { open, close };
-    map.set(open, pair);
-    if (open !== close)
-      map.set(close, pair);
-  }
-  return map;
-}
-function same(pair) {
-  return pair.open === pair.close;
-}
-function nextIsNotAlpha(doc, range) {
-  const next = charAt(doc, range.cursor(doc));
-  return next === null || !isAlphanumeric(next);
-}
-function prevIsNotAlpha(doc, range) {
-  const prev = charBefore(doc, range.cursor(doc));
-  return prev === null || !isAlphanumeric(prev);
-}
-function shouldClose(pair, doc, range) {
-  let result = nextIsNotAlpha(doc, range);
-  if (same(pair))
-    result = result && prevIsNotAlpha(doc, range);
-  return result;
-}
-function isSingleGrapheme(doc, range) {
-  if (range.isEmpty())
-    return false;
-  return nextGraphemeBoundary(doc, range.from()) === range.to();
-}
-function hookInsert(doc, range, ch, pairs) {
-  const pair = pairs.get(ch);
-  if (pair) {
-    if (same(pair))
-      return handleInsertSame(doc, range, pair);
-    if (pair.open === ch)
-      return handleInsertOpen(doc, range, pair);
-    if (pair.close === ch)
-      return handleInsertClose(doc, range, pair);
-  } else if (isWhitespace(ch)) {
-    return handleInsertWhitespace(doc, range, ch, pairs);
-  }
-  return null;
-}
-function hookDelete(doc, range, pairs) {
-  const cursor = range.cursor(doc);
-  const cur = charAt(doc, cursor);
-  const prev = charBefore(doc, cursor);
-  if (cur === null || prev === null)
-    return null;
-  if (doc.length >= 4 && isWhitespace(prev) && isWhitespace(cur)) {
-    const secondPrev = charAt(doc, nthPrevGraphemeBoundary(doc, cursor, 2));
-    const secondNext = charAt(doc, nextGraphemeBoundary(doc, cursor));
-    if (secondPrev === null || secondNext === null)
-      return null;
-    const pair = pairs.get(secondPrev);
-    if (pair && pair.open === secondPrev && pair.close === secondNext)
-      return handleDelete(doc, range);
-  }
-  const pair = pairs.get(cur);
-  if (!pair)
-    return null;
-  if (pair.open !== prev || pair.close !== cur)
-    return null;
-  return handleDelete(doc, range);
-}
-function handleDelete(doc, range) {
-  const cursor = range.cursor(doc);
-  const endNext = nextGraphemeBoundary(doc, cursor);
-  const endPrev = prevGraphemeBoundary(doc, cursor);
-  const sizeDelete = endNext - endPrev;
-  const nextHead = nextGraphemeBoundary(doc, range.head) - sizeDelete;
-  const single = isSingleGrapheme(doc, range);
-  let nextAnchor;
-  if (range.direction() === "forward")
-    nextAnchor = single ? range.anchor - (endNext - cursor) : range.anchor;
-  else
-    nextAnchor = single ? range.anchor - (cursor - endPrev) : range.anchor - sizeDelete;
-  return [[endPrev, endNext], new Range(nextAnchor, nextHead)];
-}
-function handleInsertWhitespace(doc, range, ch, pairs) {
-  const cursor = range.cursor(doc);
-  const cur = charAt(doc, cursor);
-  const prev = charBefore(doc, cursor);
-  if (cur === null || prev === null)
-    return null;
-  const pair = pairs.get(cur);
-  if (!pair || pair.open !== prev || pair.close !== cur)
-    return null;
-  return handleInsertSame(doc, range, { open: ch, close: ch });
-}
-function getNextRange(doc, start, lenInserted) {
-  if (start.head === doc.length && start.anchor === doc.length) {
-    return new Range(start.anchor + 1, start.head + 1);
-  }
-  const single = isSingleGrapheme(doc, start);
-  if (lenInserted === 0) {
-    const endAnchor = single ? nextGraphemeBoundary(doc, start.anchor) : start.anchor;
-    return new Range(endAnchor, nextGraphemeBoundary(doc, start.head));
-  }
-  if (lenInserted === 1) {
-    const endAnchor = single || start.direction() === "backward" ? start.anchor + 1 : start.anchor;
-    return new Range(endAnchor, start.head + 1);
-  }
-  const endHead = start.head === 0 || start.direction() === "backward" ? start.head + 1 : prevGraphemeBoundary(doc, start.head) + lenInserted;
-  const len = start.to() - start.from();
-  let endAnchor;
-  if (len === 0)
-    endAnchor = endHead;
-  else if (len === 1 && start.direction() === "forward")
-    endAnchor = endHead - 1;
-  else if (len === 1)
-    endAnchor = endHead + 1;
-  else if (start.direction() === "forward") {
-    endAnchor = single ? prevGraphemeBoundary(doc, start.head) + 1 : start.anchor;
-  } else {
-    endAnchor = single ? prevGraphemeBoundary(doc, start.anchor) + lenInserted : start.anchor + lenInserted;
-  }
-  return new Range(endAnchor, endHead);
-}
-function handleInsertOpen(doc, range, pair) {
-  const cursor = range.cursor(doc);
-  const next = charAt(doc, cursor);
-  if (next !== null && !shouldClose(pair, doc, range))
-    return null;
-  const text = pair.open + pair.close;
-  return [[cursor, cursor, text], getNextRange(doc, range, text.length)];
-}
-function handleInsertClose(doc, range, pair) {
-  const cursor = range.cursor(doc);
-  if (charAt(doc, cursor) !== pair.close)
-    return null;
-  return [[cursor, cursor, null], getNextRange(doc, range, 0)];
-}
-function handleInsertSame(doc, range, pair) {
-  const cursor = range.cursor(doc);
-  const next = charAt(doc, cursor);
-  if (next === pair.open)
-    return [[cursor, cursor, null], getNextRange(doc, range, 0)];
-  if (!shouldClose(pair, doc, range))
-    return null;
-  const text = pair.open + pair.close;
-  return [[cursor, cursor, text], getNextRange(doc, range, text.length)];
-}
-
-// src/commands/insert.ts
-function languagePairs(editor) {
-  const loader = editor.languages;
-  if (!loader)
-    return [];
-  const out = [];
-  for (const data of loader.languages)
-    if (data.syntax && data.config.autoPairs)
-      out.push(data.config.autoPairs);
-  return out;
-}
-function autoPairsFor(editor, host, differs = () => true) {
-  const pairs = editor.config.autoPairs;
-  if (!pairs || !editor.helixAutoPairs)
-    return null;
-  const global = makeAutoPairs(pairs);
-  if (!editor.syntax)
-    return global;
-  if (!languagePairs(editor).some((p) => differs(global, makeAutoPairs(p))))
-    return global;
-  const syntax = editor.syntax(host);
-  if (!syntax)
-    return global;
-  const primary = selection(host).primary();
-  const layer = syntax.layerForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
-  const own = syntax.loader.language(layer.language).config.autoPairs;
-  return own ? makeAutoPairs(own) : global;
-}
-function insertDiffers(doc, ranges, ch) {
-  return (a, b) => ranges.some((r) => JSON.stringify(hookInsert(doc, r, ch, a)) !== JSON.stringify(hookInsert(doc, r, ch, b)));
-}
-function mayAutoPair(editor, ch) {
-  const pairs = editor.config.autoPairs;
-  if (!pairs || !editor.helixAutoPairs)
-    return false;
-  const has = (list) => list.some(([open, close]) => open === ch || close === ch);
-  return has(pairs) || editor.syntax !== null && languagePairs(editor).some(has) || isWhitespace(ch);
-}
-function autoPairsOf(cx) {
-  return autoPairsFor(cx.editor, cx.host);
-}
-function insertChar(cx, ch) {
-  const doc = docOf(cx);
-  const pairs = autoPairsFor(cx.editor, cx.host, insertDiffers(doc, selOf(cx).ranges, ch));
-  changeByAndWithSelection(cx, (range) => {
-    if (pairs) {
-      const hooked = hookInsert(doc, range, ch, pairs);
-      if (hooked)
-        return hooked;
-    }
-    const cursor = range.cursor(doc);
-    return [[cursor, cursor, ch], null];
-  });
-}
-function insertTabImpl(cx, count) {
-  const doc = docOf(cx);
-  const config = cx.editor.config;
-  const unit = indentUnit(config);
-  const changes = selOf(cx).ranges.map((range) => {
-    const cursor = range.cursor(doc);
-    let indent = unit.repeat(count);
-    if (config.indentStyle.kind === "spaces") {
-      const line = lineIndex(doc, cursor);
-      const offset = (cursor - lineToChar(doc, line)) % config.indentStyle.width;
-      indent = indent.slice(offset);
-    }
-    return [cursor, cursor, indent];
-  });
-  apply(cx, changeSetOf(doc, changes));
-}
-function smartTab(cx) {
-  const doc = docOf(cx);
-  if (cx.editor.config.smartTab.enable) {
-    const afterWhitespace = selOf(cx).ranges.every((range) => {
-      const cursor = range.cursor(doc);
-      const start = lineToChar(doc, lineIndex(doc, cursor));
-      return [...doc.sliceString(start, cursor)].every((c) => isWhitespace(c));
-    });
-    if (!afterWhitespace)
-      return;
-  }
-  insertTabImpl(cx, 1);
-}
-function indentForNewline(cx, doc, line) {
-  const config = cx.editor.config;
-  const width = indentWidth(config);
-  let len = 0;
-  for (const ch of doc.line(line + 1).text) {
-    if (ch === "\t")
-      len += config.tabWidth - len % config.tabWidth;
-    else if (ch === " ")
-      len += 1;
-    else
-      break;
-  }
-  return indentUnit(config).repeat(Math.floor(len / width));
-}
-function lastNonWhitespace(s) {
-  const chars = [...s];
-  let offset = s.length;
-  for (let i = chars.length - 1;i >= 0; i--) {
-    offset -= chars[i].length;
-    if (!isWhitespace(chars[i]))
-      return offset;
-  }
-  return null;
-}
-function insertNewline(cx) {
-  const doc = docOf(cx);
-  const sel = selOf(cx);
-  const pairs = autoPairsOf(cx);
-  const unit = indentUnit(cx.editor.config);
-  const ranges = [];
-  const changes = [];
-  let globalOffs = 0;
-  let lastPos = 0;
-  for (const range of sel.ranges) {
-    let charsDeleted = 0;
-    const pos = range.cursor(doc);
-    const prev = pos === 0 ? " " : charBefore(doc, pos) ?? " ";
-    const curr = charAt(doc, pos) ?? " ";
-    const currentLine = lineIndex(doc, pos);
-    const lineStart = lineToChar(doc, currentLine);
-    let newText = "";
-    let from;
-    let to;
-    let localOffs;
-    const idx = lastNonWhitespace(doc.sliceString(lineStart, pos));
-    if (idx !== null) {
-      const lastCh = charAt(doc, lineStart + idx);
-      const firstTrailing = Math.min(Math.max(lineStart + idx + lastCh.length, lastPos), pos);
-      lastPos = pos;
-      const indent = indentForNewline(cx, doc, currentLine);
-      const pair = pairs?.get(prev);
-      const onAutoPair = !!pair && pair.open === prev && pair.close === curr;
-      if (onAutoPair) {
-        newText += `
-` + indent + unit;
-        localOffs = newText.length;
-        newText += `
-` + indent;
-      } else {
-        newText += `
-` + indent;
-        localOffs = newText.length;
-      }
-      charsDeleted = pos - firstTrailing;
-      from = firstTrailing;
-      to = pos;
-      localOffs -= charsDeleted;
-    } else {
-      newText += `
-`;
-      from = lineStart;
-      to = lineStart;
-      localOffs = newText.length;
-    }
-    const newRange = range.cursor(doc) > range.anchor ? new Range(range.anchor + globalOffs, range.head + localOffs + globalOffs) : new Range(range.anchor + localOffs + globalOffs, range.head + localOffs + globalOffs);
-    ranges.push(newRange);
-    globalOffs += newText.length - charsDeleted;
-    changes.push([from, to, newText]);
-  }
-  apply(cx, changeSetOf(doc, changes), new Selection(ranges, sel.primaryIndex));
-}
-function dedent(cx, doc, range) {
-  const pos = range.cursor(doc);
-  const lineStart = lineToChar(doc, lineIndex(doc, pos));
-  const fragment = doc.sliceString(lineStart, pos);
-  if (fragment === "" || ![...fragment].every((c) => c === " " || c === "\t"))
-    return null;
-  if (charBefore(doc, pos) === "\t")
-    return [nthPrevGraphemeBoundary(doc, pos, 1), pos];
-  const config = cx.editor.config;
-  const width = [...fragment].reduce((sum, c) => sum + (c === "\t" ? config.tabWidth : 1), 0);
-  const iw = indentWidth(config);
-  let drop = width % iw;
-  if (drop === 0)
-    drop = iw;
-  let start = pos;
-  const chars = [...fragment].reverse();
-  for (let i = 0;i < drop; i++) {
-    if (chars[i] === " ")
-      start -= 1;
-    else
-      break;
-  }
-  return [start, pos];
-}
-function deleteCharBackward(cx) {
-  const count = cx.count();
-  const doc = docOf(cx);
-  const pairs = autoPairsOf(cx);
-  deleteByAndWithSelection(cx, (range) => {
-    const pos = range.cursor(doc);
-    if (pos === 0)
-      return [[pos, pos], null];
-    const d = dedent(cx, doc, range);
-    if (d)
-      return [d, null];
-    if (pairs) {
-      const hooked = hookDelete(doc, range, pairs);
-      if (hooked)
-        return hooked;
-    }
-    return [[nthPrevGraphemeBoundary(doc, pos, count), pos], null];
-  });
-}
-function deleteBySelectionInsertMode(cx, f, direction) {
-  const doc = docOf(cx);
-  const sel = selOf(cx);
-  const ranges = [];
-  let insertNewline = false;
-  const deletions = [];
-  for (const r of sel.ranges) {
-    const [start, end] = f(doc, r);
-    if (direction === "forward") {
-      let range = r;
-      if (range.head > range.anchor) {
-        insertNewline = insertNewline || end === doc.length;
-        range = new Range(range.anchor, Math.min(range.head + 1, doc.length));
-      }
-      ranges.push(range);
-    }
-    deletions.push([start, end]);
-  }
-  let changes = deleteChanges(doc, deletions);
-  if (insertNewline) {
-    const newDocLen = changes.newLength;
-    changes = changes.compose(changeSetOf(changes.apply(doc), [[newDocLen, newDocLen, `
-`]]));
-  }
-  if (direction === "forward") {
-    const preset = new Selection(ranges, sel.primaryIndex);
-    const value = { selection: preset };
-    const mapped = value.selection.map(changes);
-    apply(cx, changes, mapped);
-  } else {
-    apply(cx, changes);
-  }
-}
-function excludeCursor(doc, range, cursor) {
-  if (range.to() === cursor.to() && doc.length !== cursor.to()) {
-    return new Range(range.from(), prevGraphemeBoundary(doc, cursor.to()));
-  }
-  return range;
-}
-var insertCommands = {
-  __insert_char: (cx, ch) => {
-    if (ch !== undefined)
-      insertChar(cx, ch);
-  },
-  insert_tab: (cx) => insertTabImpl(cx, 1),
-  smart_tab: smartTab,
-  insert_newline: insertNewline,
-  delete_char_backward: deleteCharBackward,
-  delete_char_forward: (cx) => {
-    const count = cx.count();
-    deleteBySelectionInsertMode(cx, (doc, range) => {
-      const pos = range.cursor(doc);
-      return [pos, nthNextGraphemeBoundary(doc, pos, count)];
-    }, "forward");
-  },
-  delete_word_backward: (cx) => {
-    const count = cx.count();
-    deleteBySelectionInsertMode(cx, (doc, range) => {
-      const anchor = wordMove(doc, range, count, "prevWordStart").from();
-      const next = new Range(anchor, range.cursor(doc));
-      const r = excludeCursor(doc, next, range);
-      return [r.from(), r.to()];
-    }, "backward");
-  },
-  delete_word_forward: (cx) => {
-    const count = cx.count();
-    deleteBySelectionInsertMode(cx, (doc, range) => [range.cursor(doc), wordMove(doc, range, count, "nextWordEnd").to()], "forward");
-  },
-  kill_to_line_start: (cx) => {
-    deleteBySelectionInsertMode(cx, (doc, range) => {
-      const line = lineIndex(doc, range.cursor(doc));
-      const firstChar = lineToChar(doc, line);
-      const anchor = range.cursor(doc);
-      let head;
-      if (anchor === firstChar && line !== 0)
-        head = lineEndCharIndex(doc, line - 1);
-      else {
-        const offset = firstNonWhitespaceChar(doc, line);
-        if (offset !== null && firstChar + offset < anchor)
-          head = firstChar + offset;
-        else
-          head = firstChar;
-      }
-      return [head, anchor];
-    }, "backward");
-  },
-  kill_to_line_end: (cx) => {
-    deleteBySelectionInsertMode(cx, (doc, range) => {
-      const line = lineIndex(doc, range.cursor(doc));
-      const lineEnd = lineEndCharIndex(doc, line);
-      const pos = range.cursor(doc);
-      if (pos === lineEnd)
-        return [pos, lineToChar(doc, line + 1)];
-      return [pos, lineEnd];
-    }, "forward");
-  },
-  commit_undo_checkpoint: (cx) => commitHistoryNow(cx.host),
-  insert_char_interactive: (cx) => {
-    const mode = modeOf(cx);
-    cx.editor.runStatic(cx, "insert_mode");
-    insertSelectionInteractive(cx, mode);
-  },
-  append_char_interactive: (cx) => {
-    const mode = modeOf(cx);
-    cx.editor.runStatic(cx, "append_mode");
-    insertSelectionInteractive(cx, mode);
-  }
-};
-function insertSelectionInteractive(cx, oldMode) {
-  const count = cx.count();
-  cx.onNextKey((cx, key) => {
-    if (key === "ret") {
-      if (count !== 1) {
-        cx.editor.setError("inserting multiple newlines not yet supported");
-        return;
-      }
-      insertNewline(cx);
-    } else if (key === "tab") {
-      insertTabImpl(cx, count);
-    } else {
-      const ch = cx.editor.keyChar(key);
-      if (ch !== null)
-        for (let i = 0;i < count; i++)
-          insertChar(cx, ch);
-    }
-    setModeOnly(cx, oldMode);
-  });
-}
 
 // src/commands/misc.ts
 import { Transaction as Transaction2 } from "@codemirror/state";
@@ -6140,21 +7714,27 @@ function moveNodeBound(dir, movement) {
       setSel(cx, moveParentNodeEnd(syntax, docOf(cx), selOf(cx), dir, movement));
   });
 }
-function gotoTsObject(dir) {
-  return (cx) => applyMotion(cx, (cx) => {
-    if (!syntaxOf(cx)) {
-      cx.editor.setStatus("Syntax-tree is not available in current buffer");
-      return;
-    }
-    const isSelect = modeOf(cx) === "select";
-    const selection = selOf(cx).transform((range) => {
-      if (!isSelect)
-        return range.withDirection(dir);
-      return new Range(range.anchor, range.head < range.anchor ? range.anchor : range.head);
+function gotoTsObject(object, dir) {
+  return (cx) => {
+    const count = cx.count();
+    applyMotion(cx, (cx) => {
+      const syntax = syntaxOf(cx);
+      if (!syntax) {
+        cx.editor.setStatus("Syntax-tree is not available in current buffer");
+        return;
+      }
+      const doc = docOf(cx);
+      const isSelect = modeOf(cx) === "select";
+      const selection = selOf(cx).transform((range) => {
+        const next = gotoTreesitterObject(syntax, doc, range, object, dir, count);
+        if (!isSelect)
+          return next.withDirection(dir);
+        return new Range(range.anchor, next.head < range.anchor ? next.anchor : next.head);
+      });
+      pushJump(cx);
+      setSel(cx, selection);
     });
-    pushJump(cx);
-    setSel(cx, selection);
-  });
+  };
 }
 var syntaxCommands = {
   expand_selection: expand2,
@@ -6167,20 +7747,20 @@ var syntaxCommands = {
   move_parent_node_start: moveNodeBound("backward", "move"),
   extend_parent_node_end: moveNodeBound("forward", "extend"),
   extend_parent_node_start: moveNodeBound("backward", "extend"),
-  goto_next_function: gotoTsObject("forward"),
-  goto_prev_function: gotoTsObject("backward"),
-  goto_next_class: gotoTsObject("forward"),
-  goto_prev_class: gotoTsObject("backward"),
-  goto_next_parameter: gotoTsObject("forward"),
-  goto_prev_parameter: gotoTsObject("backward"),
-  goto_next_comment: gotoTsObject("forward"),
-  goto_prev_comment: gotoTsObject("backward"),
-  goto_next_test: gotoTsObject("forward"),
-  goto_prev_test: gotoTsObject("backward"),
-  goto_next_xml_element: gotoTsObject("forward"),
-  goto_prev_xml_element: gotoTsObject("backward"),
-  goto_next_entry: gotoTsObject("forward"),
-  goto_prev_entry: gotoTsObject("backward")
+  goto_next_function: gotoTsObject("function", "forward"),
+  goto_prev_function: gotoTsObject("function", "backward"),
+  goto_next_class: gotoTsObject("class", "forward"),
+  goto_prev_class: gotoTsObject("class", "backward"),
+  goto_next_parameter: gotoTsObject("parameter", "forward"),
+  goto_prev_parameter: gotoTsObject("parameter", "backward"),
+  goto_next_comment: gotoTsObject("comment", "forward"),
+  goto_prev_comment: gotoTsObject("comment", "backward"),
+  goto_next_test: gotoTsObject("test", "forward"),
+  goto_prev_test: gotoTsObject("test", "backward"),
+  goto_next_xml_element: gotoTsObject("xml-element", "forward"),
+  goto_prev_xml_element: gotoTsObject("xml-element", "backward"),
+  goto_next_entry: gotoTsObject("entry", "forward"),
+  goto_prev_entry: gotoTsObject("entry", "backward")
 };
 
 // src/core/textwrap.ts
@@ -6474,6 +8054,14 @@ var OPTIONS = {
   "auto-info": [(c) => c.autoInfo, (c, v) => c.autoInfo = bool(v)],
   "color-modes": [(c) => c.colorModes, (c, v) => c.colorModes = bool(v)],
   cursorline: [(c) => c.cursorline, (c, v) => c.cursorline = bool(v)],
+  "indent-heuristic": [
+    (c) => c.indentHeuristic,
+    (c, v) => {
+      if (v !== "simple" && v !== "tree-sitter" && v !== "hybrid")
+        throw new Error("invalid indent-heuristic");
+      c.indentHeuristic = v;
+    }
+  ],
   "continue-comments": [(c) => c.continueComments, (c, v) => c.continueComments = bool(v)],
   "line-number": [
     (c) => c.lineNumber ?? "absolute",
@@ -6933,14 +8521,14 @@ var DEFS = [
     fun: validateOnly((cx, args) => {
       const a = args.positional[0];
       if (a === undefined) {
-        const s = cx.editor.config.indentStyle;
+        const s = cx.editor.indent(cx.host).style;
         cx.editor.setStatus(s.kind === "tabs" ? "tabs" : `${s.width} ${s.width === 1 ? "space" : "spaces"}`);
         return;
       }
       if (a === "t" || a === "tabs")
-        cx.editor.config.indentStyle = { kind: "tabs" };
+        cx.editor.indentStyles.set(cx.host.id, { kind: "tabs" });
       else if (/^\d+$/.test(a) && Number(a) >= 1 && Number(a) <= 16)
-        cx.editor.config.indentStyle = { kind: "spaces", width: Number(a) };
+        cx.editor.indentStyles.set(cx.host.id, { kind: "spaces", width: Number(a) });
       else
         cx.editor.setError("'indent-style': invalid indent style");
     })
@@ -7351,234 +8939,6 @@ class Prompt {
   }
 }
 
-// src/commands/comments.ts
-var DEFAULT_LINE = "#";
-var DEFAULT_BLOCK = { start: "/*", end: "*/" };
-function firstNonWs(s) {
-  let off = 0;
-  for (const ch of s) {
-    if (!isWhitespace(ch))
-      return off;
-    off += ch.length;
-  }
-  return null;
-}
-function lastNonWs(s) {
-  const chars = [...s];
-  let off = s.length;
-  for (let i = chars.length - 1;i >= 0; i--) {
-    off -= chars[i].length;
-    if (!isWhitespace(chars[i]))
-      return off;
-  }
-  return null;
-}
-function getCommentToken(doc, tokens, line) {
-  const text = lineWithEnding(doc, line);
-  const start = firstNonWs(text);
-  if (start === null)
-    return null;
-  let best = null;
-  for (const t of tokens)
-    if (text.slice(start).startsWith(t) && (best === null || t.length > best.length))
-      best = t;
-  return best;
-}
-function toggleLineComments(doc, sel, token) {
-  const tok = token ?? DEFAULT_LINE;
-  const comment = `${tok} `;
-  const lines = [];
-  let minNext = 0;
-  for (const range of sel.ranges) {
-    const [s, e] = lineRange(doc, range);
-    const start = Math.min(Math.max(s, minNext), doc.lines);
-    const end = Math.min(e + 1, doc.lines);
-    for (let l = start;l < end; l++)
-      lines.push(l);
-    minNext = end;
-  }
-  let commented = true;
-  const toChange = [];
-  let min = Number.MAX_SAFE_INTEGER;
-  let margin = 1;
-  for (const line of lines) {
-    const text = lineWithEnding(doc, line);
-    const pos = firstNonWs(text);
-    if (pos === null)
-      continue;
-    min = Math.min(min, pos);
-    if (text.slice(pos, Math.min(pos + tok.length, text.length)) !== tok)
-      commented = false;
-    if (text[pos + tok.length] !== " ")
-      margin = 0;
-    toChange.push(line);
-  }
-  return toChange.map((line) => {
-    const pos = lineToChar(doc, line) + min;
-    return commented ? [pos, pos + tok.length + margin, null] : [pos, pos, comment];
-  });
-}
-function findBlockComments(tokens, doc, sel) {
-  let commented = true;
-  let onlyWhitespace = true;
-  const changes = [];
-  const defaults = tokens[0] ?? DEFAULT_BLOCK;
-  let startToken = defaults.start;
-  let endToken = defaults.end;
-  const sorted = [...tokens].sort((a, b) => a.start.length === b.start.length ? b.end.length - a.end.length : b.start.length - a.start.length);
-  for (const range of sel.ranges) {
-    const slice = doc.sliceString(range.from(), range.to());
-    const startPos = firstNonWs(slice);
-    const endPos = lastNonWs(slice);
-    if (startPos === null || endPos === null) {
-      changes.push({ kind: "whitespace", range });
-      continue;
-    }
-    let lineCommented = false;
-    let afterStart = 0;
-    let beforeEnd = 0;
-    const len = endPos + 1 - startPos;
-    for (const { start, end } of sorted) {
-      afterStart = startPos + start.length;
-      beforeEnd = Math.max(0, endPos - end.length);
-      if (len >= start.length + end.length) {
-        if (slice.slice(startPos, afterStart) === start && slice.slice(beforeEnd + 1, endPos + 1) === end) {
-          startToken = start;
-          endToken = end;
-          lineCommented = true;
-          break;
-        }
-      }
-    }
-    if (!lineCommented) {
-      changes.push({ kind: "uncommented", range, startPos, endPos, startToken: defaults.start, endToken: defaults.end });
-      commented = false;
-    } else {
-      changes.push({
-        kind: "commented",
-        range,
-        startPos,
-        endPos,
-        startMargin: slice[afterStart] === " ",
-        endMargin: afterStart !== beforeEnd && slice[beforeEnd] === " ",
-        startToken,
-        endToken
-      });
-    }
-    onlyWhitespace = false;
-  }
-  if (onlyWhitespace)
-    commented = false;
-  return [commented, changes];
-}
-function createBlockCommentTransaction(sel, commented, comments) {
-  const changes = [];
-  const ranges = [];
-  let offs = 0;
-  for (const c of comments) {
-    if (commented) {
-      if (c.kind === "commented") {
-        const from = c.range.from();
-        changes.push([from + c.startPos, from + c.startPos + c.startToken.length + (c.startMargin ? 1 : 0), null]);
-        changes.push([from + c.endPos - c.endToken.length - (c.endMargin ? 1 : 0) + 1, from + c.endPos + 1, null]);
-      }
-    } else if (c.kind === "uncommented") {
-      const from = c.range.from();
-      changes.push([from + c.startPos, from + c.startPos, `${c.startToken} `]);
-      changes.push([from + c.endPos + 1, from + c.endPos + 1, ` ${c.endToken}`]);
-      const offset = c.startToken.length + c.endToken.length + 2;
-      ranges.push(new Range(from + offs, from + offs + c.endPos + 1 + offset).withDirection(c.range.direction()));
-      offs += offset;
-    } else {
-      ranges.push(new Range(c.range.from() + offs, c.range.to() + offs));
-    }
-  }
-  return [changes, ranges];
-}
-function splitLinesOfSelection(doc, sel) {
-  const ranges = [];
-  for (const range of sel.ranges) {
-    const [ls, le] = lineRange(doc, range);
-    for (let l = ls;l <= le; l++) {
-      const start = lineToChar(doc, l);
-      const end = lineToChar(doc, l + 1);
-      ranges.push(new Range(start, end));
-    }
-  }
-  return new Selection(ranges, 0);
-}
-function languageCommentTokens(cx, pos) {
-  const loader = cx.editor.languages;
-  const syntax = syntaxOf(cx);
-  let config = null;
-  if (syntax && loader) {
-    const byte = syntax.byteOf(pos);
-    let lineLayer = null;
-    let blockLayer = null;
-    for (const layer of syntax.layersForByteRange(byte, byte)) {
-      const own = loader.language(layer.language).config;
-      if (own.commentTokens)
-        lineLayer = own;
-      if (own.blockCommentTokens)
-        blockLayer = own;
-    }
-    config = lineLayer ?? blockLayer;
-  }
-  config ??= cx.editor.languageConfig(cx.host);
-  return { line: config?.commentTokens ?? null, block: config?.blockCommentTokens ?? null };
-}
-function runComments(cx, kind) {
-  const doc = docOf(cx);
-  const sel = selOf(cx);
-  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : languageCommentTokens(cx, sel.primary().cursor(doc));
-  const cursorLine = lineIndex(doc, sel.primary().cursor(doc));
-  const lineToken = tokens.line ? getCommentToken(doc, tokens.line, cursorLine) ?? tokens.line[0] ?? null : null;
-  const blockTokens = tokens.block;
-  let changes;
-  let ranges = null;
-  const blockToggle = (s, bt) => {
-    const [commented, cc] = findBlockComments(bt, doc, s);
-    const [ch, rs] = createBlockCommentTransaction(s, commented, cc);
-    return { ch, rs: commented ? null : rs };
-  };
-  if (kind === "toggle") {
-    if (lineToken !== null && blockTokens === null) {
-      changes = toggleLineComments(doc, sel, lineToken);
-    } else {
-      const split = splitLinesOfSelection(doc, sel);
-      const bt = blockTokens ?? [DEFAULT_BLOCK];
-      const [lineCommented, lineChanges] = findBlockComments(bt, doc, split);
-      if (lineCommented) {
-        changes = createBlockCommentTransaction(split, true, lineChanges)[0];
-      } else {
-        const [blockCommented, blockChanges] = findBlockComments(bt, doc, sel);
-        if (blockCommented)
-          changes = createBlockCommentTransaction(sel, true, blockChanges)[0];
-        else if (lineToken === null && blockTokens !== null)
-          changes = createBlockCommentTransaction(split, false, lineChanges)[0];
-        else
-          changes = toggleLineComments(doc, sel, lineToken);
-      }
-    }
-  } else if (kind === "line") {
-    if (lineToken === null && blockTokens !== null) {
-      const r = blockToggle(splitLinesOfSelection(doc, sel), blockTokens);
-      changes = r.ch;
-      ranges = r.rs;
-    } else {
-      changes = toggleLineComments(doc, sel, lineToken);
-    }
-  } else if (lineToken !== null && blockTokens === null) {
-    changes = toggleLineComments(doc, sel, lineToken);
-  } else {
-    const r = blockToggle(sel, blockTokens ?? [DEFAULT_BLOCK]);
-    changes = r.ch;
-    ranges = r.rs;
-  }
-  apply(cx, changeSetOf(doc, changes), ranges ? new Selection(ranges, sel.primaryIndex) : null);
-  exitSelectMode(cx);
-}
-
 // src/core/editor.ts
 class Context {
   editor;
@@ -7771,6 +9131,16 @@ class HelixEditor {
   languageConfig(host) {
     const id = this.documentLanguage?.get(host) ?? null;
     return id === null || !this.languages ? null : this.languages.language(id).config;
+  }
+  indentStyles = new Map;
+  indent(host) {
+    const language = this.languageConfig(host)?.indent ?? null;
+    return { style: this.indentStyles.get(host.id) ?? this.config.indentStyle, tabWidth: language?.tabWidth ?? this.config.tabWidth };
+  }
+  detectIndent(host) {
+    const language = this.languageConfig(host)?.indent ?? null;
+    const style = autoDetectIndentStyle(host.state.doc) ?? (language ? indentStyleFromStr(language.unit) : this.config.indentStyle);
+    this.indentStyles.set(host.id, style);
   }
   languageName(host) {
     return this.languageConfig(host)?.languageId ?? null;
@@ -8116,7 +9486,6 @@ var IGNORED_EDITOR = new Set([
   "default-line-ending",
   "atomic-save",
   "popup-border",
-  "indent-heuristic",
   "end-of-line-diagnostics",
   "clipboard-provider",
   "editor-config",
@@ -8185,6 +9554,13 @@ function applyEditor(config, editor, warnings) {
         const s = asStr(value, key, warnings);
         if (s !== undefined)
           config.jumpLabelAlphabet = [...s];
+        break;
+      }
+      case "indent-heuristic": {
+        if (value === "simple" || value === "tree-sitter" || value === "hybrid")
+          config.indentHeuristic = value;
+        else
+          warnings.push("editor.indent-heuristic: expected simple, tree-sitter or hybrid");
         break;
       }
       case "shell": {
@@ -9061,642 +10437,6 @@ function parseLanguagesToml(...sources) {
   return { languages, grammars };
 }
 
-// src/syntax/ts.ts
-function readLeb(bytes, at) {
-  let result = 0;
-  let shift = 0;
-  for (;; ) {
-    const byte = bytes[at.pos++];
-    result |= (byte & 127) << shift;
-    if ((byte & 128) === 0)
-      return result >>> 0;
-    shift += 7;
-  }
-}
-function dylinkInfo(module) {
-  const section = WebAssembly.Module.customSections(module, "dylink.0")[0];
-  if (!section)
-    throw new Error("not a tree-sitter grammar module: no dylink.0 section");
-  const bytes = new Uint8Array(section);
-  const at = { pos: 0 };
-  while (at.pos < bytes.length) {
-    const type = bytes[at.pos++];
-    const size = readLeb(bytes, at);
-    const end = at.pos + size;
-    if (type === 1) {
-      const memorySize = readLeb(bytes, at);
-      const memoryAlign = readLeb(bytes, at);
-      const tableSize = readLeb(bytes, at);
-      return { memorySize, memoryAlign, tableSize };
-    }
-    at.pos = end;
-  }
-  return { memorySize: 0, memoryAlign: 0, tableSize: 0 };
-}
-function alignUp(value, align) {
-  return Math.ceil(value / align) * align;
-}
-var NODE_WORDS = 6;
-var NODE_BYTES = NODE_WORDS * 4;
-var ENOSYS = 52;
-
-class Runtime {
-  x;
-  scratch;
-  words;
-  bytes;
-  constructor(x) {
-    this.x = x;
-    this.scratch = x.hm_malloc(NODE_BYTES * 2 + 16);
-    this.words = new Uint32Array(x.memory.buffer);
-    this.bytes = new Uint8Array(x.memory.buffer);
-  }
-  async loadLanguage(binary, name) {
-    const module = await WebAssembly.compile(binary);
-    const info = dylinkInfo(module);
-    const x = this.x;
-    const align = 2 ** info.memoryAlign;
-    const memoryBase = info.memorySize > 0 ? alignUp(x.calloc(1, info.memorySize + align), align) : 0;
-    const table = x.__indirect_function_table;
-    const tableBase = table.length;
-    if (info.tableSize > 0)
-      table.grow(info.tableSize);
-    const env = {
-      memory: x.memory,
-      __indirect_function_table: table,
-      __stack_pointer: x.__stack_pointer,
-      __memory_base: new WebAssembly.Global({ value: "i32", mutable: false }, memoryBase),
-      __table_base: new WebAssembly.Global({ value: "i32", mutable: false }, tableBase)
-    };
-    const own = x;
-    for (const imp of WebAssembly.Module.imports(module)) {
-      if (imp.module !== "env")
-        throw new Error(`grammar ${name} imports ${imp.module}.${imp.name}`);
-      if (imp.name in env)
-        continue;
-      const value = imp.kind === "function" ? own[imp.name] : undefined;
-      if (value === undefined)
-        throw new Error(`grammar ${name} imports ${imp.name}, which tree-sitter does not export`);
-      env[imp.name] = value;
-    }
-    const instance = await WebAssembly.instantiate(module, { env });
-    const exports = instance.exports;
-    exports.__wasm_apply_data_relocs?.();
-    exports.__wasm_call_ctors?.();
-    const entry = exports[`tree_sitter_${name.replace(/[-.]/g, "_")}`];
-    if (!entry)
-      throw new Error(`grammar ${name} has no tree_sitter_${name} function`);
-    return entry();
-  }
-  static async load(binary) {
-    const stub = () => ENOSYS;
-    const { instance } = await WebAssembly.instantiate(binary, {
-      wasi_snapshot_preview1: { fd_close: stub, fd_seek: stub, fd_write: stub }
-    });
-    const x = instance.exports;
-    x._initialize();
-    return new Runtime(x);
-  }
-  u32() {
-    if (this.words.buffer !== this.x.memory.buffer)
-      this.words = new Uint32Array(this.x.memory.buffer);
-    return this.words;
-  }
-  u8() {
-    if (this.bytes.buffer !== this.x.memory.buffer)
-      this.bytes = new Uint8Array(this.x.memory.buffer);
-    return this.bytes;
-  }
-  get inPtr() {
-    return this.scratch;
-  }
-  get outPtr() {
-    return this.scratch + NODE_BYTES;
-  }
-  get lenPtr() {
-    return this.scratch + NODE_BYTES * 2;
-  }
-  writeNode(ptr, node) {
-    this.u32().set(node.raw, ptr >> 2);
-  }
-  readNode(ptr) {
-    const words = this.u32();
-    const raw = words.slice(ptr >> 2, (ptr >> 2) + NODE_WORDS);
-    return raw[4] === 0 ? null : new Node(this, raw);
-  }
-  string(ptr, length) {
-    return new TextDecoder().decode(this.u8().subarray(ptr, ptr + length));
-  }
-  cString(ptr) {
-    const bytes = this.u8();
-    let end = ptr;
-    while (bytes[end] !== 0)
-      end++;
-    return new TextDecoder().decode(bytes.subarray(ptr, end));
-  }
-  alloc(data) {
-    const ptr = this.x.hm_malloc(Math.max(1, data.length));
-    this.u8().set(data, ptr);
-    return ptr;
-  }
-  nodeCall(node, f) {
-    this.writeNode(this.inPtr, node);
-    f(this.inPtr, this.outPtr);
-    return this.readNode(this.outPtr);
-  }
-  nodeValue(node, f) {
-    this.writeNode(this.inPtr, node);
-    return f(this.inPtr);
-  }
-}
-
-class Language {
-  rt;
-  ptr;
-  names = new Map;
-  constructor(rt, ptr) {
-    this.rt = rt;
-    this.ptr = ptr;
-  }
-  symbolName(symbol) {
-    let name = this.names.get(symbol);
-    if (name === undefined) {
-      name = this.rt.cString(this.rt.x.hm_symbol_name(this.ptr, symbol));
-      this.names.set(symbol, name);
-    }
-    return name;
-  }
-}
-
-class Node {
-  rt;
-  raw;
-  constructor(rt, raw) {
-    this.rt = rt;
-    this.raw = raw;
-  }
-  get startByte() {
-    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_start(p));
-  }
-  get endByte() {
-    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_end(p));
-  }
-  get symbol() {
-    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_symbol(p));
-  }
-  get isNamed() {
-    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_named(p)) !== 0;
-  }
-  get childCount() {
-    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_child_count(p));
-  }
-  child(index) {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_child(p, index, o));
-  }
-  get children() {
-    const out = [];
-    const count = this.childCount;
-    for (let i = 0;i < count; i++)
-      out.push(this.child(i));
-    return out;
-  }
-  get parent() {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_parent(p, o));
-  }
-  get nextSibling() {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_next_sibling(p, o));
-  }
-  get previousSibling() {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_prev_sibling(p, o));
-  }
-  descendantForByteRange(start, end) {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_descendant(p, start, end, 0, o));
-  }
-  namedDescendantForByteRange(start, end) {
-    return this.rt.nodeCall(this, (p, o) => this.rt.x.hm_node_descendant(p, start, end, 1, o));
-  }
-  equals(other) {
-    return this.raw[4] === other.raw[4] && this.raw[5] === other.raw[5];
-  }
-}
-
-class Tree {
-  rt;
-  ptr;
-  constructor(rt, ptr) {
-    this.rt = rt;
-    this.ptr = ptr;
-  }
-  edit(start, oldEnd, newEnd) {
-    this.rt.x.hm_tree_edit(this.ptr, start, oldEnd, newEnd);
-  }
-  copy() {
-    return new Tree(this.rt, this.rt.x.hm_tree_copy(this.ptr));
-  }
-  get rootNode() {
-    this.rt.x.hm_tree_root(this.ptr, this.rt.outPtr);
-    return this.rt.readNode(this.rt.outPtr);
-  }
-  walk() {
-    return new TreeCursor(this.rt, this.rootNode);
-  }
-  delete() {
-    this.rt.x.hm_tree_delete(this.ptr);
-  }
-}
-
-class TreeCursor {
-  rt;
-  ptr;
-  constructor(rt, node) {
-    this.rt = rt;
-    this.ptr = rt.nodeValue(node, (p) => rt.x.hm_cursor_new(p));
-  }
-  get currentNode() {
-    this.rt.x.hm_cursor_node(this.ptr, this.rt.outPtr);
-    return this.rt.readNode(this.rt.outPtr);
-  }
-  gotoParent() {
-    return this.rt.x.hm_cursor_parent(this.ptr) !== 0;
-  }
-  gotoFirstChild() {
-    return this.rt.x.hm_cursor_first_child(this.ptr) !== 0;
-  }
-  gotoNextSibling() {
-    return this.rt.x.hm_cursor_next_sibling(this.ptr) !== 0;
-  }
-  gotoPreviousSibling() {
-    return this.rt.x.hm_cursor_prev_sibling(this.ptr) !== 0;
-  }
-  gotoFirstChildForByte(goal) {
-    return this.rt.x.hm_cursor_first_child_for_byte(this.ptr, goal) !== 0;
-  }
-  delete() {
-    if (this.ptr)
-      this.rt.x.hm_cursor_delete(this.ptr);
-    this.ptr = 0;
-  }
-}
-
-class Parser {
-  rt;
-  constructor(rt) {
-    this.rt = rt;
-  }
-  parse(language, text, length, ranges, oldTree = null) {
-    const rt = this.rt;
-    let rangesPtr = 0;
-    if (ranges && ranges.length > 0) {
-      rangesPtr = rt.x.hm_malloc(ranges.length * 24);
-      const words = rt.u32();
-      ranges.forEach((range, i) => {
-        const base = (rangesPtr >> 2) + i * 6;
-        words.set([0, 0, 0, 0, range.start, range.end], base);
-      });
-    }
-    const tree = rt.x.hm_parse(language.ptr, text, length, rangesPtr, ranges?.length ?? 0, oldTree?.ptr ?? 0);
-    if (rangesPtr)
-      rt.x.hm_free(rangesPtr);
-    return tree ? new Tree(rt, tree) : null;
-  }
-}
-
-// src/syntax/query.ts
-class InvalidPredicateError extends Error {
-}
-function unknownPredicate(predicate) {
-  if (predicate.kind === "other")
-    return new InvalidPredicateError(`unknown predicate #${predicate.predicate.name}`);
-  return new InvalidPredicateError(`unknown property '${predicate.key}'`);
-}
-
-class QueryParseError extends Error {
-}
-var ERROR_KINDS = ["none", "syntax", "node-type", "field", "capture", "structure", "language"];
-function bytesEqual(a, b) {
-  if (a.length !== b.length)
-    return false;
-  for (let i = 0;i < a.length; i++)
-    if (a[i] !== b[i])
-      return false;
-  return true;
-}
-function argOf(query, type, value) {
-  return type === 1 ? { kind: "capture", capture: value } : { kind: "string", value: query.stringValue(value) };
-}
-function checkArgCount(p, n) {
-  if (p.args.length !== n)
-    throw new InvalidPredicateError(`expected ${n} arguments for #${p.name}, got ${p.args.length}`);
-}
-function checkMinArgCount(p, n) {
-  if (n > p.args.length)
-    throw new InvalidPredicateError(`expected at least ${n} arguments for #${p.name}, got ${p.args.length}`);
-}
-function checkMaxArgCount(p, n) {
-  if (p.args.length > n)
-    throw new InvalidPredicateError(`expected at most ${n} arguments for #${p.name}, got ${p.args.length}`);
-}
-function strArg(query, p, i) {
-  const arg = p.args[i];
-  if (arg.kind === "string")
-    return arg.value;
-  throw new InvalidPredicateError(`${i}. argument to #${p.name} must be a literal, got capture @${JSON.stringify(query.captureName(arg.capture))}`);
-}
-function captureArg(p, i) {
-  const arg = p.args[i];
-  if (arg.kind === "capture")
-    return arg.capture;
-  throw new InvalidPredicateError(`${i}. argument to #${p.name} expected a capture, got literal ${JSON.stringify(arg.value)}`);
-}
-function parseProperty(query, p) {
-  checkMinArgCount(p, 1);
-  checkMaxArgCount(p, 2);
-  const key = strArg(query, p, 0);
-  const val = p.args.length === 2 ? strArg(query, p, 1) : null;
-  return { key, val };
-}
-
-class Query {
-  rt;
-  language;
-  regex;
-  ptr;
-  captureNames = [];
-  strings = [];
-  textPredicates = [];
-  regexes = [];
-  constructor(rt, language, source, custom, regex = null) {
-    this.rt = rt;
-    this.language = language;
-    this.regex = regex;
-    const bytes = new TextEncoder().encode(source);
-    const src = rt.alloc(bytes);
-    const error = rt.lenPtr;
-    this.ptr = rt.x.hm_query_new(language.ptr, src, bytes.length, error);
-    rt.x.hm_free(src);
-    if (!this.ptr) {
-      const words = rt.u32();
-      const offset = new TextDecoder().decode(bytes.subarray(0, words[error >> 2])).length;
-      const kind = ERROR_KINDS[words[(error >> 2) + 1]] ?? "syntax";
-      throw new QueryParseError(`invalid ${kind} in query at ${offset}`);
-    }
-    const captureCount = rt.x.hm_query_capture_count(this.ptr);
-    for (let i = 0;i < captureCount; i++)
-      this.captureNames.push(this.read(rt.x.hm_query_capture_name(this.ptr, i, rt.lenPtr)));
-    const stringCount = rt.x.hm_query_string_count(this.ptr);
-    for (let i = 0;i < stringCount; i++)
-      this.strings.push(this.read(rt.x.hm_query_string(this.ptr, i, rt.lenPtr)));
-    const patternCount = rt.x.hm_query_pattern_count(this.ptr);
-    try {
-      for (let pattern = 0;pattern < patternCount; pattern++)
-        this.textPredicates.push(this.parsePatternPredicates(pattern, custom));
-    } catch (err) {
-      this.delete();
-      if (err instanceof InvalidPredicateError) {
-        const start = new TextDecoder().decode(bytes.subarray(0, rt.x.hm_query_start_byte(this.ptr, this.textPredicates.length))).length;
-        throw new QueryParseError(`${err.message} in the pattern at ${start}`);
-      }
-      throw err;
-    }
-  }
-  read(ptr) {
-    return this.rt.string(ptr, this.rt.u32()[this.rt.lenPtr >> 2]);
-  }
-  stringValue(id) {
-    return this.strings[id];
-  }
-  captureName(capture) {
-    return this.captureNames[capture];
-  }
-  getCapture(name) {
-    const i = this.captureNames.indexOf(name);
-    return i < 0 ? null : i;
-  }
-  get patternCount() {
-    return this.textPredicates.length;
-  }
-  startByteForPattern(pattern) {
-    return this.rt.x.hm_query_start_byte(this.ptr, pattern);
-  }
-  disableCapture(name) {
-    const bytes = new TextEncoder().encode(name);
-    const ptr = this.rt.alloc(bytes);
-    this.rt.x.hm_query_disable_capture(this.ptr, ptr, bytes.length);
-    this.rt.x.hm_free(ptr);
-  }
-  delete() {
-    for (const regex of this.regexes)
-      this.regex?.drop(regex);
-    this.regexes.length = 0;
-    this.rt.x.hm_query_delete(this.ptr);
-  }
-  compileRegex(pattern) {
-    if (!this.regex)
-      throw new InvalidPredicateError(`invalid regex '${pattern}', no regex engine`);
-    try {
-      const regex = this.regex.compile(`(?-m)${pattern}`, false);
-      this.regexes.push(regex);
-      return regex;
-    } catch (err) {
-      throw new InvalidPredicateError(`invalid regex '${pattern}', ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
-  parsePatternPredicates(pattern, custom) {
-    const rt = this.rt;
-    const steps = rt.x.hm_query_predicates(this.ptr, pattern, rt.lenPtr);
-    const count = rt.u32()[rt.lenPtr >> 2];
-    const words = rt.u32().slice(steps >> 2, (steps >> 2) + count * 2);
-    const out = [];
-    let current = [];
-    const predicates = [];
-    for (let i = 0;i < count; i++) {
-      const type = words[i * 2];
-      const value = words[i * 2 + 1];
-      if (type === 0) {
-        if (current.length > 0)
-          predicates.push(current);
-        current = [];
-      } else
-        current.push([type, value]);
-    }
-    if (current.length > 0)
-      predicates.push(current);
-    const encode = (s) => new TextEncoder().encode(s);
-    for (const steps of predicates) {
-      const [headType, headValue] = steps[0];
-      if (headType !== 2) {
-        throw new InvalidPredicateError(`expected predicate to start with a function name. Got @${this.captureName(headValue)}.`);
-      }
-      const p = { name: this.stringValue(headValue), args: steps.slice(1).map(([t, v]) => argOf(this, t, v)) };
-      switch (p.name) {
-        case "eq?":
-        case "not-eq?":
-        case "any-eq?":
-        case "any-not-eq?": {
-          checkArgCount(p, 2);
-          const capture = captureArg(p, 0);
-          const arg2 = p.args[1];
-          const negated = ["not-eq?", "not-any-eq?"].includes(p.name);
-          const matchAll = p.name === "eq?" || p.name === "not-eq?";
-          const kind = arg2.kind === "capture" ? { kind: "eq-capture", capture: arg2.capture } : { kind: "eq-string", value: encode(arg2.value) };
-          out.push({ capture, kind, negated, matchAll });
-          break;
-        }
-        case "match?":
-        case "not-match?":
-        case "any-match?":
-        case "any-not-match?": {
-          checkArgCount(p, 2);
-          const capture = captureArg(p, 0);
-          const source = strArg(this, p, 1);
-          const negated = p.name === "not-match?" || p.name === "any-not-match?";
-          const matchAll = p.name === "match?" || p.name === "not-match?";
-          out.push({ capture, kind: { kind: "match-string", regex: this.compileRegex(source) }, negated, matchAll });
-          break;
-        }
-        case "set!": {
-          const { key, val } = parseProperty(this, p);
-          custom(pattern, { kind: "set-property", key, val });
-          break;
-        }
-        case "is-not?":
-        case "is?": {
-          const { key, val } = parseProperty(this, p);
-          custom(pattern, { kind: "is-property-set", negate: p.name === "is-not?", key, val });
-          break;
-        }
-        case "any-of?":
-        case "not-any-of?": {
-          checkMinArgCount(p, 1);
-          const capture = captureArg(p, 0);
-          const values = [];
-          for (let i = 1;i < p.args.length; i++)
-            values.push(encode(strArg(this, p, i)));
-          out.push({ capture, kind: { kind: "any-string", values }, negated: p.name === "not-any-of?", matchAll: false });
-          break;
-        }
-        default:
-          custom(pattern, { kind: "other", predicate: p });
-      }
-    }
-    return out;
-  }
-  satisfies(pattern, nodes, input) {
-    const predicates = this.textPredicates[pattern];
-    for (const predicate of predicates)
-      if (!this.satisfied(predicate, nodes, input))
-        return false;
-    return true;
-  }
-  satisfied(p, nodes, input) {
-    const text = (node) => input.utf8.subarray(node.startByte, node.endByte);
-    const helper = (results) => {
-      if (p.matchAll) {
-        for (const matched of results)
-          if (matched === p.negated)
-            return false;
-        return true;
-      }
-      for (const matched of results)
-        if (matched !== p.negated)
-          return true;
-      return false;
-    };
-    const captured = nodes.filter((n) => n.capture === p.capture);
-    const kind = p.kind;
-    switch (kind.kind) {
-      case "eq-string":
-        return helper(captured.map((n) => bytesEqual(text(n.node), kind.value)));
-      case "eq-capture": {
-        const others = nodes.filter((n) => n.capture === kind.capture);
-        const pairs = Math.min(captured.length, others.length);
-        const results = [];
-        for (let i = 0;i < pairs; i++)
-          results.push(bytesEqual(text(captured[i].node), text(others[i].node)));
-        const res = helper(results);
-        if (!p.matchAll)
-          return res;
-        return res && captured.length - pairs <= 1 && others.length === pairs;
-      }
-      case "match-string":
-        return helper(captured.map((n) => this.regex.isMatchBytes(kind.regex, text(n.node))));
-      case "any-string":
-        return helper(captured.map((n) => {
-          const bytes = text(n.node);
-          return kind.values.some((value) => bytesEqual(value, bytes));
-        }));
-    }
-  }
-}
-var TREE_SITTER_MATCH_LIMIT = 256;
-var MAX = 4294967295;
-
-class QueryCursor {
-  query;
-  input;
-  ptr;
-  out;
-  constructor(query, node, input, range = [0, MAX], limit = MAX) {
-    this.query = query;
-    this.input = input;
-    const rt = query.rt;
-    this.ptr = rt.x.hm_qc_new();
-    this.out = rt.x.hm_malloc(24);
-    rt.writeNode(rt.inPtr, node);
-    rt.x.hm_qc_exec(this.ptr, query.ptr, rt.inPtr, range[0], range[1], limit);
-  }
-  readMatch() {
-    const rt = this.query.rt;
-    const words = rt.u32();
-    const base = this.out >> 2;
-    const id = words[base];
-    const pattern = words[base + 1];
-    const count = words[base + 2];
-    const captures = words[base + 3] >> 2;
-    const nodes = [];
-    for (let i = 0;i < count; i++) {
-      const at = captures + i * 7;
-      nodes.push({ node: new Node(rt, words.slice(at, at + 6)), capture: words[at + 6] });
-    }
-    return { id, pattern, nodes };
-  }
-  nextMatch() {
-    const rt = this.query.rt;
-    for (;; ) {
-      if (!rt.x.hm_qc_next_match(this.ptr, this.out))
-        return null;
-      const match = this.readMatch();
-      if (this.query.satisfies(match.pattern, match.nodes, this.input))
-        return match;
-    }
-  }
-  nextMatchedNode() {
-    const rt = this.query.rt;
-    for (;; ) {
-      if (!rt.x.hm_qc_next_capture(this.ptr, this.out))
-        return null;
-      const match = this.readMatch();
-      const index = rt.u32()[(this.out >> 2) + 4];
-      if (this.query.satisfies(match.pattern, match.nodes, this.input))
-        return [match, index];
-      rt.x.hm_qc_remove_match(this.ptr, match.id);
-    }
-  }
-  removeMatch(id) {
-    this.query.rt.x.hm_qc_remove_match(this.ptr, id);
-  }
-  didExceedMatchLimit() {
-    return this.query.rt.x.hm_qc_exceeded(this.ptr) !== 0;
-  }
-  delete() {
-    if (!this.ptr)
-      return;
-    this.query.rt.x.hm_qc_delete(this.ptr);
-    this.query.rt.x.hm_free(this.out);
-    this.ptr = 0;
-  }
-}
-
 // src/syntax/injections.ts
 var SHEBANG = /#!\p{White_Space}*(?:\P{White_Space}*[/\\](?:env\p{White_Space}+(?:-\P{White_Space}+\p{White_Space}+)*)?)?([^\p{White_Space}.\p{Nd}]+)/u;
 function shebangMarker(text) {
@@ -10150,7 +10890,14 @@ class LanguageLoader {
   }
   indentQuery(id, compile) {
     const data = this.language(id);
-    return data.query("indents.scm", (text) => compile(data.syntax.grammar, text));
+    return data.query("indents.scm", (text) => {
+      try {
+        return compile(data.syntax.grammar, text);
+      } catch (err) {
+        this.errors.push(`Failed to compile indents.scm query for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    });
   }
   compile(data, text, file) {
     try {
@@ -10786,6 +11533,9 @@ var MARKDOWN_INLINE_INJECTIONS = `((html_tag) @injection.content
 async function createLoader(binary, options = {}) {
   const rt = await Runtime.load(binary);
   const config = parseLanguagesToml(...options.languages ?? [MARKDOWN_LANGUAGES]);
+  const only = options.only;
+  if (only)
+    config.languages = config.languages.filter((l) => only.includes(l.languageId));
   const grammars = new Map([
     ["markdown", new Language(rt, rt.x.hm_language(0))],
     ["markdown_inline", new Language(rt, rt.x.hm_language(1))]
@@ -11082,6 +11832,34 @@ async function loadSyntax(win, wasm, options = {}) {
     else
       win.setTimeout(work, 0);
   });
+}
+
+// src/view/status.ts
+import { Facet as Facet2 } from "@codemirror/state";
+var onHelixStatus = Facet2.define();
+function statusOf(editor, host, focused) {
+  const state = host.state.field(helixField, false);
+  if (!state)
+    return null;
+  const doc = host.state.doc;
+  const cursor = state.selection.primary().cursor(doc);
+  const line = doc.lineAt(cursor);
+  let column = 1;
+  for (let pos = line.from;pos < cursor; pos = nextGraphemeBoundary(doc, pos))
+    column++;
+  return {
+    mode: state.mode,
+    pending: focused ? editor.pendingDisplay() : "",
+    count: focused ? editor.count : null,
+    register: focused ? editor.selectedRegister : null,
+    recording: editor.macroRecording?.register ?? null,
+    selections: state.selection.ranges.length,
+    primary: state.selection.primaryIndex,
+    line: line.number,
+    column,
+    message: editor.status,
+    language: editor.languageName(host) ?? "text"
+  };
 }
 
 // src/view/theme.ts
@@ -12086,7 +12864,11 @@ function uiSignature(editor, host) {
     p ? [p.label, p.line, p.cursor, p.selection, p.completions.length] : null,
     auto ? "kind" in auto ? auto.name : auto.title : null,
     editor.status,
-    editor.jumpLabels.get(host.id)?.length ?? 0
+    editor.jumpLabels.get(host.id)?.length ?? 0,
+    editor.pendingDisplay(),
+    editor.count,
+    editor.selectedRegister,
+    editor.macroRecording?.register ?? null
   ]);
 }
 function describe(command) {
@@ -12187,8 +12969,14 @@ function makeViewOps(scrolloff) {
 }
 
 // src/codemirror.ts
-var helixEditor = Facet2.define({ combine: (values) => values[0] ?? null });
-var helixDocument = Facet2.define({
+function helixStatus(view) {
+  const editor = view.state.facet(helixEditor);
+  const host = editor ? hostOf.get(view) : undefined;
+  return editor && host ? statusOf(editor, host, view.hasFocus) : null;
+}
+var hostOf = new WeakMap;
+var helixEditor = Facet3.define({ combine: (values) => values[0] ?? null });
+var helixDocument = Facet3.define({
   combine: (values) => Object.assign({}, ...values)
 });
 function languageSource(grammars) {
@@ -12241,12 +13029,14 @@ function helix2(options = {}) {
         paneId: id
       };
       hosts.set(view, host);
+      hostOf.set(view, host);
     }
     return host;
   };
   let started = false;
   let sessions = null;
   const views = new Set;
+  const lastStatus = new WeakMap;
   const start = (view) => {
     if (started)
       return;
@@ -12274,10 +13064,13 @@ function helix2(options = {}) {
         set: (host, language) => {
           if (host.view)
             loadedSessions.setLanguage(host.view, language);
+          editor.detectIndent(host);
           rerender();
         }
       };
       editor.syntax = (host) => host.view ? loadedSessions.get(host.view, host.state.doc) : null;
+      for (const open of views)
+        editor.detectIndent(hostFor(open));
       loadedSessions.loader.onLoad(rerender);
     }).catch(() => editor.setError("the syntax tree failed to load"));
   };
@@ -12326,6 +13119,16 @@ function helix2(options = {}) {
     onRender: (view) => {
       if (view.hasFocus)
         active = view;
+      const listeners = view.state.facet(onHelixStatus);
+      if (listeners.length === 0)
+        return;
+      const status = statusOf(editor, hostFor(view), view === active);
+      const key = JSON.stringify(status);
+      if (!status || lastStatus.get(view) === key)
+        return;
+      lastStatus.set(view, key);
+      for (const listener of listeners)
+        listener(status, view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -12334,10 +13137,12 @@ function helix2(options = {}) {
       start(view);
       if (sessions)
         sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
+      editor.detectIndent(hostFor(view));
     },
     onViewClose: (view) => {
       views.delete(view);
       sessions?.close(view);
+      editor.indentStyles.delete(hostFor(view).id);
       if (active === view)
         active = null;
     }
@@ -12459,6 +13264,7 @@ export {
   helixExtension,
   helixField,
   helixOwned,
+  helixStatus,
   historyField,
   jumplistFor,
   keyFromDom,
@@ -12467,6 +13273,7 @@ export {
   loadSyntax,
   makeViewOps,
   nextGraphemeBoundary,
+  onHelixStatus,
   parseKey,
   parseLanguagesToml,
   parseMacro,
@@ -12477,6 +13284,7 @@ export {
   selOf,
   setHelix,
   setSel,
+  statusOf,
   syncNativeSelection,
   toNative,
   uiRefresher,

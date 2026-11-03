@@ -456,6 +456,10 @@ export function uiSignature(editor: HelixEditor, host: Host): string {
     auto ? ("kind" in auto ? auto.name : auto.title) : null,
     editor.status,
     editor.jumpLabels.get(host.id)?.length ?? 0,
+    editor.pendingDisplay(),
+    editor.count,
+    editor.selectedRegister,
+    editor.macroRecording?.register ?? null,
   ]);
 }
 

@@ -1,6 +1,6 @@
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { helix, helixDocument, helixEditor, helixField, type Context, type GrammarSource, type HelixEditor } from "../src/index";
+import { helix, helixDocument, helixEditor, helixStatus, type Context, type GrammarSource, type HelixEditor } from "../src/index";
 import { languagesToml } from "../src/languages";
 import notes from "./samples/notes.md.txt" with { type: "text" };
 import markdownEdges from "./samples/markdown-edges.md.txt" with { type: "text" };
@@ -317,17 +317,14 @@ function drawStatus(): void {
   panes.forEach((pane, i) => {
     const view = views.get(`${i}:${pane.buffer}`);
     if (!view) return;
-    const state = view.state.field(helixField, false);
-    const mode = state ? { normal: "NOR", insert: "INS", select: "SEL" }[state.mode] : "";
-    const ranges = state?.selection.ranges ?? [];
-    const head = state ? state.selection.primary().cursor(view.state.doc) : 0;
-    const line = view.state.doc.lineAt(head);
-    const pending = i === focused ? (editor?.pendingDisplay() ?? "") : "";
+    const status = helixStatus(view);
+    const mode = status ? { normal: "NOR", insert: "INS", select: "SEL" }[status.mode] : "";
+    const pending = status ? [status.recording ? `[${status.recording}]` : "", status.register ? `"${status.register}` : "", status.count ?? "", status.pending].join("") : "";
     const parts = [
       ["mode", mode],
       ["", pane.buffer],
       ["", pending],
-      ["right", `${ranges.length > 1 ? `${ranges.length} sels  ` : ""}${line.number}:${head - line.from + 1}`],
+      ["right", status ? `${status.language}  ${status.selections > 1 ? `${status.primary + 1}/${status.selections} sels  ` : ""}${status.line}:${status.column}` : ""],
     ];
     pane.status.replaceChildren(
       ...parts.map(([cls, text]) => {

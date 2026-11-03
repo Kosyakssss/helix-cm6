@@ -10,11 +10,13 @@ const here = import.meta.dir;
 const args = process.argv.slice(2);
 const outIndex = args.indexOf("--out");
 if (outIndex < 0 || !args[outIndex + 1]) {
-  process.stderr.write("usage: bun languages/build.ts --out <dir> (--all | <language>...)\n");
+  process.stderr.write("usage: bun languages/build.ts --out <dir> [--native <helix runtime/grammars>] (--all | <language>...)\n");
   process.exit(2);
 }
 const out = resolve(args[outIndex + 1]!);
-const wanted = args.filter((a, i) => i !== outIndex && i !== outIndex + 1);
+const nativeIndex = args.indexOf("--native");
+const native = nativeIndex < 0 ? null : resolve(args[nativeIndex + 1]!);
+const wanted = args.filter((a, i) => i !== outIndex && i !== outIndex + 1 && i !== nativeIndex && i !== nativeIndex + 1);
 const all = wanted.includes("--all");
 
 const config = parseLanguagesToml(readFileSync(join(here, "languages.toml"), "utf8"));
@@ -106,6 +108,14 @@ function buildGrammar(grammar: GrammarConfiguration, wasi: string): void {
   ]);
 }
 
+function buildNative(grammar: GrammarConfiguration, dir: string): void {
+  const src = join(fetchGrammar(grammar), "src");
+  const ext = process.platform === "darwin" ? "dylib" : "so";
+  const files = ["parser.c", "scanner.c"].filter((f) => existsSync(join(src, f))).map((f) => join(src, f));
+  mkdirSync(dir, { recursive: true });
+  run(["cc", "-shared", "-fPIC", "-O2", "-std=c11", "-I", src, ...files, "-o", join(dir, `${grammar.name}.${ext}`)]);
+}
+
 const languages = all ? config.languages : config.languages.filter((l) => wanted.includes(l.languageId));
 const unknown = wanted.filter((w) => w !== "--all" && !config.languages.some((l) => l.languageId === w));
 if (unknown.length > 0) {
@@ -137,6 +147,7 @@ for (const name of [...grammarNames].sort()) {
   if (!grammar) continue;
   try {
     buildGrammar(grammar, wasi);
+    if (native) buildNative(grammar, native);
     process.stdout.write(`built ${name}\n`);
   } catch (err) {
     failed.push(name);

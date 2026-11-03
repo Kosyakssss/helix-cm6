@@ -318,12 +318,12 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
     fun: validateOnly((cx, args) => {
       const a = args.positional[0];
       if (a === undefined) {
-        const s = cx.editor.config.indentStyle;
+        const s = cx.editor.indent(cx.host).style;
         cx.editor.setStatus(s.kind === "tabs" ? "tabs" : `${s.width} ${s.width === 1 ? "space" : "spaces"}`);
         return;
       }
-      if (a === "t" || a === "tabs") cx.editor.config.indentStyle = { kind: "tabs" };
-      else if (/^\d+$/.test(a) && Number(a) >= 1 && Number(a) <= 16) cx.editor.config.indentStyle = { kind: "spaces", width: Number(a) };
+      if (a === "t" || a === "tabs") cx.editor.indentStyles.set(cx.host.id, { kind: "tabs" });
+      else if (/^\d+$/.test(a) && Number(a) >= 1 && Number(a) <= 16) cx.editor.indentStyles.set(cx.host.id, { kind: "spaces", width: Number(a) });
       else cx.editor.setError("'indent-style': invalid indent style");
     }),
   },

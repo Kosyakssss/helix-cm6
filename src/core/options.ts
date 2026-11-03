@@ -26,6 +26,13 @@ export const OPTIONS: Record<string, [Getter, Setter]> = {
   "auto-info": [(c) => c.autoInfo, (c, v) => (c.autoInfo = bool(v))],
   "color-modes": [(c) => c.colorModes, (c, v) => (c.colorModes = bool(v))],
   cursorline: [(c) => c.cursorline, (c, v) => (c.cursorline = bool(v))],
+  "indent-heuristic": [
+    (c) => c.indentHeuristic,
+    (c, v) => {
+      if (v !== "simple" && v !== "tree-sitter" && v !== "hybrid") throw new Error("invalid indent-heuristic");
+      c.indentHeuristic = v;
+    },
+  ],
   "continue-comments": [(c) => c.continueComments, (c, v) => (c.continueComments = bool(v))],
   "line-number": [
     (c) => c.lineNumber ?? "absolute",

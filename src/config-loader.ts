@@ -31,7 +31,6 @@ const IGNORED_EDITOR = new Set([
   "default-line-ending",
   "atomic-save",
   "popup-border",
-  "indent-heuristic",
   "end-of-line-diagnostics",
   "clipboard-provider",
   "editor-config",
@@ -95,6 +94,11 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
       case "jump-label-alphabet": {
         const s = asStr(value, key, warnings);
         if (s !== undefined) config.jumpLabelAlphabet = [...s];
+        break;
+      }
+      case "indent-heuristic": {
+        if (value === "simple" || value === "tree-sitter" || value === "hybrid") config.indentHeuristic = value;
+        else warnings.push("editor.indent-heuristic: expected simple, tree-sitter or hybrid");
         break;
       }
       case "shell": {

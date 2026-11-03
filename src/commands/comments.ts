@@ -170,8 +170,35 @@ export function splitLinesOfSelection(doc: Text, sel: Selection): Selection {
       const end = lineToChar(doc, l + 1);
       ranges.push(new Range(start, end));
     }
+    const sliceStart = lineToChar(doc, ls);
+    const sliceEnd = lineToChar(doc, le + 1);
+    if (sliceEnd > sliceStart && doc.sliceString(sliceEnd - 1, sliceEnd) === "\n") ranges.push(new Range(sliceEnd, sliceEnd));
   }
   return new Selection(ranges, 0);
+}
+
+export function continuedLineCommentToken(cx: Context, doc: Text, line: number): string | null {
+  const text = lineWithEnding(doc, line);
+  const fnw = firstNonWs(text);
+  if (fnw === null) return null;
+  const pos = lineToChar(doc, line) + fnw;
+  if (cx.editor.commentTokens) {
+    const tokens = cx.editor.commentTokens(cx.host, pos).line;
+    return tokens ? getCommentToken(doc, tokens, line) : null;
+  }
+  const syntax = syntaxOf(cx);
+  const loader = cx.editor.languages;
+  if (syntax && loader) {
+    const byte = syntax.byteOf(pos);
+    let token: string | null = null;
+    for (const layer of syntax.layersForByteRange(byte, byte)) {
+      const tokens = loader.language(layer.language).config.commentTokens;
+      if (tokens) token = getCommentToken(doc, tokens, line) ?? token;
+    }
+    return token;
+  }
+  const tokens = cx.editor.languageConfig(cx.host)?.commentTokens;
+  return tokens ? getCommentToken(doc, tokens, line) : null;
 }
 
 function languageCommentTokens(cx: Context, pos: number): CommentTokens {

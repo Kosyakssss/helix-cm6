@@ -246,7 +246,7 @@ function posAtVisualCoords(doc: Text, row: number, col: number, tabWidth: number
 function alignSelections(cx: Context): void {
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tabWidth = cx.editor.config.tabWidth;
+  const tabWidth = cx.editor.indent(cx.host).tabWidth;
   const columnWidths: number[] = [];
   const coordinates: { row: number; col: number }[] = [];
   let previousLine = -1;
@@ -299,7 +299,7 @@ function copySelectionOnLine(cx: Context, direction: "forward" | "backward"): vo
   const count = cx.count();
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tabWidth = cx.editor.config.tabWidth;
+  const tabWidth = cx.editor.indent(cx.host).tabWidth;
   const ranges: Range[] = [...sel.ranges];
   let primaryIndex = 0;
   for (const range of sel.ranges) {

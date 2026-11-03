@@ -227,6 +227,14 @@ export class Node {
     readonly raw: Uint32Array,
   ) {}
 
+  get id(): number {
+    return this.raw[4]!;
+  }
+
+  walk(): TreeCursor {
+    return new TreeCursor(this.rt, this);
+  }
+
   get startByte(): number {
     return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_start(p));
   }

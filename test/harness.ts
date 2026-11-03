@@ -6,14 +6,50 @@ import { buildKeymaps } from "../src/keymap";
 import { helixField, historyField, setHelix, syncNativeSelection, toNative, helixOwned } from "../src/state";
 import { defaultConfig, type Config } from "../src/config";
 import { print, plain } from "../src/core/markup";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createLoader, SyntaxSessions } from "../src/syntax/languages";
 import { RustRegexEngine } from "../src/core/rx";
 
 const root = resolve(import.meta.dir, "..");
 const regexEngine = await RustRegexEngine.load(readFileSync(resolve(root, "regex/regex.wasm")));
-const syntaxSessions = new SyntaxSessions(await createLoader(readFileSync(resolve(root, "tree-sitter/tree-sitter.wasm")), { regex: regexEngine }));
+const treeSitter = readFileSync(resolve(root, "tree-sitter/tree-sitter.wasm"));
+const languagesToml = readFileSync(resolve(root, "languages/languages.toml"), "utf8");
+const grammarDir = resolve(root, "test/oracle/languages");
+const syntaxSessions = new SyntaxSessions(await createLoader(treeSitter, { regex: regexEngine }));
+const codeSessions = new Map<string, SyntaxSessions>();
+
+async function sessionsFor(lang: string): Promise<SyntaxSessions> {
+  if (lang === "markdown") return syntaxSessions;
+  let sessions = codeSessions.get(lang);
+  if (!sessions) {
+    const loader = await createLoader(treeSitter, {
+      regex: regexEngine,
+      languages: [languagesToml],
+      only: [lang],
+      source: {
+        grammar: (name) => {
+          const file = resolve(grammarDir, "grammars", `${name}.wasm`);
+          return existsSync(file) ? readFileSync(file) : null;
+        },
+        query: (language, file) => {
+          const path = resolve(grammarDir, "queries", language, file);
+          return existsSync(path) ? readFileSync(path, "utf8") : null;
+        },
+      },
+    });
+    const id = loader.languageForName(lang);
+    if (id === null) throw new Error(`unknown language ${lang}`);
+    await loader.load(id);
+    sessions = new SyntaxSessions(loader);
+    codeSessions.set(lang, sessions);
+  }
+  return sessions;
+}
+
+export async function prepareLanguages(langs: Iterable<string>): Promise<void> {
+  for (const lang of langs) await sessionsFor(lang);
+}
 
 export interface RunResult {
   text?: string;
@@ -50,16 +86,20 @@ export function makeHost(markup: string) {
   return host;
 }
 
-export function run(markup: string, keys: string, editor = makeEditor(), lang?: "markdown"): RunResult {
+export function run(markup: string, keys: string, editor = makeEditor(), lang?: string): RunResult {
   const host = makeHost(markup);
-  syntaxSessions.clear();
+  const sessions = lang === undefined || lang === "markdown" ? syntaxSessions : codeSessions.get(lang);
+  if (!sessions) throw new Error(`call prepareLanguages for ${lang} first`);
+  sessions.clear();
   if (lang) {
-    syntaxSessions.open(host, host.state.doc);
-    editor.languages = syntaxSessions.loader;
-    editor.syntax = (h) => syntaxSessions.get(h, h.state.doc);
+    const id = sessions.loader.languageForName(lang);
+    sessions.open(host, host.state.doc, id);
+    editor.languages = sessions.loader;
+    editor.documentLanguage = { get: (h) => sessions.languageOf(h), set: (h, language) => sessions.setLanguage(h, language) };
+    editor.syntax = (h) => sessions.get(h, h.state.doc);
   }
   host.onChanges = (changes, oldDoc) => {
-    if (lang) syntaxSessions.change(host, oldDoc, changes, host.state.doc);
+    if (lang) sessions.change(host, oldDoc, changes, host.state.doc);
     editor.docChanged(host, changes);
   };
   try {

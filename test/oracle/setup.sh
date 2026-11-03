@@ -25,4 +25,5 @@ if [ ! -f "$grammars/markdown.$ext" ] || [ ! -f "$grammars/markdown_inline.$ext"
     cc -shared -fPIC -O2 -I "$src/tree-sitter-$name/src" "$src/tree-sitter-$name/src/parser.c" "$src/tree-sitter-$name/src/scanner.c" -o "$grammars/$out.$ext"
   done
 fi
+bun "$here/../../languages/build.ts" --out "$here/languages" --native "$grammars" $(cat "$here/languages.txt")
 echo "Helix oracle ready in $dir"

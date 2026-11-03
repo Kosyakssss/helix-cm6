@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { compare } from "./oracle/diff";
-import { handSuite, markdownSuite } from "./oracle/suites";
+import { codeSuite, handSuite, markdownSuite } from "./oracle/suites";
 import { fuzzSuite, markdownFuzzSuite } from "./oracle/fuzz";
 import { oracleGraphemes } from "./oracle/oracle";
 import { segmentGraphemes } from "../src/graphemes";
@@ -23,6 +23,11 @@ for (const seed of [1, 2, 3, 4, 5]) {
 
 test("markdown suite matches Helix with the markdown syntax tree", async () => {
   const { failures } = await compare(markdownSuite());
+  expect(failures.map(describe)).toEqual([]);
+}, 1_800_000);
+
+test("code suite matches Helix with each language's grammar and queries", async () => {
+  const { failures } = await compare(codeSuite());
   expect(failures.map(describe)).toEqual([]);
 }, 1_800_000);
 

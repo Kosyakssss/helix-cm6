@@ -25,6 +25,7 @@ export interface Config {
     textWidth: number;
     tabWidth: number;
     indentStyle: IndentStyle;
+    indentHeuristic: "simple" | "tree-sitter" | "hybrid";
     autoPairs: [string, string][] | false;
     autoInfo: boolean;
     smartTab: {

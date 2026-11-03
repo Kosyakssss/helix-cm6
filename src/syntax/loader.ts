@@ -74,17 +74,17 @@ export class LanguageData {
   syntax: SyntaxConfig | null | undefined = undefined;
   loading: Promise<void> | null = null;
   readonly queries = new Map<QueryFile, string>();
-  private compiled = new Map<QueryFile, Query | null>();
+  private compiled = new Map<QueryFile, unknown>();
 
   constructor(
     readonly id: LanguageId,
     readonly config: LanguageConfiguration,
   ) {}
 
-  query(file: QueryFile, compile: (text: string) => Query): Query | null {
-    if (this.compiled.has(file)) return this.compiled.get(file)!;
+  query<T>(file: QueryFile, compile: (text: string) => T): T | null {
+    if (this.compiled.has(file)) return this.compiled.get(file) as T | null;
     const text = this.queries.get(file) ?? "";
-    let query: Query | null = null;
+    let query: T | null = null;
     if (text !== "" && this.syntax) {
       try {
         query = compile(text);
@@ -271,9 +271,16 @@ export class LanguageLoader implements InjectionLoader {
     return data.query("textobjects.scm", (text) => this.compile(data, text, "textobjects.scm"));
   }
 
-  indentQuery(id: LanguageId, compile: (grammar: Language, text: string) => Query): Query | null {
+  indentQuery<T>(id: LanguageId, compile: (grammar: Language, text: string) => T): T | null {
     const data = this.language(id);
-    return data.query("indents.scm", (text) => compile(data.syntax!.grammar, text));
+    return data.query("indents.scm", (text) => {
+      try {
+        return compile(data.syntax!.grammar, text);
+      } catch (err) {
+        this.errors.push(`Failed to compile indents.scm query for '${data.config.languageId}': ${err instanceof Error ? err.message : String(err)}`);
+        throw err;
+      }
+    });
   }
 
   private compile(data: LanguageData, text: string, file: QueryFile): Query {

@@ -13,6 +13,7 @@ export declare function autoPairsOf(cx: Context): AutoPairs | null;
 export declare function insertChar(cx: Context, ch: string): void;
 export declare function insertTabImpl(cx: Context, count: number): void;
 export declare function smartTab(cx: Context): void;
+export declare function newlineIndent(cx: Context, doc: Text, lineBefore: number, lineBeforeEndPos: number, currentLine: number): string;
 export declare function insertNewline(cx: Context): void;
 export declare function deleteCharBackward(cx: Context): void;
 export declare function deleteBySelectionInsertMode(cx: Context, f: (doc: Text, range: Range) => [number, number], direction: "forward" | "backward"): void;

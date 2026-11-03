@@ -6,7 +6,7 @@ export interface Case {
   id: string;
   in: string;
   keys: string;
-  lang?: "markdown";
+  lang?: string;
 }
 
 export interface OracleResult {
@@ -37,7 +37,7 @@ export function loadCache(): Record<string, OracleResult> {
 
 function oracleBinary(): string {
   const proc = Bun.spawnSync(
-    ["cargo", "test", "-q", "-p", "helix-term", "--features", "integration", "--test", "oracle", "--no-run", "--message-format=json"],
+    ["cargo", "test", "-q", "--release", "-p", "helix-term", "--features", "integration", "--test", "oracle", "--no-run", "--message-format=json"],
     { cwd: HELIX, stdout: "pipe", stderr: "pipe", env: { ...process.env, HELIX_DISABLE_AUTO_GRAMMAR_BUILD: "1" } },
   );
   const matches = [...proc.stdout.toString().matchAll(/"executable":"([^"]*oracle-[^"]*)"/g)];

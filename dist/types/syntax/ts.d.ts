@@ -81,6 +81,8 @@ export declare class Node {
     readonly rt: Runtime;
     readonly raw: Uint32Array;
     constructor(rt: Runtime, raw: Uint32Array);
+    get id(): number;
+    walk(): TreeCursor;
     get startByte(): number;
     get endByte(): number;
     get symbol(): number;

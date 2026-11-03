@@ -7,6 +7,7 @@ export declare const MARKDOWN_LANGUAGES = "[[language]]\nname = \"markdown\"\nsc
 export interface LoaderOptions {
     regex?: RustRegexEngine | null;
     languages?: readonly string[];
+    only?: readonly string[];
     source?: LanguageSource | null;
 }
 export declare function createLoader(binary: Uint8Array, options?: LoaderOptions): Promise<LanguageLoader>;

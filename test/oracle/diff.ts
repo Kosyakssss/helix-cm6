@@ -1,6 +1,6 @@
 import { oracleAsync, type Case } from "./oracle";
-import { run } from "../harness";
-import { handSuite, markdownSuite } from "./suites";
+import { prepareLanguages, run } from "../harness";
+import { codeSuite, handSuite, markdownSuite } from "./suites";
 import { fuzzSuite, markdownFuzzSuite } from "./fuzz";
 
 export interface Failure {
@@ -11,6 +11,7 @@ export interface Failure {
 
 export async function compare(cases: Case[]): Promise<{ failures: Failure[]; skipped: number }> {
   const results = await oracleAsync(cases);
+  await prepareLanguages(new Set(cases.flatMap((c) => (c.lang && c.lang !== "markdown" ? [c.lang] : []))));
   const failures: Failure[] = [];
   let skipped = 0;
   for (const c of cases) {
@@ -44,7 +45,9 @@ if (import.meta.main) {
         ? markdownSuite()
         : which === "mdfuzz"
           ? markdownFuzzSuite(fuzzN, fuzzSeed)
-          : handSuite();
+          : which === "code"
+            ? codeSuite()
+            : handSuite();
   if (filter) cases = cases.filter((c) => c.keys.includes(filter) || c.id.startsWith(filter));
   const { failures, skipped } = await compare(cases);
   const byKeys = new Map<string, Failure[]>();

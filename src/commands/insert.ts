@@ -11,7 +11,8 @@ import { hookDelete, hookInsert, makeAutoPairs, type AutoPairs } from "../auto-p
 import { wordMove } from "../movement";
 import { Range, Selection } from "../selection";
 import { charAt, charBefore, isWhitespace, lineIndex } from "../core/text";
-import { indentUnit, indentWidth } from "../config";
+import { indentForNewline, indentStyleStr, indentStyleWidth } from "../syntax/indent";
+import { continuedLineCommentToken } from "./comments";
 import {
   apply,
   changeByAndWithSelection,
@@ -26,6 +27,7 @@ import {
   selOf,
   setModeOnly,
   setSel,
+  syntaxOf,
   type Change,
 } from "./util";
 import type { CommandFn } from "./motion";
@@ -88,14 +90,14 @@ export function insertChar(cx: Context, ch: string): void {
 
 export function insertTabImpl(cx: Context, count: number): void {
   const doc = docOf(cx);
-  const config = cx.editor.config;
-  const unit = indentUnit(config);
+  const { style } = cx.editor.indent(cx.host);
+  const unit = indentStyleStr(style);
   const changes: Change[] = selOf(cx).ranges.map((range) => {
     const cursor = range.cursor(doc);
     let indent = unit.repeat(count);
-    if (config.indentStyle.kind === "spaces") {
+    if (style.kind === "spaces") {
       const line = lineIndex(doc, cursor);
-      const offset = (cursor - lineToChar(doc, line)) % config.indentStyle.width;
+      const offset = (cursor - lineToChar(doc, line)) % style.width;
       indent = indent.slice(offset);
     }
     return [cursor, cursor, indent];
@@ -116,16 +118,9 @@ export function smartTab(cx: Context): void {
   insertTabImpl(cx, 1);
 }
 
-function indentForNewline(cx: Context, doc: Text, line: number): string {
-  const config = cx.editor.config;
-  const width = indentWidth(config);
-  let len = 0;
-  for (const ch of doc.line(line + 1).text) {
-    if (ch === "\t") len += config.tabWidth - (len % config.tabWidth);
-    else if (ch === " ") len += 1;
-    else break;
-  }
-  return indentUnit(config).repeat(Math.floor(len / width));
+export function newlineIndent(cx: Context, doc: Text, lineBefore: number, lineBeforeEndPos: number, currentLine: number): string {
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  return indentForNewline(syntaxOf(cx), cx.editor.config.indentHeuristic, style, tabWidth, doc, lineBefore, lineBeforeEndPos, currentLine);
 }
 
 function lastNonWhitespace(s: string): number | null {
@@ -142,7 +137,7 @@ export function insertNewline(cx: Context): void {
   const doc = docOf(cx);
   const sel = selOf(cx);
   const pairs = autoPairsOf(cx);
-  const unit = indentUnit(cx.editor.config);
+  const unit = indentStyleStr(cx.editor.indent(cx.host).style);
   const ranges: Range[] = [];
   const changes: Change[] = [];
   let globalOffs = 0;
@@ -163,10 +158,16 @@ export function insertNewline(cx: Context): void {
       const lastCh = charAt(doc, lineStart + idx)!;
       const firstTrailing = Math.min(Math.max(lineStart + idx + lastCh.length, lastPos), pos);
       lastPos = pos;
-      const indent = indentForNewline(cx, doc, currentLine);
+      const token = cx.editor.config.continueComments ? continuedLineCommentToken(cx, doc, currentLine) : null;
+      const lineText = doc.line(currentLine + 1).text;
+      const fnw = firstNonWhitespaceChar(doc, currentLine);
+      const indent = token !== null && fnw !== null ? lineText.slice(0, fnw) : newlineIndent(cx, doc, currentLine, pos, currentLine);
       const pair = pairs?.get(prev);
       const onAutoPair = !!pair && pair.open === prev && pair.close === curr;
-      if (onAutoPair) {
+      if (token !== null) {
+        newText += "\n" + indent + token + " ";
+        localOffs = newText.length;
+      } else if (onAutoPair) {
         newText += "\n" + indent + unit;
         localOffs = newText.length;
         newText += "\n" + indent;
@@ -201,9 +202,9 @@ function dedent(cx: Context, doc: Text, range: Range): [number, number] | null {
   const fragment = doc.sliceString(lineStart, pos);
   if (fragment === "" || ![...fragment].every((c) => c === " " || c === "\t")) return null;
   if (charBefore(doc, pos) === "\t") return [nthPrevGraphemeBoundary(doc, pos, 1), pos];
-  const config = cx.editor.config;
-  const width = [...fragment].reduce((sum, c) => sum + (c === "\t" ? config.tabWidth : 1), 0);
-  const iw = indentWidth(config);
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  const width = [...fragment].reduce((sum, c) => sum + (c === "\t" ? tabWidth : 1), 0);
+  const iw = indentStyleWidth(style, tabWidth);
   let drop = width % iw;
   if (drop === 0) drop = iw;
   let start = pos;

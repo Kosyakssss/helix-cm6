@@ -1,9 +1,12 @@
+import { continuedLineCommentToken } from "./comments";
+import { newlineIndent } from "./insert";
+import { textobjectTreesitter } from "../syntax/textobject";
 import type { Text } from "@codemirror/state";
 import type { Context } from "../core/editor";
 import { nextGraphemeBoundary, prevGraphemeBoundary, segmentGraphemes } from "../graphemes";
 import { Range, Selection } from "../selection";
 import { charAt, charIsLineEnding, isLowercase, isUppercase, lineIndex } from "../core/text";
-import { indentUnit, indentWidth } from "../config";
+import { indentStyleStr, indentStyleWidth } from "../syntax/indent";
 import { getPair } from "../match-brackets";
 import { findMatchingBracketPlaintext } from "../match-brackets";
 import { findMatchingBracketFuzzy } from "../syntax/object";
@@ -122,7 +125,7 @@ function insertWithIndent(cx: Context, fallback: "lineStart" | "lineEnd"): void 
     const line = lineIndex(doc, range.cursor(doc));
     const lineStart = lineToChar(doc, line);
     if (lineEndCharIndex(doc, line) === lineStart) {
-      const indent = indentFor(cx, doc, line);
+      const indent = newlineIndent(cx, doc, line, lineStart, line);
       const pos = offs + lineStart;
       ranges.push(Range.point(pos + indent.length));
       offs += indent.length;
@@ -142,18 +145,6 @@ function insertWithIndent(cx: Context, fallback: "lineStart" | "lineEnd"): void 
   apply(cx, changeSetOf(doc, changes), new Selection(ranges, sel.primaryIndex));
 }
 
-function indentFor(cx: Context, doc: Text, line: number): string {
-  const config = cx.editor.config;
-  const width = indentWidth(config);
-  let len = 0;
-  for (const ch of doc.line(line + 1).text) {
-    if (ch === "\t") len += config.tabWidth - (len % config.tabWidth);
-    else if (ch === " ") len += 1;
-    else break;
-  }
-  return indentUnit(config).repeat(Math.floor(len / width));
-}
-
 const LIST_MARKER = /^([ \t]*)((?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|>[ \t]?)/;
 
 function continuedListMarker(doc: Text, line: number): string | null {
@@ -166,7 +157,7 @@ function continuedListMarker(doc: Text, line: number): string | null {
   return marker;
 }
 
-export function openLines(cx: Context, open: "below" | "above"): void {
+export function openLines(cx: Context, open: "below" | "above", comments = true): void {
   const count = cx.count();
   enterInsertMode(cx);
   const doc = docOf(cx);
@@ -179,11 +170,13 @@ export function openLines(cx: Context, open: "below" | "above"): void {
     const nextNewLine = open === "below" ? currLine + 1 : currLine;
     const aboveNext = Math.max(0, nextNewLine - 1);
     const [aboveEnd, aboveEndWidth] = nextNewLine === 0 ? [0, 0] : [lineEndCharIndex(doc, aboveNext), 1];
-    const continueToken = cx.editor.continueLists && open === "below" ? continuedListMarker(doc, currLine) : null;
+    const listToken = cx.editor.continueLists && open === "below" ? continuedListMarker(doc, currLine) : null;
+    const commentToken = listToken === null && comments && cx.editor.config.continueComments ? continuedLineCommentToken(cx, doc, currLine) : null;
+    const continueToken = listToken ?? (commentToken === null ? null : `${commentToken} `);
     const lineText = doc.line(currLine + 1).text;
     const firstNonWs = firstNonWhitespaceChar(doc, currLine);
     const indent =
-      continueToken !== null && firstNonWs !== null ? lineText.slice(0, firstNonWs) : indentFor(cx, doc, currLine);
+      continueToken !== null && firstNonWs !== null ? lineText.slice(0, firstNonWs) : newlineIndent(cx, doc, aboveNext, aboveEnd, currLine);
     const token = continueToken ?? "";
     let text: string;
     if (open === "above" && nextNewLine === 0) text = indent + token + "\n";
@@ -225,7 +218,7 @@ function deleteSelectionImpl(cx: Context, op: "delete" | "change", yank: boolean
   }
   apply(cx, deleteChanges(doc, sel.ranges.map((r) => [r.from(), r.to()])));
   if (op === "delete") exitSelectMode(cx);
-  else if (onlyWholeLines) openLines(cx, "above");
+  else if (onlyWholeLines) openLines(cx, "above", false);
   else enterInsertMode(cx);
 }
 
@@ -358,16 +351,16 @@ function getLines(doc: Text, sel: Selection): number[] {
 function indentCommand(cx: Context): void {
   const count = cx.count();
   const doc = docOf(cx);
-  const config = cx.editor.config;
-  const indent = indentUnit(config).repeat(count);
+  const { style } = cx.editor.indent(cx.host);
+  const indent = indentStyleStr(style).repeat(count);
   const changes: Change[] = [];
   for (const line of getLines(doc, selOf(cx))) {
     const text = doc.line(line + 1).text;
     if (text.trim() === "") continue;
     const pos = lineToChar(doc, line);
     let ind = indent;
-    if (config.indentStyle.kind === "spaces") {
-      const offset = (firstNonWhitespaceChar(doc, line) ?? 0) % config.indentStyle.width;
+    if (style.kind === "spaces") {
+      const offset = (firstNonWhitespaceChar(doc, line) ?? 0) % style.width;
       ind = indent.slice(offset);
     }
     changes.push([pos, pos, ind]);
@@ -379,8 +372,8 @@ function indentCommand(cx: Context): void {
 function unindentCommand(cx: Context): void {
   const count = cx.count();
   const doc = docOf(cx);
-  const config = cx.editor.config;
-  const width = count * indentWidth(config);
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  const width = count * indentStyleWidth(style, tabWidth);
   const changes: Change[] = [];
   for (const lineIdx of getLines(doc, selOf(cx))) {
     const text = doc.line(lineIdx + 1).text;
@@ -388,7 +381,7 @@ function unindentCommand(cx: Context): void {
     let pos = 0;
     for (const ch of text) {
       if (ch === " ") w += 1;
-      else if (ch === "\t") w = (Math.floor(w / config.tabWidth) + 1) * config.tabWidth;
+      else if (ch === "\t") w = (Math.floor(w / tabWidth) + 1) * tabWidth;
       else break;
       pos += 1;
       if (w >= width) break;
@@ -619,8 +612,8 @@ function selectTextobject(cx: Context, objtype: TextObject): void {
         cx.editor.setStatus("Diff is not available in current buffer");
         return;
       }
-      if ("tfacTex".includes(ch)) return;
       const syntax = syntaxOf(cx);
+      const objects: Record<string, string> = { t: "class", f: "function", a: "parameter", c: "comment", T: "test", e: "entry", x: "xml-element" };
       setSel(
         cx,
         selOf(cx).transform((range) => {
@@ -633,6 +626,14 @@ function selectTextobject(cx: Context, objtype: TextObject): void {
               return textobjectParagraph(doc, range, objtype, count);
             case "m":
               return textobjectPairSurroundClosest(doc, range, objtype, count, syntax);
+            case "t":
+            case "f":
+            case "a":
+            case "c":
+            case "T":
+            case "e":
+            case "x":
+              return syntax ? textobjectTreesitter(syntax, doc, range, objtype, objects[ch]!) : range;
             default:
               if (!/^[0-9A-Za-z]$/.test(ch)) return textobjectPairSurround(doc, range, objtype, ch, count, syntax);
               return range;

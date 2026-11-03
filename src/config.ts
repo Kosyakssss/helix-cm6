@@ -22,6 +22,7 @@ export interface Config {
   textWidth: number;
   tabWidth: number;
   indentStyle: IndentStyle;
+  indentHeuristic: "simple" | "tree-sitter" | "hybrid";
   autoPairs: [string, string][] | false;
   autoInfo: boolean;
   smartTab: { enable: boolean; supersedeMenu: boolean };
@@ -59,6 +60,7 @@ export function defaultConfig(): Config {
     textWidth: 80,
     tabWidth: 4,
     indentStyle: { kind: "tabs" },
+    indentHeuristic: "hybrid",
     autoPairs: DEFAULT_AUTO_PAIRS,
     autoInfo: true,
     smartTab: { enable: true, supersedeMenu: false },

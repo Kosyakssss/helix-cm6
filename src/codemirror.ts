@@ -11,6 +11,7 @@ import type { LanguageId } from "./syntax/injections";
 import type { LanguageLoader, LanguageSource, QueryFile } from "./syntax/loader";
 import { SystemClipboard } from "./view/clipboard";
 import { loadSyntax } from "./view/syntax";
+import { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
 import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
@@ -35,6 +36,14 @@ export interface HelixDocument {
   name?: string | null;
   language?: string | null;
 }
+
+export function helixStatus(view: EditorView): HelixStatus | null {
+  const editor = view.state.facet(helixEditor);
+  const host = editor ? hostOf.get(view) : undefined;
+  return editor && host ? statusOf(editor, host, view.hasFocus) : null;
+}
+
+const hostOf = new WeakMap<EditorView, Host>();
 
 export const helixEditor = Facet.define<HelixEditor, HelixEditor | null>({ combine: (values) => values[0] ?? null });
 
@@ -92,6 +101,7 @@ export function helix(options: HelixOptions = {}): Extension {
         paneId: id,
       };
       hosts.set(view, host);
+      hostOf.set(view, host);
     }
     return host;
   };
@@ -99,6 +109,7 @@ export function helix(options: HelixOptions = {}): Extension {
   let started = false;
   let sessions: SyntaxSessions | null = null;
   const views = new Set<EditorView>();
+  const lastStatus = new WeakMap<EditorView, string>();
   const start = (view: EditorView) => {
     if (started) return;
     started = true;
@@ -127,10 +138,12 @@ export function helix(options: HelixOptions = {}): Extension {
           get: (host) => (host.view ? loadedSessions.languageOf(host.view) : null),
           set: (host, language) => {
             if (host.view) loadedSessions.setLanguage(host.view, language);
+            editor.detectIndent(host);
             rerender();
           },
         };
         editor.syntax = (host) => (host.view ? loadedSessions.get(host.view, host.state.doc) : null);
+        for (const open of views) editor.detectIndent(hostFor(open));
         loadedSessions.loader.onLoad(rerender);
       })
       .catch(() => editor.setError("the syntax tree failed to load"));
@@ -180,6 +193,13 @@ export function helix(options: HelixOptions = {}): Extension {
     },
     onRender: (view) => {
       if (view.hasFocus) active = view;
+      const listeners = view.state.facet(onHelixStatus);
+      if (listeners.length === 0) return;
+      const status = statusOf(editor, hostFor(view), view === active);
+      const key = JSON.stringify(status);
+      if (!status || lastStatus.get(view) === key) return;
+      lastStatus.set(view, key);
+      for (const listener of listeners) listener(status, view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -187,10 +207,12 @@ export function helix(options: HelixOptions = {}): Extension {
       views.add(view);
       start(view);
       if (sessions) sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
+      editor.detectIndent(hostFor(view));
     },
     onViewClose: (view) => {
       views.delete(view);
       sessions?.close(view);
+      editor.indentStyles.delete(hostFor(view).id);
       if (active === view) active = null;
     },
   });

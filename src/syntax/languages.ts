@@ -75,12 +75,15 @@ const MARKDOWN_INLINE_INJECTIONS = `((html_tag) @injection.content
 export interface LoaderOptions {
   regex?: RustRegexEngine | null;
   languages?: readonly string[];
+  only?: readonly string[];
   source?: LanguageSource | null;
 }
 
 export async function createLoader(binary: Uint8Array, options: LoaderOptions = {}): Promise<LanguageLoader> {
   const rt = await Runtime.load(binary);
   const config = parseLanguagesToml(...(options.languages ?? [MARKDOWN_LANGUAGES]));
+  const only = options.only;
+  if (only) config.languages = config.languages.filter((l) => only.includes(l.languageId));
   const grammars = new Map([
     ["markdown", new Language(rt, rt.x.hm_language(0))],
     ["markdown_inline", new Language(rt, rt.x.hm_language(1))],

@@ -35,21 +35,14 @@ mod test {
         })
     }
 
-    fn markdown_loader() -> helix_core::syntax::Loader {
+    fn lang_loader(name: &str) -> helix_core::syntax::Loader {
+        let keep: Vec<&str> = if name == "markdown" { vec!["markdown", "markdown.inline"] } else { vec![name] };
         let mut lang = helix_loader::config::default_lang_config();
         if let Some(languages) = lang.get_mut("language").and_then(|v| v.as_array_mut()) {
-            languages.retain(|l| {
-                matches!(l.get("name").and_then(|n| n.as_str()), Some("markdown" | "markdown.inline"))
-            });
+            languages.retain(|l| l.get("name").and_then(|n| n.as_str()).is_some_and(|n| keep.contains(&n)));
             for language in languages.iter_mut() {
                 let table = language.as_table_mut().unwrap();
                 table.insert("language-servers".into(), toml::Value::Array(Vec::new()));
-                if table.contains_key("indent") {
-                    let mut indent = toml::map::Map::new();
-                    indent.insert("tab-width".into(), toml::Value::Integer(4));
-                    indent.insert("unit".into(), toml::Value::String("\t".into()));
-                    table.insert("indent".into(), toml::Value::Table(indent));
-                }
             }
         }
         helix_core::syntax::Loader::new(lang.try_into().unwrap()).unwrap()
@@ -58,7 +51,7 @@ mod test {
     async fn run_case(input: &str, keys: &str, lang: Option<&str>) -> Value {
         let (text, selection) = test::print(input);
         let builder = match lang {
-            Some(_) => AppBuilder::new().with_lang_loader(markdown_loader()),
+            Some(name) => AppBuilder::new().with_lang_loader(lang_loader(name)),
             None => AppBuilder::new(),
         };
         let mut app = match builder.build() {

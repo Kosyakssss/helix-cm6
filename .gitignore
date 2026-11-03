@@ -2,3 +2,4 @@ node_modules
 .DS_Store
 test/oracle/cache-*.json
 play/languages
+test/oracle/languages

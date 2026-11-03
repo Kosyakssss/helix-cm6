@@ -16,6 +16,7 @@ import type { Syntax } from "../syntax/syntax";
 import type { LanguageConfiguration } from "../syntax/config";
 import type { LanguageId } from "../syntax/injections";
 import type { LanguageLoader } from "../syntax/loader";
+import { autoDetectIndentStyle, indentStyleFromStr, type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
 
@@ -282,6 +283,19 @@ export class HelixEditor {
   languageConfig(host: Host): LanguageConfiguration | null {
     const id = this.documentLanguage?.get(host) ?? null;
     return id === null || !this.languages ? null : this.languages.language(id).config;
+  }
+
+  indentStyles = new Map<string, IndentStyle>();
+
+  indent(host: Host): { style: IndentStyle; tabWidth: number } {
+    const language = this.languageConfig(host)?.indent ?? null;
+    return { style: this.indentStyles.get(host.id) ?? this.config.indentStyle, tabWidth: language?.tabWidth ?? this.config.tabWidth };
+  }
+
+  detectIndent(host: Host): void {
+    const language = this.languageConfig(host)?.indent ?? null;
+    const style = autoDetectIndentStyle(host.state.doc) ?? (language ? indentStyleFromStr(language.unit) : this.config.indentStyle);
+    this.indentStyles.set(host.id, style);
   }
 
   languageName(host: Host): string | null {

@@ -20,7 +20,7 @@ States:
 
 ## Commands
 
-Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 49, ported 30, out of scope 11, missing 10.
+Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31, out of scope 11, missing 9.
 
 ### Static commands
 
@@ -75,7 +75,7 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `earlier` | ported |
 | `ensure_selections_forward` | ported |
 | `exit_select_mode` | ported |
-| `expand_selection` | partial: markdown only |
+| `expand_selection` | ported |
 | `extend_char_left` | ported |
 | `extend_char_right` | ported |
 | `extend_line` | ported |
@@ -90,8 +90,8 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `extend_next_sub_word_start` | ported |
 | `extend_next_word_end` | ported |
 | `extend_next_word_start` | ported |
-| `extend_parent_node_end` | partial: markdown only |
-| `extend_parent_node_start` | partial: markdown only |
+| `extend_parent_node_end` | ported |
+| `extend_parent_node_start` | ported |
 | `extend_prev_char` | ported |
 | `extend_prev_long_word_end` | ported |
 | `extend_prev_long_word_start` | ported |
@@ -151,27 +151,27 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `goto_line_start` | ported |
 | `goto_next_buffer` | app |
 | `goto_next_change` | missing |
-| `goto_next_class` | partial: markdown only |
-| `goto_next_comment` | partial: markdown only |
+| `goto_next_class` | ported |
+| `goto_next_comment` | ported |
 | `goto_next_diag` | app |
-| `goto_next_entry` | partial: markdown only |
-| `goto_next_function` | partial: markdown only |
+| `goto_next_entry` | ported |
+| `goto_next_function` | ported |
 | `goto_next_paragraph` | ported |
-| `goto_next_parameter` | partial: markdown only |
+| `goto_next_parameter` | ported |
 | `goto_next_tabstop` | missing |
-| `goto_next_test` | partial: markdown only |
-| `goto_next_xml_element` | partial: markdown only |
+| `goto_next_test` | ported |
+| `goto_next_xml_element` | ported |
 | `goto_prev_change` | missing |
-| `goto_prev_class` | partial: markdown only |
-| `goto_prev_comment` | partial: markdown only |
+| `goto_prev_class` | ported |
+| `goto_prev_comment` | ported |
 | `goto_prev_diag` | app |
-| `goto_prev_entry` | partial: markdown only |
-| `goto_prev_function` | partial: markdown only |
+| `goto_prev_entry` | ported |
+| `goto_prev_function` | ported |
 | `goto_prev_paragraph` | ported |
-| `goto_prev_parameter` | partial: markdown only |
+| `goto_prev_parameter` | ported |
 | `goto_prev_tabstop` | missing |
-| `goto_prev_test` | partial: markdown only |
-| `goto_prev_xml_element` | partial: markdown only |
+| `goto_prev_test` | ported |
+| `goto_prev_xml_element` | ported |
 | `goto_previous_buffer` | app |
 | `goto_reference` | app |
 | `goto_type_definition` | app |
@@ -224,8 +224,8 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `move_next_sub_word_start` | ported |
 | `move_next_word_end` | ported |
 | `move_next_word_start` | ported |
-| `move_parent_node_end` | partial: markdown only |
-| `move_parent_node_start` | partial: markdown only |
+| `move_parent_node_end` | ported |
+| `move_parent_node_start` | ported |
 | `move_prev_long_word_end` | ported |
 | `move_prev_long_word_start` | ported |
 | `move_prev_sub_word_end` | ported |
@@ -280,13 +280,13 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `search_selection` | ported |
 | `search_selection_detect_word_boundaries` | ported |
 | `select_all` | ported |
-| `select_all_children` | partial: markdown only |
-| `select_all_siblings` | partial: markdown only |
+| `select_all_children` | ported |
+| `select_all_siblings` | ported |
 | `select_line_above` | ported |
 | `select_line_below` | ported |
 | `select_mode` | ported |
-| `select_next_sibling` | partial: markdown only |
-| `select_prev_sibling` | partial: markdown only |
+| `select_next_sibling` | ported |
+| `select_prev_sibling` | ported |
 | `select_references_to_symbol_under_cursor` | app |
 | `select_regex` | ported |
 | `select_register` | ported |
@@ -297,7 +297,7 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `shell_keep_pipe` | ported |
 | `shell_pipe` | ported |
 | `shell_pipe_to` | ported |
-| `shrink_selection` | partial: markdown only |
+| `shrink_selection` | ported |
 | `shrink_to_line_bounds` | ported |
 | `signature_help` | app |
 | `smart_tab` | ported |
@@ -415,7 +415,7 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `:hsplit-new` | app |
 | `:tutor` | app |
 | `:goto` | ported |
-| `:set-language` | missing |
+| `:set-language` | ported |
 | `:set-option` | ported |
 | `:toggle-option` | ported |
 | `:get-option` | ported |
@@ -453,7 +453,7 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `scroll-lines` | ported |
 | `mouse` | missing |
 | `mouse-yank-register` | ported |
-| `shell` | ported: passed to the app's runner, `helix({ shell })` |
+| `shell` | ported |
 | `line-number` | partial: parsed, relative numbers not drawn |
 | `cursorline` | ported |
 | `cursorcolumn` | missing |
@@ -497,7 +497,7 @@ Static: ported 206, app 60, partial 24, out of scope 17, missing 6. Typed: app 4
 | `trim-trailing-whitespace` | ported |
 | `smart-tab` | ported |
 | `popup-border` | missing: popups |
-| `indent-heuristic` | missing: indent queries |
+| `indent-heuristic` | ported |
 | `jump-label-alphabet` | ported |
 | `inline-diagnostics` | missing |
 | `end-of-line-diagnostics` | missing |
@@ -540,4 +540,4 @@ From Helix's `helix-term/src/ui`.
 
 ## Languages
 
-Only the markdown grammar loads, and every document parses as markdown. Tree-sitter commands and textobjects work only on markdown. Indent, comment tokens and auto-pairs are global. Helix's `languages.toml` has no equivalent yet.
+The registry is Helix's `languages.toml` (`helix-cm6/languages`), merged with the app's files as Helix merges a user's file. A document's language comes from its path and shebang, or from `:set-language`. Injections, textobjects, the `]f`-style motions, the syntax tree commands, comment tokens, auto-pairs and indent queries follow the language at the cursor, as in Helix. The indent style is detected from the text when a document opens or changes language, else taken from the language; the tab width comes from the language. Markdown is built in; other grammars are wasm modules that `bun run grammars` builds from the revisions in `languages.toml`, with Helix's queries. Highlighting, rainbow brackets and tags need Phase 3.

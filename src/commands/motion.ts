@@ -51,7 +51,7 @@ function moveImpl(
 
 function logical(cx: Context) {
   return (doc: Text, range: Range, dir: Direction, count: number, behaviour: Movement) =>
-    moveVertically(doc, range, dir, count, behaviour, cx.editor.config.tabWidth);
+    moveVertically(doc, range, dir, count, behaviour, cx.editor.indent(cx.host).tabWidth);
 }
 
 function moveVisual(cx: Context, dir: Direction, behaviour: Movement): void {

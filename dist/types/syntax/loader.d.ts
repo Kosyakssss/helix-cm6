@@ -17,7 +17,7 @@ export declare class LanguageData {
     readonly queries: Map<QueryFile, string>;
     private compiled;
     constructor(id: LanguageId, config: LanguageConfiguration);
-    query(file: QueryFile, compile: (text: string) => Query): Query | null;
+    query<T>(file: QueryFile, compile: (text: string) => T): T | null;
 }
 export interface Builtins {
     grammars: Map<string, Language>;
@@ -52,6 +52,6 @@ export declare class LanguageLoader implements InjectionLoader {
     load(id: LanguageId): Promise<void>;
     private loadData;
     textobjectQuery(id: LanguageId): Query | null;
-    indentQuery(id: LanguageId, compile: (grammar: Language, text: string) => Query): Query | null;
+    indentQuery<T>(id: LanguageId, compile: (grammar: Language, text: string) => T): T | null;
     private compile;
 }

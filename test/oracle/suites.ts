@@ -134,3 +134,150 @@ export function markdownSuite(): Case[] {
   }
   return cases;
 }
+
+const CODE_TEXTS: Record<string, string> = {
+  rust: `use std::fmt;
+
+/// A point on a plane.
+#[derive(Debug, Clone)]
+pub struct Point {
+    x: i32,
+    y: i32, // the vertical part
+}
+
+impl Point {
+    pub fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+
+    fn sum(&self, other: &Point, scale: i32) -> i32 {
+        /* block comment */
+        (self.x + other.x) * scale + [self.y, other.y].iter().sum::<i32>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn adds() {
+        assert_eq!(super::Point::new(1, 2).x, 1);
+    }
+}
+`,
+  python: `import os
+
+# A counter of things.
+class Counter:
+    """Counts lines."""
+
+    def __init__(self, name, limit=10):
+        self.name = name
+        self.items = {"a": 1, "b": [2, 3]}
+
+    def add(self, value, *rest, **opts):
+        # add one value
+        return self.limit + value
+
+
+def test_counter():
+    assert Counter("x").add(1) == 11
+`,
+  typescript: `import { a } from "./a";
+
+// A shape with an area.
+interface Shape {
+  area(): number;
+}
+
+export class Square implements Shape {
+  constructor(private side: number, readonly name = "sq") {}
+
+  area(): number {
+    /* the area */
+    return this.side * this.side;
+  }
+}
+
+const values = { first: 1, second: [2, 3] };
+function total(xs: number[], scale: number): number {
+  return xs.reduce((sum, x) => sum + x * scale, 0);
+}
+`,
+  json: `{
+  "name": "demo",
+  "list": [1, 2, {"inner": true}],
+  "nested": {"a": null, "b": "text"}
+}
+`,
+  go: `package main
+
+import "fmt"
+
+// Pair holds two values.
+type Pair struct {
+	A int
+	B string
+}
+
+func (p Pair) Show(prefix string, n int) string {
+	return fmt.Sprintf("%s %d %s", prefix, p.A+n, p.B)
+}
+
+func TestPair(t *testing.T) {
+	_ = Pair{A: 1, B: "x"}
+}
+`,
+  toml: `# settings
+[editor]
+line-number = "relative"
+rulers = [80, 120]
+
+[keys.normal]
+C-s = ":w"
+`,
+  html: `<!doctype html>
+<html>
+  <body>
+    <!-- a comment -->
+    <div class="box"><p>Hello <b>world</b></p></div>
+  </body>
+</html>
+`,
+  bash: `#!/bin/sh
+# greet someone
+greet() {
+  local name="$1"
+  echo "hello $name" | tr a-z A-Z
+}
+for x in a b c; do greet "$x"; done
+`,
+};
+
+const CODE_KEYS = [
+  "mif", "maf", "mit", "mat", "mia", "maa", "mic", "mac", "miT", "maT", "mie", "mae", "mix", "max", "2maf",
+  "]f", "[f", "2]f", "]t", "[t", "]a", "[a", "]c", "[c", "]T", "]e", "[e", "]x", "[x", "v]f", "v[f", "x]f",
+  "<A-o>", "<A-o><A-o>", "<A-o><A-o><A-o>", "<A-o><A-i>", "<A-i>", "<A-n>", "<A-p>", "<A-o><A-n>", "<A-o><A-p>",
+  "<A-a>", "<A-o><A-a>", "<A-I>", "<A-e>", "<A-b>", "<A-e><A-e>", "v<A-e>", "v<A-b>",
+  "mm", "mim", "mam", "mi(", "ma{", "mi\"", "md(", "mr({",
+  "<C-c>", "x<C-c>", "<space>c", "<space>C", "<space><A-c>", "jx<C-c>",
+  "i(<esc>", "i\"<esc>", "i{<esc>", "i'<esc>",
+  "o<esc>", "O<esc>", "ox<esc>", "Ox<esc>", "2o<esc>", "A<ret><esc>", "i<ret><esc>", "a<ret><esc>", "A<ret>x<ret><esc>",
+  "gla<ret><esc>", "ghi<ret><esc>", "A {<ret><esc>", "A(<ret><esc>", "xc<esc>",
+];
+
+export function codeSuite(): Case[] {
+  const cases: Case[] = [];
+  let n = 0;
+  for (const [lang, text] of Object.entries(CODE_TEXTS)) {
+    const starts = graphemeStarts(text);
+    const picks = new Set<number>();
+    const want = Math.min(14, starts.length);
+    for (let i = 0; i < want; i++) picks.add(starts[Math.floor(((i + 0.5) * starts.length) / want)]!);
+    for (const at of picks) {
+      const end = starts.find((s) => s > at) ?? text.length;
+      const markup = text.slice(0, at) + "#[" + text.slice(at, end) + "|]#" + text.slice(end);
+      for (const keys of CODE_KEYS) cases.push({ id: `code#${n++}`, in: markup, keys, lang });
+    }
+  }
+  return cases;
+}

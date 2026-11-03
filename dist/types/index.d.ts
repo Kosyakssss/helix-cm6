@@ -1,7 +1,8 @@
-export { helix, helixDocument, helixEditor, type GrammarSource, type HelixDocument, type HelixOptions } from "./codemirror";
+export { helix, helixDocument, helixEditor, helixStatus, type GrammarSource, type HelixDocument, type HelixOptions } from "./codemirror";
 export { helixExtension, uiRefresher, uiSignature, type ViewEnv } from "./view/view";
 export { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 export { loadSyntax } from "./view/syntax";
+export { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
 export { makeViewOps } from "./view/viewops";
 export { SystemClipboard } from "./view/clipboard";
 export { HelixEditor, Context, type HandleKeyOptions, type JumpLabel, type OnKeyCallback, type OnKeyKind, type PromptRequest, type Status, type UiHooks, type ViewOps, type Workspace, } from "./core/editor";

@@ -11,6 +11,7 @@ import type { Syntax } from "../syntax/syntax";
 import type { LanguageConfiguration } from "../syntax/config";
 import type { LanguageId } from "../syntax/injections";
 import type { LanguageLoader } from "../syntax/loader";
+import { type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
 export type OnKeyCallback = (cx: Context, key: string) => void;
@@ -147,6 +148,12 @@ export declare class HelixEditor {
     prompt(cx: Context, request: PromptRequest): void;
     commandMode(cx: Context): void;
     languageConfig(host: Host): LanguageConfiguration | null;
+    indentStyles: Map<string, IndentStyle>;
+    indent(host: Host): {
+        style: IndentStyle;
+        tabWidth: number;
+    };
+    detectIndent(host: Host): void;
     languageName(host: Host): string | null;
     isBusy(): boolean;
     whileBusy(work: void | Promise<void>): void | Promise<void>;
