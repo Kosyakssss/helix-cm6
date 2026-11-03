@@ -1,5 +1,7 @@
 import { EditorView } from "@codemirror/view";
-import { helix, helixEditor, helixKeys, helixRun } from "../../src/codemirror";
+import { helix, helixDocument, helixEditor, helixKeys, helixRun } from "../../src/codemirror";
+import { setDiagnostics } from "../../src/diagnostics";
+import { helixSetDiffBase, helixUi } from "../../src/ui";
 import { helixField } from "../../src/state";
 import { helixHooks, type HelixEdge } from "../../src/hooks";
 
@@ -43,7 +45,35 @@ const finalLine = (id: string) => {
   view.state.facet(helixEditor)!.finalLineIsLine = true;
   return view;
 };
-const extra = { edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4") };
+const uiParent = document.createElement("div");
+uiParent.id = "ui";
+document.body.appendChild(uiParent);
+const uiText = "# Title *em*\n\nsome  text\n\tindented line\n\nsecond word second\n";
+const uiView = new EditorView({
+  parent: uiParent,
+  doc: uiText,
+  extensions: [
+    helix({
+      config: '[editor.statusline]\nleft = ["mode", "file-name", "file-modification-indicator"]\nright = ["diagnostics", "selections", "position", "file-type"]\n',
+      workspace: {
+        run: () => false,
+        files: () => ["alpha.md", "beta.md", "gamma.txt"],
+        readFile: (path) => `contents of ${path}\n`,
+        openFile: (cx, path) => cx.editor.setStatus(`opened ${path}`),
+        language: {
+          hover: () => Promise.resolve("**hover text**"),
+          completions: () => Promise.resolve([{ label: "alphabet", detail: "test" }, { label: "alpine" }]),
+        },
+      },
+    }),
+    helixDocument.of({ path: "doc.md", name: "doc.md" }),
+    helixUi({ themes: { demo: 'keyword = "#112233"\n"markup.heading" = { fg = "#445566", modifiers = ["bold"] }\n"ui.background" = { bg = "#fafafa" }\n"ui.text" = "#222222"\n' } }),
+    EditorView.theme({ "&": { height: "300px" } }),
+  ],
+});
+helixSetDiffBase(uiView, uiText.replace("second word second", "first word first"));
+uiView.dispatch({ effects: setDiagnostics.of([{ from: 2, to: 7, severity: "error", message: "a problem" }]) });
+const extra = { ui: uiView, edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4") };
 
 function panel(name: "a" | "b") {
   const dom = views[name].dom;
@@ -68,6 +98,35 @@ Object.assign(window, {
     const value = view.state.field(helixField).selection.primary();
     return { doc: view.state.doc.toString(), head: value.cursor(view.state.doc), anchor: value.anchor, edges: [...edges], entered: [...entered], status: view.state.facet(helixEditor)!.status?.message ?? null };
   },
+  helixUiState: () => {
+    const dom = uiView.dom;
+    const text = (sel: string) => dom.querySelector(sel)?.textContent ?? null;
+    const all = (sel: string) => dom.querySelectorAll(sel).length;
+    const heading = dom.querySelector(".cm-content .hx-s-markup-heading");
+    return {
+      status: text(".hx-statusline"),
+      numbers: [...dom.querySelectorAll(".hx-gutter-line-numbers .cm-gutterElement")].map((e) => e.textContent!.trim()).filter(Boolean).slice(0, 8),
+      diagnostics: all(".hx-gutter-diagnostics .hx-s-error"),
+      underline: all(".cm-content .hx-diagnostic"),
+      diff: all(".hx-gutter-diff .hx-s-diff-delta-gutter"),
+      heading: heading?.textContent ?? null,
+      headingColor: heading ? getComputedStyle(heading).color : null,
+      spaces: all(".hx-ws-space"),
+      guides: all(".hx-indent-guide"),
+      rulers: all(".hx-ruler"),
+      column: all(".hx-cursorcolumn"),
+      picker: all(".hx-picker"),
+      pickerRows: all(".hx-picker-row:not(.hx-picker-header)"),
+      preview: text(".hx-picker-preview-body"),
+      popup: text(".hx-popup-body"),
+      menu: [...dom.querySelectorAll(".hx-menu-label")].map((e) => e.textContent),
+      theme: [...dom.classList].some((c) => c.startsWith("hx-theme-")),
+      message: dom.querySelector(".hx-message:not(.hx-hidden)")?.textContent ?? null,
+      doc: uiView.state.doc.toString(),
+      cursor: uiView.state.field(helixField).selection.primary().cursor(uiView.state.doc),
+    };
+  },
+  helixFocusUi: () => uiView.focus(),
   helixRunIn: (name: keyof typeof extra, command: string) => helixRun(extra[name], command),
   helixDoc: (name: "a" | "b") => views[name].state.doc.toString(),
   helixLastKeydown: () => lastKeydown,

@@ -16,7 +16,8 @@ if (outIndex < 0 || !args[outIndex + 1]) {
 const out = resolve(args[outIndex + 1]!);
 const nativeIndex = args.indexOf("--native");
 const native = nativeIndex < 0 ? null : resolve(args[nativeIndex + 1]!);
-const wanted = args.filter((a, i) => i !== outIndex && i !== outIndex + 1 && i !== nativeIndex && i !== nativeIndex + 1);
+const themes = args.includes("--themes");
+const wanted = args.filter((a, i) => i !== outIndex && i !== outIndex + 1 && i !== nativeIndex && i !== nativeIndex + 1 && a !== "--themes");
 const all = wanted.includes("--all");
 
 const config = parseLanguagesToml(readFileSync(join(here, "languages.toml"), "utf8"));
@@ -124,6 +125,14 @@ if (unknown.length > 0) {
 }
 
 const repo = helixRepo();
+if (themes) {
+  mkdirSync(join(out, "themes"), { recursive: true });
+  const list = Bun.spawnSync(["git", "-C", repo, "ls-tree", "--name-only", `${HELIX_REV}:runtime/themes`], { stdout: "pipe" }).stdout.toString().split("\n").filter((n) => n.endsWith(".toml"));
+  for (const name of list) writeFileSync(join(out, "themes", name), Bun.spawnSync(["git", "-C", repo, "show", `${HELIX_REV}:runtime/themes/${name}`], { stdout: "pipe" }).stdout.toString());
+  writeFileSync(join(out, "themes", "default.toml"), Bun.spawnSync(["git", "-C", repo, "show", `${HELIX_REV}:theme.toml`], { stdout: "pipe" }).stdout.toString());
+  writeFileSync(join(out, "themes", "base16_default.toml"), Bun.spawnSync(["git", "-C", repo, "show", `${HELIX_REV}:base16_theme.toml`], { stdout: "pipe" }).stdout.toString());
+  process.stdout.write(`${list.length + 2} themes in ${join(out, "themes")}\n`);
+}
 const queryLanguages = new Set<string>();
 const pending = languages.map((l) => l.languageId);
 while (pending.length > 0) {

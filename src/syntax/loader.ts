@@ -83,6 +83,7 @@ export class LanguageData {
   ) {}
 
   query<T>(file: QueryFile, compile: (text: string) => T): T | null {
+    if (this.syntax === undefined) return null;
     if (this.compiled.has(file)) return this.compiled.get(file) as T | null;
     const text = this.queries.get(file) ?? "";
     let query: T | null = null;

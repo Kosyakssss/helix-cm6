@@ -1,6 +1,6 @@
-import { RangeSetBuilder, type Extension } from "@codemirror/state";
-import { Decoration, EditorView, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
-import { diagnosticsOf, severityRank, setDiagnostics, type Diagnostic, type Severity } from "../diagnostics";
+import { RangeSetBuilder, StateField, type EditorState, type Extension } from "@codemirror/state";
+import { Decoration, EditorView, WidgetType, type DecorationSet } from "@codemirror/view";
+import { diagnosticsOf, severityRank, type Diagnostic, type Severity } from "../diagnostics";
 import { helixField } from "../state";
 import { make } from "../view/dom";
 import { helixEnv } from "../view/view";
@@ -48,13 +48,13 @@ function mark(d: Diagnostic): Decoration {
   return deco;
 }
 
-function build(view: EditorView): DecorationSet {
-  const list = diagnosticsOf(view.state);
-  const env = view.state.facet(helixEnv);
+function build(state: EditorState): DecorationSet {
+  const list = diagnosticsOf(state);
+  const env = state.facet(helixEnv);
   if (list.length === 0 || !env) return Decoration.none;
   const config = env.editor.config;
-  const value = view.state.field(helixField, false);
-  const doc = view.state.doc;
+  const value = state.field(helixField, false);
+  const doc = state.doc;
   const cursorLine = value ? doc.lineAt(value.selection.primary().cursor(doc)).number : -1;
   const items: { from: number; to: number; deco: Decoration }[] = [];
   const perLine = new Map<number, Diagnostic[]>();
@@ -80,18 +80,14 @@ function build(view: EditorView): DecorationSet {
   return builder.finish();
 }
 
-const decorations = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = build(view);
-    }
-    update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet || update.transactions.some((tr) => tr.effects.some((e) => e.is(setDiagnostics)))) this.decorations = build(update.view);
-    }
+const decorations = StateField.define<DecorationSet>({
+  create: (state) => build(state),
+  update(value, tr) {
+    if (value === Decoration.none && diagnosticsOf(tr.state).length === 0) return value;
+    return build(tr.state);
   },
-  { decorations: (v) => v.decorations },
-);
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 const theme = EditorView.baseTheme({
   ".hx-diagnostic": { textDecorationLine: "underline", textDecorationStyle: "wavy", textDecorationSkipInk: "none" },

@@ -14,6 +14,11 @@ import type { LanguageLoader } from "../syntax/loader";
 import { type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
+import type { Theme } from "../ui/theme";
+import type { UiLayer } from "./layers";
+import { type WorkspaceProviders } from "../commands/workspace";
+import type { Matcher } from "./matcher";
+import { type Diagnostic } from "../diagnostics";
 export type OnKeyCallback = (cx: Context, key: string) => void;
 export type OnKeyKind = "pseudoPending" | "fallback";
 export interface Status {
@@ -58,8 +63,11 @@ export interface UiHooks {
     promptChanged?(host: Host, prompt: Prompt | null): void;
     jumpLabels?(host: Host, labels: JumpLabel[]): void;
 }
-export interface Workspace {
-    run(cx: Context, name: string, args: string[]): void;
+export interface Workspace extends WorkspaceProviders {
+    diagnostics?(host: Host): readonly Diagnostic[];
+    cwd?(host: Host): string;
+    versionControlHead?(host: Host): string;
+    run(cx: Context, name: string, args: string[]): void | false;
     openJump?(cx: Context, jump: Jump): void;
     variable?(cx: Context, name: Variable): string | null;
 }
@@ -138,6 +146,7 @@ export declare class HelixEditor {
     jumpTo(cx: Context, jump: Jump): void;
     runStatic(cx: Context, name: string): void;
     workspaceCommand(cx: Context, name: string, args?: string[]): void;
+    private hasProvider;
     scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", sync: boolean): void;
     alignView(cx: Context, align: "top" | "center" | "bottom"): void;
     gotoWindow(cx: Context, align: "top" | "center" | "bottom"): void;
@@ -157,6 +166,35 @@ export declare class HelixEditor {
     };
     detectIndent(host: Host): void;
     languageName(host: Host): string | null;
+    private savedRevisions;
+    theme: Theme | null;
+    themes: {
+        names(): string[];
+        load(name: string): Theme | null;
+    } | null;
+    onThemeChanged: (() => void) | null;
+    busyLabel: string | null;
+    isModified(host: Host): boolean;
+    markSaved(host: Host): void;
+    busyFrame(): string | null;
+    workspaceDiagnostics(host: Host): readonly Diagnostic[];
+    versionControlHead(host: Host): string;
+    workingDirectory(host: Host): string;
+    layers: UiLayer[];
+    lastPicker: UiLayer | null;
+    matcher: Matcher | null;
+    matcherLoader: (() => Promise<Matcher>) | null;
+    private layerListeners;
+    onLayersChanged(listener: () => void): () => void;
+    renderLayers(host?: Host): void;
+    pushLayer(layer: UiLayer, host?: Host): void;
+    removeLayer(layer: UiLayer, host?: Host): void;
+    withMatcher(run: (matcher: Matcher) => void): Promise<void>;
+    private themeBeforePreview;
+    private themeChanged;
+    setTheme(theme: Theme): void;
+    setThemePreview(theme: Theme): void;
+    unsetThemePreview(): void;
     focusedHost(host: Host): Host;
     isBusy(): boolean;
     whileBusy(work: void | Promise<void>): void | Promise<void>;

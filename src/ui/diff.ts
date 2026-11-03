@@ -19,7 +19,7 @@ export function helixSetDiffBase(view: EditorView, base: string | null): void {
 
 const diffPlugin = ViewPlugin.fromClass(
   class {
-    private timer: ReturnType<typeof setTimeout> | null = null;
+    private timer: number | null = null;
     private doc: Text | null = null;
 
     constructor(readonly view: EditorView) {}
@@ -38,8 +38,10 @@ const diffPlugin = ViewPlugin.fromClass(
     }
 
     private schedule(): void {
-      if (this.timer !== null) clearTimeout(this.timer);
-      this.timer = setTimeout(() => {
+      const win = this.view.dom.ownerDocument.defaultView;
+      if (!win) return;
+      if (this.timer !== null) win.clearTimeout(this.timer);
+      this.timer = win.setTimeout(() => {
         this.timer = null;
         this.compute();
       }, 50);
@@ -66,7 +68,7 @@ const diffPlugin = ViewPlugin.fromClass(
     }
 
     destroy(): void {
-      if (this.timer !== null) clearTimeout(this.timer);
+      if (this.timer !== null) this.view.dom.ownerDocument.defaultView?.clearTimeout(this.timer);
     }
   },
 );

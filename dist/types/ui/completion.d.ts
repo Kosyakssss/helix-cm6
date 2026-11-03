@@ -1,0 +1,31 @@
+import type { Extension } from "@codemirror/state";
+import { Context, type HelixEditor } from "../core/editor";
+import type { Host } from "../core/host";
+import type { CompletionItem } from "../commands/workspace";
+import { Menu } from "./menu";
+export declare class CompletionController {
+    readonly editor: HelixEditor;
+    readonly host: Host;
+    menu: Menu<CompletionItem> | null;
+    private start;
+    private items;
+    private cx;
+    private applying;
+    private previewed;
+    private timer;
+    private request;
+    constructor(editor: HelixEditor, host: Host);
+    close(): void;
+    private cursor;
+    private filtered;
+    private show;
+    private replaceWord;
+    private preview;
+    private accept;
+    trigger(cx: Context, manual: boolean): Promise<void>;
+    documentChanged(): void;
+    private window;
+    private schedule;
+}
+export declare function completionController(editor: HelixEditor, host: Host): CompletionController;
+export declare function helixCompletion(): Extension;

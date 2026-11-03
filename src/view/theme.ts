@@ -1,13 +1,13 @@
 import { EditorView } from "@codemirror/view";
 
-const fg = "var(--hx-fg, currentColor)";
+const fg = "var(--hx-fg, CanvasText)";
 const bg = "var(--hx-bg, Canvas)";
 const selection = "var(--hx-selection, Highlight)";
 const error = "var(--hx-error, #d32f2f)";
-const muted = "var(--hx-muted, color-mix(in srgb, currentColor 60%, transparent))";
-const panel = "var(--hx-panel, color-mix(in srgb, currentColor 5%, Canvas))";
-const border = "var(--hx-border, color-mix(in srgb, currentColor 20%, transparent))";
-const hover = "var(--hx-hover, color-mix(in srgb, currentColor 8%, transparent))";
+const muted = "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))";
+const panel = "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))";
+const border = "var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))";
+const hover = "var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent))";
 const radius = "var(--hx-cursor-radius, 2px)";
 
 export const nativeSelectionTheme = EditorView.baseTheme({
@@ -40,9 +40,9 @@ export const helixTheme = EditorView.baseTheme({
     position: "absolute",
     inset: "0",
     borderRadius: radius,
-    backgroundColor: `color-mix(in srgb, ${fg} 45%, ${bg})`,
+    backgroundColor: `var(--hx-cursor-bg, color-mix(in srgb, ${fg} 45%, ${bg}))`,
   },
-  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: fg },
+  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: "var(--hx-cursor-primary-bg, var(--hx-fg, CanvasText))" },
   ".cm-layer .hx-cell-sq-tl, .cm-layer .hx-cell-sq-tl::before": { borderTopLeftRadius: "0" },
   ".cm-layer .hx-cell-sq-tr, .cm-layer .hx-cell-sq-tr::before": { borderTopRightRadius: "0" },
   ".cm-layer .hx-cell-sq-bl, .cm-layer .hx-cell-sq-bl::before": { borderBottomLeftRadius: "0" },
@@ -61,12 +61,13 @@ export const helixTheme = EditorView.baseTheme({
     fontFeatureSettings: "var(--hx-glyph-features)",
     fontVariationSettings: "var(--hx-glyph-variations)",
     whiteSpace: "pre",
-    color: bg,
+    color: `var(--hx-cursor-primary-fg, ${bg})`,
   },
   "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
-  "&.hx .hx-cursorline": { backgroundColor: hover },
+  "&.hx .hx-cursorline": { backgroundColor: "var(--hx-cursorline, var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent)))" },
   ".hx-panel": {
     position: "relative",
+    color: fg,
     fontFamily: "var(--hx-panel-font, monospace)",
     fontSize: "var(--hx-panel-font-size, 0.85em)",
     background: panel,

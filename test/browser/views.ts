@@ -36,7 +36,7 @@ async function run(type: BrowserType): Promise<string[]> {
   });
   const page = await context.newPage();
   const errors: string[] = [];
-  page.on("pageerror", (err) => errors.push(String(err)));
+  page.on("pageerror", (err) => { errors.push(String(err)); if (process.env.VIEWS_DEBUG) console.error(String(err), err.stack); });
   await page.goto("https://helix.test/");
   await page.waitForFunction(() => (window as unknown as { helixReady(): boolean }).helixReady());
 
@@ -152,6 +152,77 @@ async function run(type: BrowserType): Promise<string[]> {
   check("x and p on a last line without a newline pastes below as a line", (await extra("final2", "jxyp")).doc, "one\ntwo\ntwo");
   check("p of a line after a last line without a newline adds a line", (await extra("final3", "xyjp")).doc, "one\ntwo\none");
   check("e on a whole last line stays charwise", (await extra("final4", "jeyP")).doc, "one\ntwotwo");
+
+  type UiState = { status: string; numbers: string[]; diagnostics: number; underline: number; diff: number; heading: string | null; headingColor: string | null; spaces: number; guides: number; rulers: number; column: number; picker: number; pickerRows: number; preview: string | null; popup: string | null; menu: string[]; theme: boolean; message: string | null; doc: string; cursor: number };
+  const uiState = () => page.evaluate(() => (window as unknown as { helixUiState(): UiState }).helixUiState());
+  const uiKeys = async (keys: string) => {
+    await extra("ui", keys);
+    await page.waitForTimeout(150);
+  };
+  await page.click("#ui .cm-content");
+  await page.evaluate(() => (window as unknown as { helixFocusUi(): void }).helixFocusUi());
+  await page.waitForTimeout(400);
+  await uiKeys("gg");
+  await page.waitForFunction(() => document.querySelector("#ui .cm-content .hx-s-markup-heading") !== null, undefined, { timeout: 5000 }).catch(() => undefined);
+  let ui = await uiState();
+  if (!ui.status.includes("NOR") || !ui.status.includes("doc.md") || !ui.status.includes("markdown")) fails.push(`statusline: got ${JSON.stringify(ui.status)}`);
+  check("gutter line numbers", ui.numbers.filter((n) => n !== "000").slice(0, 3), ["1", "2", "3"]);
+  check("diagnostic gutter and underline", [ui.diagnostics, ui.underline], [1, 1]);
+  if (ui.diff !== 1) {
+    await page.waitForTimeout(500);
+    ui = await uiState();
+  }
+  check("diff gutter", ui.diff, 1);
+  check("markdown heading highlight", ui.heading !== null, true);
+  await uiKeys(":set line-number relative<ret>");
+  ui = await uiState();
+  check("relative line numbers", ui.numbers.filter((n) => n !== "000").slice(0, 3), ["1", "1", "2"]);
+  await uiKeys(":set whitespace.render all<ret>");
+  check("whitespace is drawn", (await uiState()).spaces > 0, true);
+  await uiKeys(":set whitespace.render none<ret>:set indent-guides.render true<ret>");
+  check("indent guides are drawn", (await uiState()).guides > 0, true);
+  await uiKeys(":set rulers [40]<ret>");
+  check("a ruler is drawn", (await uiState()).rulers, 1);
+  await uiKeys(":set cursorcolumn true<ret>");
+  check("the cursor column is drawn", (await uiState()).column, 1);
+  await uiKeys(":theme demo<ret>");
+  ui = await uiState();
+  check("a theme applies", [ui.theme, ui.headingColor], [true, "rgb(68, 85, 102)"]);
+  await extra("ui", "<space>f");
+  await page.waitForTimeout(600);
+  ui = await uiState();
+  check("the file picker opens with its items", [ui.picker, ui.pickerRows], [1, 3]);
+  await uiKeys("gam");
+  ui = await uiState();
+  check("the picker filters with nucleo", ui.pickerRows, 1);
+  check("the picker previews", ui.preview?.includes("contents of gamma.txt"), true);
+  await uiKeys("<ret>");
+  ui = await uiState();
+  check("the picker closes and opens the file", [ui.picker, ui.message], [0, "opened gamma.txt"]);
+  await extra("ui", "<space>?");
+  await page.waitForTimeout(400);
+  await uiKeys("move_char_left");
+  check("the command palette lists commands", (await uiState()).pickerRows >= 1, true);
+  await uiKeys("<esc>");
+  await extra("ui", "<space>k");
+  await page.waitForTimeout(200);
+  check("hover shows a popup", (await uiState()).popup, "hover text");
+  await uiKeys("<esc>");
+  check("esc closes the popup", (await uiState()).popup, null);
+  await uiKeys("ggi");
+  await page.keyboard.type("al");
+  await page.waitForTimeout(100);
+  await extra("ui", "<C-x>");
+  await page.waitForTimeout(300);
+  check("completion lists the provider's items", (await uiState()).menu, ["alphabet", "alpine"]);
+  await uiKeys("<tab>");
+  check("completion previews the selected item", (await uiState()).doc.startsWith("alphabet"), true);
+  await uiKeys("<ret>");
+  ui = await uiState();
+  check("completion accepts and closes", [ui.doc.startsWith("alphabet"), ui.menu], [true, []]);
+  await uiKeys("<esc>");
+  await uiKeys("]g");
+  check("]g goes to the next change", (await uiState()).status.includes("6:1"), true);
 
   await browser.close();
   if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));

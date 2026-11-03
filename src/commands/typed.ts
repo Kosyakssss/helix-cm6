@@ -9,7 +9,7 @@ import { earlier, later } from "./misc";
 import { yankJoinedTo, paste, replaceSelectionsWithRegister } from "./edit";
 import { gotoLineWithoutJumplist } from "./motion";
 import { commitHistoryNow, jumplistFor } from "./jumps";
-import { shell } from "./shell";
+import { shell, type ShellOutput } from "./shell";
 import { Args, SHELL_SIGNATURE, split, Tokenizer, type Flag, type Signature } from "./command-line";
 import { expand } from "./expansion";
 import { diagnosticsOf } from "../diagnostics";
@@ -188,6 +188,23 @@ function prettyPrintTree(node: SyntaxNode): string {
 }
 
 const DEFS: Omit<TypableCommand, "signature">[] = [
+  {
+    name: "run-shell-command",
+    aliases: ["sh", "!"],
+    doc: "Run a shell command",
+    fun: validateOnly((cx, args) => {
+      const command = args.join(" ");
+      if (!cx.editor.shell) throw new Error("No shell set");
+      const show = (result: ShellOutput) => {
+        if (result.code !== 0 && !result.stdout) cx.editor.setError(result.stderr.trim() || `Shell command failed with code ${result.code}`);
+        else if (!result.stdout.trim()) cx.editor.setStatus("Command run");
+        else hoverPopup(cx, `\`\`\`\n${result.stdout}\n\`\`\``);
+        cx.editor.ui.render?.(cx.host);
+      };
+      const output = cx.editor.shell(command, null, cx.editor.config.shell);
+      void cx.editor.whileBusy(output instanceof Promise ? output.then(show) : show(output));
+    }),
+  },
   {
     name: "tree-sitter-scopes",
     aliases: [],

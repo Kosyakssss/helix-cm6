@@ -30,3 +30,9 @@ export { LanguageLoader, type LanguageSource, type QueryFile } from "./syntax/lo
 export { parseLanguagesToml, type LanguageConfiguration } from "./syntax/config";
 export type { LanguageId } from "./syntax/injections";
 export type { Syntax } from "./syntax/syntax";
+export * from "./ui";
+export { setDiagnostics, diagnosticsField, type Diagnostic, type Severity } from "./diagnostics";
+export { Matcher, FuzzyPattern, type Hunk } from "./core/matcher";
+export type { CodeAction, CompletionItem, FileTarget, LanguageFeatures, Location, LocationKind, SearchMatch, SignatureHelp, SymbolInfo, TextEdit, WorkspaceBuffer, WorkspaceProviders } from "./commands/workspace";
+export type { UiLayer, LayerResult } from "./core/layers";
+export { helixEnv } from "./view/view";

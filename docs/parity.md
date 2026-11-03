@@ -5,10 +5,17 @@ Helix commit `ba40e547`, the oracle's pin. This list is the backlog of `docs/roa
 States:
 
 - **ported**: in the engine, from Helix's source.
-- **app**: the engine hands the command to the app's `Workspace`. A plain `helix()` editor says it is not available.
+- **app**: the engine draws the result, and the data comes from the app's `Workspace`: buffers, files, search, or the `language` features (an LSP client, for example). `docs/api.md` lists them. Without them, the command says it is not available.
 - **partial**: ported, with the gap named in the row.
 - **missing**: not in the engine yet.
 - **out of scope**: see `docs/roadmap.md`.
+
+## Partial
+
+- `mouse`, `middle-click-paste`: parsed. The mouse follows CodeMirror's handling.
+- Inline diagnostics draw each message under its line. Helix fits them to the free columns; a browser wraps them.
+- `:line-ending crlf` says so instead of changing the document: CodeMirror keeps line feeds, and the app writes the ending it wants.
+- Tabstops (`goto_next_tabstop`, `goto_prev_tabstop`) need LSP snippets, which are not ported.
 
 ## Open bugs
 
@@ -20,7 +27,7 @@ States:
 
 ## Commands
 
-Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31, out of scope 11, missing 9.
+Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40, out of scope 11.
 
 ### Static commands
 
@@ -44,7 +51,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `command_mode` | ported |
 | `command_palette` | app |
 | `commit_undo_checkpoint` | ported |
-| `completion` | app |
+| `completion` | ported |
 | `copy_between_registers` | ported |
 | `copy_selection_on_next_line` | ported |
 | `copy_selection_on_prev_line` | ported |
@@ -135,12 +142,12 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `goto_file_hsplit` | app |
 | `goto_file_start` | ported |
 | `goto_file_vsplit` | app |
-| `goto_first_change` | missing |
+| `goto_first_change` | app |
 | `goto_first_diag` | app |
 | `goto_first_nonwhitespace` | ported |
 | `goto_implementation` | app |
 | `goto_last_accessed_file` | app |
-| `goto_last_change` | missing |
+| `goto_last_change` | app |
 | `goto_last_diag` | app |
 | `goto_last_line` | ported |
 | `goto_last_modification` | ported |
@@ -150,7 +157,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `goto_line_end_newline` | ported |
 | `goto_line_start` | ported |
 | `goto_next_buffer` | app |
-| `goto_next_change` | missing |
+| `goto_next_change` | app |
 | `goto_next_class` | ported |
 | `goto_next_comment` | ported |
 | `goto_next_diag` | app |
@@ -161,7 +168,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `goto_next_tabstop` | missing |
 | `goto_next_test` | ported |
 | `goto_next_xml_element` | ported |
-| `goto_prev_change` | missing |
+| `goto_prev_change` | app |
 | `goto_prev_class` | ported |
 | `goto_prev_comment` | ported |
 | `goto_prev_diag` | app |
@@ -364,7 +371,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `:new` | app |
 | `:format` | app |
 | `:indent-style` | ported |
-| `:line-ending` | missing |
+| `:line-ending` | ported |
 | `:earlier` | ported |
 | `:later` | ported |
 | `:write-quit` | app |
@@ -377,7 +384,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `:quit-all!` | app |
 | `:cquit` | app |
 | `:cquit!` | app |
-| `:theme` | missing |
+| `:theme` | ported |
 | `:yank-join` | ported |
 | `:clipboard-yank` | ported |
 | `:clipboard-yank-join` | ported |
@@ -403,9 +410,9 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `:lsp-workspace-command` | app |
 | `:lsp-restart` | out of scope |
 | `:lsp-stop` | out of scope |
-| `:tree-sitter-scopes` | missing |
-| `:tree-sitter-highlight-name` | missing |
-| `:tree-sitter-layers` | missing |
+| `:tree-sitter-scopes` | ported |
+| `:tree-sitter-highlight-name` | ported |
+| `:tree-sitter-layers` | ported |
 | `:debug-start` | out of scope |
 | `:debug-remote` | out of scope |
 | `:debug-eval` | out of scope |
@@ -421,7 +428,7 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `:get-option` | ported |
 | `:sort` | ported |
 | `:reflow` | ported |
-| `:tree-sitter-subtree` | missing |
+| `:tree-sitter-subtree` | ported |
 | `:config-reload` | app |
 | `:config-open` | app |
 | `:config-open-workspace` | app |
@@ -430,14 +437,14 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | `:append-output` | ported |
 | `:pipe` | ported |
 | `:pipe-to` | ported |
-| `:run-shell-command` | missing |
-| `:reset-diff-change` | missing |
+| `:run-shell-command` | ported |
+| `:reset-diff-change` | ported |
 | `:clear-register` | ported |
 | `:set-register` | ported |
 | `:redraw` | ported |
 | `:move` | app |
 | `:move!` | app |
-| `:yank-diagnostic` | missing |
+| `:yank-diagnostic` | ported |
 | `:read` | app |
 | `:echo` | ported |
 | `:noop` | ported |
@@ -451,93 +458,96 @@ Static: ported 230, app 60, out of scope 17, missing 6. Typed: app 49, ported 31
 | --- | --- |
 | `scrolloff` | ported |
 | `scroll-lines` | ported |
-| `mouse` | missing |
+| `mouse` | partial |
 | `mouse-yank-register` | ported |
 | `shell` | ported |
-| `line-number` | partial: parsed, relative numbers not drawn |
+| `line-number` | ported |
 | `cursorline` | ported |
-| `cursorcolumn` | missing |
-| `gutters` | partial: parsed, not drawn |
-| `middle-click-paste` | missing |
+| `cursorcolumn` | ported |
+| `gutters` | ported |
+| `middle-click-paste` | partial |
 | `auto-pairs` | ported |
-| `auto-completion` | missing: completion |
-| `path-completion` | partial: prompt only |
-| `word-completion` | missing: completion |
-| `auto-format` | missing: formatter |
+| `auto-completion` | ported |
+| `path-completion` | ported |
+| `word-completion` | ported |
+| `auto-format` | app |
 | `default-yank-register` | ported |
 | `auto-save` | app |
 | `text-width` | ported |
-| `idle-timeout` | missing |
-| `completion-timeout` | missing |
-| `preview-completion-insert` | missing |
-| `completion-trigger-len` | missing |
-| `completion-replace` | missing |
+| `idle-timeout` | ported |
+| `completion-timeout` | ported |
+| `preview-completion-insert` | ported |
+| `completion-trigger-len` | ported |
+| `completion-replace` | ported |
 | `continue-comments` | ported |
 | `auto-info` | ported |
-| `file-picker` | missing: picker |
-| `file-explorer` | missing: picker |
-| `statusline` | partial: parsed, not drawn |
+| `file-picker` | app |
+| `file-explorer` | app |
+| `statusline` | ported |
 | `cursor-shape` | ported |
 | `true-color` | out of scope |
 | `undercurl` | out of scope |
 | `search` | ported |
-| `lsp` | missing: LSP API |
-| `terminal` | missing, and it warns as an unknown key |
-| `rulers` | missing |
-| `whitespace` | missing: not drawn |
-| `bufferline` | missing |
-| `indent-guides` | partial: parsed, not drawn |
+| `lsp` | app |
+| `terminal` | out of scope |
+| `rulers` | ported |
+| `whitespace` | ported |
+| `bufferline` | ported |
+| `indent-guides` | ported |
 | `color-modes` | ported |
-| `soft-wrap` | missing |
+| `soft-wrap` | ported |
 | `workspace-lsp-roots` | out of scope |
-| `default-line-ending` | missing |
+| `default-line-ending` | ported |
 | `insert-final-newline` | ported |
 | `atomic-save` | out of scope |
 | `trim-final-newlines` | ported |
 | `trim-trailing-whitespace` | ported |
 | `smart-tab` | ported |
-| `popup-border` | missing: popups |
+| `popup-border` | ported |
 | `indent-heuristic` | ported |
 | `jump-label-alphabet` | ported |
-| `inline-diagnostics` | missing |
-| `end-of-line-diagnostics` | missing |
+| `inline-diagnostics` | ported |
+| `end-of-line-diagnostics` | ported |
 | `clipboard-provider` | out of scope |
-| `editor-config` | missing |
-| `rainbow-brackets` | missing: highlighting |
+| `editor-config` | app |
+| `rainbow-brackets` | ported |
 | `kitty-keyboard-protocol` | out of scope |
-| `buffer-picker` | missing: picker |
+| `buffer-picker` | ported |
 | `workspace-trust` | out of scope |
 
 ## Statusline elements
 
-All 24 elements are parsed. The engine draws none; helix-motions draws them in Obsidian's status bar.
+`helixStatusline()` draws all 24 elements, each with its theme scope. `spinner`, `version-control`, `current-working-directory` and `workspace-diagnostics` take their data from the `Workspace`.
 
 `mode`, `spinner`, `file-base-name`, `file-name`, `file-absolute-path`, `file-modification-indicator`, `read-only-indicator`, `file-encoding`, `file-line-ending`, `file-indent-style`, `file-type`, `diagnostics`, `workspace-diagnostics`, `selections`, `primary-selection-length`, `position`, `separator`, `position-percentage`, `total-line-numbers`, `spacer`, `version-control`, `register`, `current-working-directory`, `code-action-hint`
 
 ## Gutters
 
-`diagnostics`, `line-numbers`, `spacer`, `diff` and `code-action-hint` are parsed and not drawn.
+`helixGutters()` draws `diagnostics`, `line-numbers` (absolute, relative, `min-width`, and `~` on the empty last line), `spacer` and `diff`. `code-action-hint` is not drawn.
 
 ## UI components
 
-From Helix's `helix-term/src/ui`.
+From Helix's `helix-term/src/ui`. Each is optional. `helixUi()` adds them all.
 
 | Component | State |
 | --- | --- |
 | prompt with history, completion and registers | ported |
 | infobox (`auto-info`) | ported |
 | jump labels | ported |
-| cursors, selections, cursorline, color modes | ported, with the bugs above |
-| statusline | missing |
-| gutters | missing |
-| syntax highlighting, themes | missing |
-| picker with preview | missing |
-| completion menu | missing |
-| popup, hover, signature help | missing |
-| inline decorations (inlay hints, diagnostics) | missing |
-| bufferline | missing |
-| whitespace, indent guides, rulers, soft-wrap indicators | missing |
+| cursors, selections, cursorline, color modes | ported |
+| statusline | ported |
+| gutters | ported |
+| syntax highlighting, rainbow brackets | ported, checked against Helix |
+| Helix themes with `inherits` and palettes, `:theme` with preview | ported |
+| picker with query syntax, preview and streaming | ported, matching with `nucleo` |
+| completion menu with word completion | ported |
+| popup, hover, signature help, code actions | ported |
+| diagnostics: gutter, underline, inline, end of line | ported, see Partial |
+| diff gutter and change navigation | ported, with `imara-diff` |
+| bufferline | ported |
+| whitespace, indent guides, rulers, cursor column, soft-wrap indicators | ported |
+| inlay hints | not ported |
 
 ## Languages
 
-The registry is Helix's `languages.toml` (`helix-cm6/languages`), merged with the app's files as Helix merges a user's file. A document's language comes from its path and shebang, or from `:set-language`. Injections, textobjects, the `]f`-style motions, the syntax tree commands, comment tokens, auto-pairs and indent queries follow the language at the cursor, as in Helix. The indent style is detected from the text when a document opens or changes language, else taken from the language; the tab width comes from the language. Markdown is built in; other grammars are wasm modules that `bun run grammars` builds from the revisions in `languages.toml`, with Helix's queries. Highlighting, rainbow brackets and tags need Phase 3.
+The registry is Helix's `languages.toml` (`helix-cm6/languages`), merged with the app's files as Helix merges a user's file. A document's language comes from its path and shebang, or from `:set-language`. Injections, textobjects, the `]f`-style motions, the syntax tree commands, comment tokens, auto-pairs, indent queries, highlights, locals, rainbows and tags follow the language at the cursor, as in Helix. The indent style is detected from the text when a document opens or changes language, else taken from the language; the tab width comes from the language. Markdown is built in; other grammars are wasm modules that `bun run grammars` builds from the revisions in `languages.toml`, with Helix's queries.

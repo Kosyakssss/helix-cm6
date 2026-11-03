@@ -1,9 +1,10 @@
 import type { ChangeSet, Text } from "@codemirror/state";
+import { type Locals } from "./highlight";
 import type { LanguageId } from "./injections";
 import type { LanguageLoader } from "./loader";
 import type { Node, Runtime, Tree, TreeCursor as TSCursor } from "./ts";
 type ByteRange = [number, number];
-interface Injection {
+export interface Injection {
     range: ByteRange;
     layer: Layer;
     matchedNodeRange: ByteRange;
@@ -26,6 +27,7 @@ export declare class Layer {
     injections: Injection[];
     ranges: ByteRange[];
     flags: Flags;
+    locals: Locals | null;
     constructor(language: LanguageId, parent: Layer | null);
 }
 declare class Source {
@@ -57,6 +59,8 @@ export declare class Syntax {
     applyChanges(changes: ChangeSet, newDoc: Text): void;
     private update;
     private parse;
+    allLayers(): Iterable<Layer>;
+    localsOf(layer: Layer): Locals;
     treeOf(layer: Layer): Tree;
     layerAndTreeForByteRange(start: number, end: number): [Layer, Tree];
     injectionAtByteIdx(layer: Layer, idx: number): Injection | null;

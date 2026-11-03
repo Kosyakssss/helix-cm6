@@ -1,6 +1,6 @@
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { helix, helixDocument, helixEditor, helixStatus, type Context, type GrammarSource, type HelixEditor } from "../src/engine";
+import { helix, helixDocument, helixEditor, helixRun, helixSetDiffBase, helixUi, setDiagnostics, type CompletionItem, type Context, type Diagnostic, type GrammarSource, type HelixEditor, type LanguageFeatures, type ShellRunner, type WorkspaceBuffer } from "../src/engine";
 import { languagesToml } from "../src/languages";
 import notes from "./samples/notes.md.txt" with { type: "text" };
 import markdownEdges from "./samples/markdown-edges.md.txt" with { type: "text" };
@@ -25,9 +25,10 @@ interface Buffer {
 interface Pane {
   root: HTMLElement;
   editor: HTMLElement;
-  status: HTMLElement;
   buffer: string;
 }
+
+declare const HELIX_PLAY_TOKEN: string;
 
 function big(): string {
   const lines: string[] = [];
@@ -63,7 +64,6 @@ const root = doc.documentElement;
 const panesEl = doc.getElementById("panes")!;
 const filesEl = doc.getElementById("files")!;
 const hx = new Compartment();
-const wrap = new Compartment();
 const sync = Annotation.define<boolean>();
 const views = new Map<string, EditorView>();
 const panes: Pane[] = [];
@@ -78,12 +78,37 @@ const grammars: GrammarSource = {
     return response.ok ? response.text() : null;
   },
 };
-const options = { languages: languagesToml, grammars };
-let extension: Extension = helix(options);
+const shell: ShellRunner = async (command, input, argv) => {
+  const response = await fetch("/shell", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${HELIX_PLAY_TOKEN}` },
+    body: JSON.stringify({ command, input, shell: argv }),
+  });
+  return (await response.json()) as { code: number; stdout: string; stderr: string };
+};
+
+const themeTexts: Record<string, string> = (await (await fetch("/themes")).json()) as Record<string, string>;
+const uiOptions = {
+  themes: themeTexts,
+  theme: setting("helix-theme", "") || undefined,
+};
+
+function configText(extra = ""): string {
+  return `[editor]\nline-number = "${setting("relative", "0") === "1" ? "relative" : "absolute"}"\nbufferline = "multiple"\ncursorline = true\ncolor-modes = true\nauto-info = true\nend-of-line-diagnostics = "hint"\nrainbow-brackets = ${setting("rainbow", "0") === "1"}\nrulers = [${setting("ruler", "0") === "1" ? "80" : ""}]\n\n[editor.soft-wrap]\nenable = ${setting("wrap", "1") === "1"}\n\n[editor.indent-guides]\nrender = ${setting("guides", "1") === "1"}\n\n[editor.whitespace.render]\ntab = "${setting("whitespace", "0") === "1" ? "all" : "none"}"\nspace = "${setting("whitespace", "0") === "1" ? "all" : "none"}"\nnewline = "${setting("whitespace", "0") === "1" ? "all" : "none"}"\n\n[editor.statusline]\nleft = ["mode", "spinner", "file-name", "read-only-indicator", "file-modification-indicator"]\nright = ["diagnostics", "selections", "register", "position", "file-type", "position-percentage"]\n${extra}`;
+}
+
+function setting(key: string, fallback: string): string {
+  return localStorage.getItem(`helix-cm6-play:${key}`) ?? fallback;
+}
+
+function buildExtension(extra = ""): Extension {
+  return [helix({ languages: languagesToml, grammars, shell, workspace: workspace(), config: configText(extra) }), helixUi(uiOptions)];
+}
+
+let extension: Extension = [];
 let scratch = 0;
 let editor: HelixEditor | null = null;
 
-const setting = (key: string, fallback: string) => localStorage.getItem(`helix-cm6-play:${key}`) ?? fallback;
 const remember = (key: string, value: string) => localStorage.setItem(`helix-cm6-play:${key}`, value);
 
 function bufferOf(name: string): Buffer {
@@ -115,7 +140,6 @@ function viewFor(pane: number, name: string): EditorView {
       extensions: [
         hx.of(extension),
         helixDocument.of({ path: name }),
-        wrap.of(setting("wrap", "1") === "1" ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((update) => {
           if (update.focusChanged && update.view.hasFocus) focus(pane);
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(sync))) {
@@ -124,12 +148,13 @@ function viewFor(pane: number, name: string): EditorView {
               for (const tr of update.transactions) if (tr.docChanged) other.dispatch({ changes: tr.changes, annotations: sync.of(true) });
             }
           }
-          drawStatus();
         }),
       ],
     }),
   });
   views.set(key, view);
+  helixSetDiffBase(view, bufferOf(name).initial);
+  lint(view, name);
   if (!editor) {
     editor = view.state.facet(helixEditor);
     if (editor) setup(editor);
@@ -145,14 +170,12 @@ function show(pane: number, name: string): void {
   view.requestMeasure();
   if (pane === focused) view.focus();
   drawFiles();
-  drawStatus();
 }
 
 function focus(pane: number): void {
   focused = pane;
   panes.forEach((p, i) => p.root.classList.toggle("focused", i === pane));
   drawFiles();
-  drawStatus();
 }
 
 function current(): EditorView {
@@ -164,13 +187,11 @@ function makePane(): Pane {
   rootEl.className = "pane";
   const editorEl = doc.createElement("div");
   editorEl.className = "editor";
-  const statusEl = doc.createElement("div");
-  statusEl.className = "status";
-  rootEl.append(editorEl, statusEl);
+  rootEl.append(editorEl);
   panesEl.append(rootEl);
   const index = panes.length;
   rootEl.addEventListener("mousedown", () => focus(index));
-  const pane = { root: rootEl, editor: editorEl, status: statusEl, buffer: "" };
+  const pane = { root: rootEl, editor: editorEl, buffer: "" };
   panes.push(pane);
   return pane;
 }
@@ -215,7 +236,102 @@ function reconfigure(): void {
 
 function setup(ed: HelixEditor): void {
   ed.pathCompleter = (prefix) => buffers.map((b) => b.name).filter((n) => n.startsWith(prefix));
-  ed.workspace = {
+}
+
+function lint(view: EditorView, name: string): void {
+  const out: Diagnostic[] = [];
+  const text = view.state.doc.toString();
+  for (const m of text.matchAll(/\b(TODO|FIXME)\b.*/g)) {
+    out.push({ from: m.index, to: m.index + m[0].length, severity: m[1] === "FIXME" ? "error" : "warning", message: `${m[1]} in ${name}`, source: "play" });
+  }
+  for (const m of text.matchAll(/[ \t]+$/gm)) out.push({ from: m.index, to: m.index + m[0].length, severity: "hint", message: "trailing whitespace", source: "play" });
+  view.dispatch({ effects: setDiagnostics.of(out) });
+}
+
+function wordAt(cx: Context): { word: string; from: number; to: number } | null {
+  const doc = cx.host.state.doc;
+  const pos = cx.host.state.selection.main.head;
+  const line = doc.lineAt(pos);
+  let from = pos - line.from;
+  let to = from;
+  const isWord = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{N}_]/u.test(ch);
+  while (from > 0 && isWord(line.text[from - 1])) from--;
+  while (to < line.length && isWord(line.text[to])) to++;
+  return to > from ? { word: line.text.slice(from, to), from: line.from + from, to: line.from + to } : null;
+}
+
+const features: LanguageFeatures = {
+  hover: (cx) => {
+    const word = wordAt(cx);
+    if (!word) return Promise.resolve(null);
+    const count = [...cx.host.state.doc.toString().matchAll(new RegExp(`\\b${word.word.replace(/[^\p{L}\p{N}_]/gu, "")}\\b`, "gu"))].length;
+    return Promise.resolve(`## \`${word.word}\`\n\n${count} use${count === 1 ? "" : "s"} in this buffer. This hover comes from the playground, as an app's LSP client would give it.`);
+  },
+  signatureHelp: () => Promise.resolve({ signatures: [{ label: "example(first: string, second: number): void", documentation: "A signature from the playground." }] }),
+  completions: (_cx, _pos) => {
+    const items: CompletionItem[] = ["helix", "selection", "register", "macro", "picker"].map((label) => ({ label, detail: "play", documentation: `**${label}** comes from the playground's completion provider.` }));
+    return Promise.resolve(items);
+  },
+  highlights: (cx) => {
+    const word = wordAt(cx);
+    if (!word) return Promise.resolve([]);
+    const text = cx.host.state.doc.toString();
+    return Promise.resolve([...text.matchAll(new RegExp(`\\b${word.word.replace(/[^\p{L}\p{N}_]/gu, "")}\\b`, "gu"))].map((m) => ({ from: m.index, to: m.index + m[0].length })));
+  },
+  locations: (cx, kind) => {
+    const word = wordAt(cx);
+    if (!word) return Promise.resolve([]);
+    const text = cx.host.state.doc.toString();
+    const uses = [...text.matchAll(new RegExp(`\\b${word.word.replace(/[^\p{L}\p{N}_]/gu, "")}\\b`, "gu"))];
+    const list = kind === "references" ? uses : uses.slice(0, 1);
+    return Promise.resolve(list.map((m) => ({ from: m.index, to: m.index + m[0].length, label: text.slice(text.lastIndexOf("\n", m.index) + 1, text.indexOf("\n", m.index)).trim() })));
+  },
+  codeActions: (cx) =>
+    Promise.resolve([
+      {
+        title: "Upper-case the selection",
+        run: () => void helixRun(cx.host.view as EditorView, "switch_to_uppercase"),
+      },
+      {
+        title: "Sort the selections",
+        run: () => void helixRun(cx.host.view as EditorView, ":sort"),
+      },
+    ]),
+  rename: (cx, name) => {
+    const word = wordAt(cx);
+    if (!word) return Promise.resolve([]);
+    const text = cx.host.state.doc.toString();
+    return Promise.resolve([...text.matchAll(new RegExp(`\\b${word.word.replace(/[^\p{L}\p{N}_]/gu, "")}\\b`, "gu"))].map((m) => ({ from: m.index, to: m.index + m[0].length, insert: name })));
+  },
+};
+
+function workspace() {
+  return {
+    language: features,
+    buffers: (): WorkspaceBuffer[] => buffers.map((b) => ({ id: b.name, path: b.name, name: b.name, modified: textOf(b.name) !== b.initial })),
+    openBuffer: (_cx: Context, id: string) => open(id),
+    files: () => buffers.map((b) => b.name),
+    openFile: (_cx: Context, path: string, target: { line?: number; from?: number; to?: number } | null) => {
+      open(path);
+      if (target?.line !== undefined) helixRun(current(), `:goto ${target.line + 1}`);
+    },
+    readFile: (path: string) => (buffers.some((b) => b.name === path) ? textOf(path) : null),
+    search: (_cx: Context, pattern: string) => {
+      const regex = new RegExp(pattern, "gmu");
+      const out: { path: string; line: number; text: string }[] = [];
+      for (const b of buffers) {
+        const lines = textOf(b.name).split("\n");
+        if (b.name === "big.md") continue;
+        lines.forEach((text, line) => {
+          regex.lastIndex = 0;
+          if (regex.test(text)) out.push({ path: b.name, line, text });
+        });
+      }
+      return Promise.resolve(out);
+    },
+    changedFiles: () => buffers.filter((b) => textOf(b.name) !== b.initial).map((b) => ({ path: b.name, status: "modified" })),
+    cwd: () => "play",
+    versionControlHead: () => "",
     run(cx: Context, name: string, args: string[]) {
       switch (name) {
         case "open":
@@ -227,6 +343,7 @@ function setup(ed: HelixEditor): void {
           return;
         case "write":
         case "write-all":
+          cx.editor.markSaved(cx.host);
           cx.editor.setStatus(`"${panes[focused]!.buffer}" kept in memory; the playground writes nothing to disk`);
           return;
         case "reload": {
@@ -239,16 +356,6 @@ function setup(ed: HelixEditor): void {
           return;
         case "goto_previous_buffer":
           cycle(-1);
-          return;
-        case "file_picker":
-        case "file_picker_in_current_buffer_directory":
-        case "buffer_picker":
-          cx.editor.prompt(cx, {
-            label: "open:",
-            complete: (input) =>
-              buffers.filter((b) => b.name.includes(input)).map((b) => ({ start: 0, text: b.name, label: b.name })),
-            onAccept: (input) => open(input),
-          });
           return;
         case "vsplit":
         case "hsplit":
@@ -280,12 +387,12 @@ function setup(ed: HelixEditor): void {
           open("helix.toml");
           return;
         case "config-reload":
-          extension = helix({ ...options, config: textOf("helix.toml") });
+          extension = buildExtension(textOf("helix.toml"));
           reconfigure();
           current().focus();
           return;
         default:
-          cx.editor.setError(`${name} is not available in the playground`);
+          return false;
       }
     },
   };
@@ -311,30 +418,6 @@ function drawFiles(): void {
       ];
     }),
   );
-}
-
-function drawStatus(): void {
-  panes.forEach((pane, i) => {
-    const view = views.get(`${i}:${pane.buffer}`);
-    if (!view) return;
-    const status = helixStatus(view);
-    const mode = status ? { normal: "NOR", insert: "INS", select: "SEL" }[status.mode] : "";
-    const pending = status ? [status.recording ? `[${status.recording}]` : "", status.register ? `"${status.register}` : "", status.count ?? "", status.pending].join("") : "";
-    const parts = [
-      ["mode", mode],
-      ["", pane.buffer],
-      ["", pending],
-      ["right", status ? `${status.language}  ${status.selections > 1 ? `${status.primary + 1}/${status.selections} sels  ` : ""}${status.line}:${status.column}` : ""],
-    ];
-    pane.status.replaceChildren(
-      ...parts.map(([cls, text]) => {
-        const span = doc.createElement("span");
-        if (cls) span.className = cls;
-        span.textContent = text ?? "";
-        return span;
-      }),
-    );
-  });
 }
 
 function applyLook(): void {
@@ -363,17 +446,37 @@ function control(id: string, key: string, onChange: (value: string) => void): vo
   });
 }
 
+function rebuild(): void {
+  extension = buildExtension();
+  reconfigure();
+  current().focus();
+}
+
+const themeSelect = doc.getElementById("helix-theme") as HTMLSelectElement;
+for (const name of Object.keys(themeTexts).sort()) {
+  const option = doc.createElement("option");
+  option.value = name;
+  option.textContent = name;
+  themeSelect.append(option);
+}
 control("theme", "theme", applyLook);
+control("helix-theme", "helix-theme", (name) => {
+  helixRun(current(), name ? `:theme ${name}` : ":noop");
+  if (!name) location.reload();
+  current().focus();
+});
+control("relative", "relative", rebuild);
+control("rainbow", "rainbow", rebuild);
+control("ruler", "ruler", rebuild);
+control("guides", "guides", rebuild);
+control("whitespace", "whitespace", rebuild);
 control("font", "font", applyLook);
 control("size", "size", applyLook);
-control("wrap", "wrap", (on) => {
-  for (const view of views.values()) view.dispatch({ effects: wrap.reconfigure(on === "1" ? EditorView.lineWrapping : []) });
-});
+control("wrap", "wrap", rebuild);
 control("split", "", (on) => (on === "1" ? split("vertical", panes[focused]!.buffer) : unsplit(focused)));
-doc.addEventListener("keyup", () => drawStatus(), true);
-doc.addEventListener("keydown", () => queueMicrotask(drawStatus), true);
 
 applyLook();
+extension = buildExtension();
 makePane();
 focus(0);
 show(0, "notes.md");

@@ -170,7 +170,10 @@ export function helix(options: HelixOptions = {}): Extension {
         };
         editor.syntax = (host) => (host.view ? loadedSessions.get(host.view, host.state.doc) : null);
         for (const open of views) editor.detectIndent(hostFor(open));
-        loadedSessions.loader.onLoad(rerender);
+        loadedSessions.loader.onLoad(() => {
+          for (const open of views) open.dispatch({});
+        });
+        for (const open of views) open.dispatch({});
       })
       .catch(() => editor.setError("the syntax tree failed to load"));
   };

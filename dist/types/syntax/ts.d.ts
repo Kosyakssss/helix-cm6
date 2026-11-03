@@ -20,6 +20,10 @@ interface Exports {
     hm_node_child_count(node: number): number;
     hm_node_child(node: number, index: number, out: number): void;
     hm_node_parent(node: number, out: number): void;
+    hm_cursor_field_name(cursor: number): number;
+    hm_node_is_missing(node: number): number;
+    hm_node_kind(node: number): number;
+    hm_node_symbol_type(node: number): number;
     hm_node_next_sibling(node: number, out: number): void;
     hm_node_prev_sibling(node: number, out: number): void;
     hm_node_descendant(node: number, start: number, end: number, named: number, out: number): void;
@@ -86,6 +90,9 @@ export declare class Node {
     get startByte(): number;
     get endByte(): number;
     get symbol(): number;
+    get isMissing(): boolean;
+    get isVisible(): boolean;
+    get kind(): string;
     get isNamed(): boolean;
     get childCount(): number;
     child(index: number): Node | null;
@@ -116,6 +123,7 @@ export declare class TreeCursor {
     private ptr;
     constructor(rt: Runtime, node: Node);
     get currentNode(): Node;
+    get fieldName(): string | null;
     gotoParent(): boolean;
     gotoFirstChild(): boolean;
     gotoNextSibling(): boolean;

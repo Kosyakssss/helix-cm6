@@ -151,10 +151,10 @@ export function gutterExtension(layout: readonly string[]): Extension {
 }
 
 export const gutterTheme = EditorView.baseTheme({
-  ".cm-gutters": { whiteSpace: "pre" },
+  "&.hx .cm-gutters": { whiteSpace: "pre", background: "var(--hx-bg, Canvas)", color: "var(--hx-fg, CanvasText)", border: "none" },
   ".hx-gutter-spacer .cm-gutterElement, .hx-gutter-line-numbers .cm-gutterElement, .hx-gutter-diagnostics .cm-gutterElement, .hx-gutter-diff .cm-gutterElement": { padding: "0" },
-  ".hx-s-ui-linenr": { color: "var(--hx-linenr, color-mix(in srgb, currentColor 45%, transparent))" },
-  ".hx-s-ui-linenr-selected": { color: "var(--hx-linenr-selected, currentColor)" },
+  ".hx-s-ui-linenr": { color: "var(--hx-linenr, color-mix(in srgb, CanvasText 45%, transparent))" },
+  ".hx-s-ui-linenr-selected": { color: "var(--hx-linenr-selected, CanvasText)" },
   ".hx-gutter-diagnostics .hx-s-error": { color: "var(--hx-error, #d32f2f)" },
   ".hx-gutter-diagnostics .hx-s-warning": { color: "var(--hx-warning, #b58900)" },
   ".hx-gutter-diagnostics .hx-s-info": { color: "var(--hx-info, #268bd2)" },

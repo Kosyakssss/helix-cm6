@@ -1,7 +1,8 @@
 import type { RustRegexEngine } from "../core/rx";
 import type { LanguageConfiguration, LanguagesConfiguration } from "./config";
 import { type InjectionLoader, type InjectionLanguageMarker, type LanguageId, type SyntaxConfig } from "./injections";
-import { Query } from "./query";
+import { HighlightQuery, LocalsQuery, RainbowQuery } from "./highlight";
+import { Query, type UserPredicate } from "./query";
 import { Language, Parser, type Runtime } from "./ts";
 export type QueryFile = "highlights.scm" | "injections.scm" | "locals.scm" | "textobjects.scm" | "indents.scm" | "rainbows.scm" | "tags.scm";
 export interface LanguageSource {
@@ -51,6 +52,11 @@ export declare class LanguageLoader implements InjectionLoader {
     private compileSyntax;
     load(id: LanguageId): Promise<void>;
     private loadData;
+    newQuery(grammar: Language, text: string, custom: (pattern: number, predicate: UserPredicate) => void): Query;
+    highlightQuery(id: LanguageId): HighlightQuery | null;
+    localsQuery(id: LanguageId): LocalsQuery | null;
+    tagsQuery(id: LanguageId): Query | null;
+    rainbowQuery(id: LanguageId): RainbowQuery | null;
     textobjectQuery(id: LanguageId): Query | null;
     indentQuery<T>(id: LanguageId, compile: (grammar: Language, text: string) => T): T | null;
     private compile;

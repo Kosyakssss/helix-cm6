@@ -38,7 +38,7 @@ export class CompletionController {
   private cx: Context | null = null;
   private applying = false;
   private previewed: { from: number; to: number; original: string } | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private timer: number | null = null;
   private request = 0;
 
   constructor(
@@ -48,7 +48,7 @@ export class CompletionController {
 
   close(): void {
     this.request++;
-    if (this.timer !== null) clearTimeout(this.timer);
+    if (this.timer !== null) this.window()?.clearTimeout(this.timer);
     this.timer = null;
     if (this.menu) this.editor.removeLayer(this.menu, this.host);
     this.menu = null;
@@ -197,14 +197,20 @@ export class CompletionController {
     this.schedule(pos);
   }
 
+  private window(): Window | null {
+    return this.host.view?.dom.ownerDocument.defaultView ?? null;
+  }
+
   private schedule(pos: number): void {
-    if (this.timer !== null) clearTimeout(this.timer);
+    const win = this.window();
+    if (!win) return;
+    if (this.timer !== null) win.clearTimeout(this.timer);
     const config = this.editor.config;
     if (!config.autoCompletion) return;
     const doc = this.host.state.doc;
     const start = wordStart(doc, pos);
     if (pos < nextGraphemeBoundary(doc, start) || pos - start < config.completionTriggerLen) return;
-    this.timer = setTimeout(() => {
+    this.timer = win.setTimeout(() => {
       this.timer = null;
       if (this.host.state.field(helixField).mode !== "insert") return;
       void this.trigger(new Context(this.editor, this.host, null, null), false);

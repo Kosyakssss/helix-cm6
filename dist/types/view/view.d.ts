@@ -1,4 +1,4 @@
-import { type Extension } from "@codemirror/state";
+import { Facet, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import type { HelixEditor } from "../core/editor";
 import type { Host } from "../core/host";
@@ -17,6 +17,7 @@ export interface ViewEnv {
     statusBar?(view: EditorView): HTMLElement | null;
     joinStatus?(view: EditorView, joined: boolean): void;
 }
+export declare const helixEnv: Facet<ViewEnv, ViewEnv | null>;
 export declare function helixExtension(env: ViewEnv): Extension;
 export declare function uiRefresher(editor: HelixEditor): (host: Host) => void;
 export declare function uiSignature(editor: HelixEditor, host: Host): string;

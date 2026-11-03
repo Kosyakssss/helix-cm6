@@ -9,3 +9,7 @@ export type { Jump } from "./commands/jumps";
 export type { ShellBehavior, ShellOutput, ShellRunner } from "./commands/shell";
 export type { CommentTokens } from "./commands/comments";
 export { Range, Selection } from "./selection";
+export { helixGutters, helixUi, helixBufferline, helixCompletion, helixDecorations, helixDiagnostics, helixDiff, helixHighlighting, helixOverlays, helixSetDiffBase, helixStatusline, helixThemes, parseTheme, statuslineOf, Menu, Picker, Popup, type HelixUiOptions, type MenuItem, type MenuOptions, type PickerAction, type PickerColumn, type PickerOptions, type PickerPreview, type StatusPart, type Statusline, type Theme, type ThemeOptions, type ThemeStyle } from "./ui";
+export { setDiagnostics, type Diagnostic, type Severity } from "./diagnostics";
+export type { CodeAction, CompletionItem, FileTarget, LanguageFeatures, Location, LocationKind, SearchMatch, SignatureHelp, SymbolInfo, TextEdit, WorkspaceBuffer, WorkspaceProviders } from "./commands/workspace";
+export type { UiLayer, LayerResult } from "./core/layers";

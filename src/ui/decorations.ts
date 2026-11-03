@@ -147,7 +147,7 @@ function guideDecorations(view: EditorView): DecorationSet {
       if (own !== null) last = own;
       const levels: number[] = [];
       const end = Math.floor(level / width);
-      for (let i = editor.config.indentGuideSkipLevels + 1; i < end; i++) levels.push(i * width);
+      for (let i = editor.config.indentGuideSkipLevels; i < end; i++) levels.push(i * width);
       if (levels.length > 0) builder.add(line.from, line.from, Decoration.widget({ widget: new GuidesWidget(levels, editor.config.indentGuideCharacter), side: -1 }));
       pos = line.to + 1;
     }
@@ -183,6 +183,7 @@ function guideSignature(view: EditorView): string {
 
 class BoxMarker implements LayerMarker {
   constructor(
+    readonly doc: Document,
     readonly cls: string,
     readonly left: number,
     readonly top: number,
@@ -194,7 +195,7 @@ class BoxMarker implements LayerMarker {
     return other instanceof BoxMarker && other.cls === this.cls && other.left === this.left && other.top === this.top && other.width === this.width && other.height === this.height && other.text === this.text;
   }
   draw(): HTMLElement {
-    const dom = document.createElement("div");
+    const dom = this.doc.createElement("div");
     this.apply(dom);
     return dom;
   }
@@ -233,7 +234,7 @@ const rulersLayer = layer({
   markers(view) {
     const left = contentLeft(view);
     const height = view.contentHeight / view.scaleY;
-    return rulersOf(view).map((column) => new BoxMarker("hx-ruler hx-s-ui-virtual-ruler", left + (column - 1) * view.defaultCharacterWidth, 0, view.defaultCharacterWidth, height));
+    return rulersOf(view).map((column) => new BoxMarker(view.dom.ownerDocument, "hx-ruler hx-s-ui-virtual-ruler", left + (column - 1) * view.defaultCharacterWidth, 0, view.defaultCharacterWidth, height));
   },
 });
 
@@ -256,7 +257,7 @@ const cursorColumnLayer = layer({
       if (seen.has(left)) return;
       seen.add(left);
       const primary = i === value.selection.primaryIndex;
-      markers.push(new BoxMarker(`hx-cursorcolumn hx-s-ui-cursorcolumn-${primary ? "primary" : "secondary"}`, left, 0, view.defaultCharacterWidth, height));
+      markers.push(new BoxMarker(view.dom.ownerDocument, `hx-cursorcolumn hx-s-ui-cursorcolumn-${primary ? "primary" : "secondary"}`, left, 0, view.defaultCharacterWidth, height));
     });
     return markers;
   },
@@ -366,7 +367,7 @@ const wrapIndicatorLayer = layer({
       const indent = indentColumns(line.text, tabWidth) ?? 0;
       const retained = indent <= wrap.maxIndentRetain ? indent : 0;
       for (let row = 1; row < rows; row++) {
-        markers.push(new BoxMarker("hx-wrap-indicator hx-s-ui-virtual-wrap", left + retained * view.defaultCharacterWidth, paddingTop + block.top + row * lineHeight, [...wrap.wrapIndicator].length * view.defaultCharacterWidth, lineHeight, wrap.wrapIndicator));
+        markers.push(new BoxMarker(view.dom.ownerDocument, "hx-wrap-indicator hx-s-ui-virtual-wrap", left + retained * view.defaultCharacterWidth, paddingTop + block.top + row * lineHeight, [...wrap.wrapIndicator].length * view.defaultCharacterWidth, lineHeight, wrap.wrapIndicator));
       }
     }
     return markers;
@@ -382,7 +383,7 @@ const decorationTheme = EditorView.baseTheme({
   ".hx-ws::before": {
     position: "absolute",
     left: "0",
-    color: "var(--hx-whitespace, color-mix(in srgb, currentColor 35%, transparent))",
+    color: "var(--hx-whitespace, color-mix(in srgb, CanvasText 35%, transparent))",
     pointerEvents: "none",
   },
   ".hx-ws-space::before": { content: "var(--hx-ws-space)" },
@@ -390,10 +391,10 @@ const decorationTheme = EditorView.baseTheme({
   ".hx-ws-nbsp::before": { content: "var(--hx-ws-nbsp)" },
   ".hx-ws-nnbsp::before": { content: "var(--hx-ws-nnbsp)" },
   ".hx-ws-newline": { display: "inline-block", width: "0", overflow: "visible" },
-  ".hx-ws-newline::before": { content: "var(--hx-ws-newline)", color: "var(--hx-whitespace, color-mix(in srgb, currentColor 35%, transparent))" },
+  ".hx-ws-newline::before": { content: "var(--hx-ws-newline)", color: "var(--hx-whitespace, color-mix(in srgb, CanvasText 35%, transparent))" },
   ".hx-indent-guides": { display: "inline-block", width: "0", position: "relative", pointerEvents: "none", textIndent: "0" },
-  ".hx-indent-guide": { position: "absolute", left: "calc(var(--hx-guide-column) * 1ch)", color: "var(--hx-indent-guide, color-mix(in srgb, currentColor 20%, transparent))" },
-  ".hx-ruler": { position: "absolute", background: "var(--hx-ruler, color-mix(in srgb, currentColor 6%, transparent))" },
-  ".hx-cursorcolumn": { position: "absolute", background: "var(--hx-cursorcolumn, color-mix(in srgb, currentColor 5%, transparent))" },
-  ".hx-wrap-indicator": { position: "absolute", whiteSpace: "pre", color: "var(--hx-wrap, color-mix(in srgb, currentColor 40%, transparent))", pointerEvents: "none" },
+  ".hx-indent-guide": { position: "absolute", left: "calc(var(--hx-guide-column) * 1ch)", color: "var(--hx-indent-guide, color-mix(in srgb, CanvasText 20%, transparent))" },
+  ".hx-ruler": { position: "absolute", background: "var(--hx-ruler, color-mix(in srgb, CanvasText 6%, transparent))" },
+  ".hx-cursorcolumn": { position: "absolute", background: "var(--hx-cursorcolumn, color-mix(in srgb, CanvasText 5%, transparent))" },
+  ".hx-wrap-indicator": { position: "absolute", whiteSpace: "pre", color: "var(--hx-wrap, color-mix(in srgb, CanvasText 40%, transparent))", pointerEvents: "none" },
 });

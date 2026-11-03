@@ -36,7 +36,7 @@ export function helixBufferline(): Extension {
 }
 
 const bufferlineTheme = EditorView.baseTheme({
-  ".hx-bufferline": { display: "flex", overflow: "hidden", whiteSpace: "pre", fontFamily: "var(--hx-panel-font, monospace)", fontSize: "var(--hx-panel-font-size, 0.85em)", background: "var(--hx-panel, color-mix(in srgb, currentColor 5%, Canvas))" },
+  ".hx-bufferline": { display: "flex", overflow: "hidden", whiteSpace: "pre", fontFamily: "var(--hx-panel-font, monospace)", fontSize: "var(--hx-panel-font-size, 0.85em)", background: "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))", color: "var(--hx-fg, CanvasText)" },
   ".hx-bufferline.hx-hidden": { display: "none" },
   ".hx-bufferline-active": { fontWeight: "600", background: "var(--hx-bg, Canvas)" },
 });

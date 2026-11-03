@@ -17,6 +17,7 @@ export interface HelixOptions {
     syntax?: WasmSource | false;
     shell?: ShellRunner;
     workspace?: Workspace;
+    matcher?: WasmSource;
 }
 export interface HelixDocument {
     path?: string | null;

@@ -27,29 +27,19 @@ bun add github:Kosyakssss/helix-cm6#<commit>
 
 ```ts
 import { EditorView } from "@codemirror/view";
-import { helix } from "helix-cm6";
+import { helix, helixUi, helixDocument } from "helix-cm6";
 
-new EditorView({ parent: document.body, extensions: helix({ config: helixToml }) });
+new EditorView({
+  parent: document.body,
+  extensions: [helix({ config: helixToml }), helixUi(), helixDocument.of({ path: "notes.md" })],
+});
 ```
 
-`helix()` options:
+`helix()` gives the editing. `helixUi()` adds the view: highlighting, themes, statusline, gutters, pickers, completion, popups, diagnostics and the diff gutter. Each part is also its own extension, so an app can take only some and draw the rest itself. The UI reads the same `[editor]` options as Helix.
 
-- `config`: the text of a Helix `config.toml`. Default: Helix's defaults.
-- `regex`: where to get the regex wasm module. Default: a lazily imported JS module with the module inlined (`dist/regex-wasm.js`, 370 KB).
-- `syntax`: the same for the tree-sitter module (`dist/tree-sitter-wasm.js`, 250 KB), or `false` for no syntax tree. Without a tree, text objects and surround use plain text, and tree commands do nothing.
-- `languages`: the text of one or more `languages.toml` files, merged in order as Helix merges a user's file into its own. Default: Helix's markdown and markdown.inline entries. `helix-cm6/languages` exports Helix's full file as `languagesToml`.
-- `grammars`: loads a grammar and the queries of a language: `grammar(name)` returns a wasm source or `null`, and `query(language, file)` returns the text of a file such as `textobjects.scm`, or `null`. The engine asks only for the languages it meets. Markdown is built in.
-- `shell`: runs a shell command for `|`, `!`, `$`, `:pipe` and the other shell commands. It gets the command, the selection text (or `null`) and `editor.shell` from the config (`["sh", "-c"]` by default), and returns the exit code, stdout and stderr, at once or as a promise. Keys typed while it runs wait, as in Helix. Without it, these commands say "No shell set".
+[docs/api.md](docs/api.md) has the whole API: options, components, the `Workspace` an app supplies for files, buffers, search and language features, and `helixHooks`.
 
-A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm` and `helix-cm6/tree-sitter.wasm`, for example with Vite:
-
-```ts
-import regexUrl from "helix-cm6/regex.wasm?url";
-
-helix({ regex: () => fetch(regexUrl), syntax: false });
-```
-
-`helixDocument` is a facet for each editor: `path` picks the language from `file-types` and the shebang, as in Helix, `language` sets it by name, and `name` is the buffer name. Without them the language is `text`, with no syntax tree. `:set-language` changes it later.
+Languages other than markdown come as wasm modules:
 
 ```ts
 import { helix, helixDocument } from "helix-cm6";
@@ -71,30 +61,29 @@ const extension = helix({
 new EditorView({ extensions: [extension, helixDocument.of({ path: "src/main.rs" })] });
 ```
 
-`bun run grammars --out <dir> rust python` builds those grammars as wasm modules into `<dir>/grammars` and copies their Helix queries, with the queries they inherit, into `<dir>/queries`. It takes each grammar from the repository and revision in Helix's `languages.toml`, and needs Git and network access. `--all` builds every grammar. A grammar module shares memory with the tree-sitter module, so it holds only the grammar's tables: JSON is 7 KB, Rust 1.1 MB.
+`bun run grammars --out <dir> rust python` builds those grammars as wasm modules into `<dir>/grammars` and copies their Helix queries, with the queries they inherit, into `<dir>/queries`. It takes each grammar from the repository and revision in Helix's `languages.toml`, and needs Git and network access. `--all` builds every grammar. `--themes` copies Helix's themes into `<dir>/themes`. A grammar module shares memory with the tree-sitter module, so it holds only the grammar's tables: JSON is 7 KB, Rust 1.1 MB.
 
-Both modules load when the first editor opens. One `helix()` extension can serve many editors: they share registers and the prompt.
-
-The engine has no files, pickers or buffers. Commands that need them call `HelixEditor.workspace` (the `Workspace` interface), which the app supplies. `helixEditor` is a facet that gives the `HelixEditor` of an editor state. For a custom host, `helixExtension` takes a `ViewEnv`; helix-motions uses it.
+The three wasm modules load on first use, from JS modules with the module inlined, or from where you say with the `regex`, `syntax` and `matcher` options. A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm`, `helix-cm6/tree-sitter.wasm` and `helix-cm6/matcher.wasm`.
 
 ## Layout
 
 - `src/core/`: the `Host` interface (`HeadlessHost` runs the engine with no view), the `Workspace` interface for things the app must supply (files, pickers, buffers), text, regex and options.
-- `src/commands/`, `src/keymap/`, `src/syntax/`: Helix's commands, keymap and syntax tree.
+- `src/commands/`, `src/keymap/`, `src/syntax/`: Helix's commands, keymap and syntax tree, with its highlighter, injections and queries.
 - `src/view/`, `src/codemirror.ts`: the view layer for a CodeMirror 6 editor (keys, IME, cursors, panels).
-- `src/index.ts`: the public API. `dist/` is its build (`bun run build`).
-- `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
+- `src/ui/`: the optional components, ported from Helix's `helix-term/src/ui`.
+- `src/index.ts`: the stable API. `src/engine.ts`: the internals. `dist/` is their build (`bun run build`).
+- `tree-sitter/`, `regex/`, `matcher/`: build scripts for the three wasm modules.
 - `test/oracle/`: the comparison with real Helix.
 - `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium, Firefox and WebKit, and a test with two editors.
 - `play/`: a page to try the engine by hand.
 
 ## Try it
 
-`bun run play` serves a page on http://127.0.0.1:4173 (set `PORT` to change it). It has sample files in several languages and edge cases (wide characters, emoji, right-to-left text, tabs, long lines, a 20,000-line note), a split view, light and dark mode, and font choices. `:config-reload` applies its `helix.toml`. The page rebuilds from `src` on every reload. Each file gets its language from its name. To give the code samples their grammars, run `bun run grammars --out play/languages rust python typescript go css json toml yaml html bash` once; the page serves `play/languages`, which Git ignores.
+`bun run play` serves a reference app on http://127.0.0.1:4173 (set `PORT` to change it). It uses every component and every part of the `Workspace`: buffers, file picker, global search, a split view, a shell that runs through its local server, Helix's themes, and small language features of its own, so hover, completion, go to definition, rename and code actions all do something. The samples cover many languages and edge cases (wide characters, emoji, right-to-left text, tabs, long lines, a 20,000-line note). Its code is the example to read for the `Workspace` API. `:config-reload` applies its `helix.toml`. The page rebuilds from `src` on every reload. To give the code samples their grammars and themes, run `bun run grammars --out play/languages --themes rust python typescript javascript go css json toml html bash` once; the page serves `play/languages`, which Git ignores.
 
 ## Tests
 
-`bun test` compares the headless engine with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium, Firefox and WebKit. `bun run views` checks two editors that share one `helix()`. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
+`bun test` compares the headless engine and its highlighter with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium, Firefox and WebKit. `bun run views` checks two editors that share one `helix()`, the hooks and every UI component in those browsers. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
 
 ## Helix forks
 
@@ -102,4 +91,4 @@ The engine follows Helix master and nothing else. To port a Helix fork, fork thi
 
 ## License
 
-[MPL-2.0](LICENSE). The wasm modules contain code under other licenses: see `tree-sitter/NOTICE` and `regex/NOTICE`.
+[MPL-2.0](LICENSE). The wasm modules contain code under other licenses: see `tree-sitter/NOTICE`, `regex/NOTICE` and `matcher/NOTICE`.
