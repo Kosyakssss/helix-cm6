@@ -8,6 +8,7 @@ import { helixField, historyField, helixOwned, setHelix, toNative } from "../sta
 import { Transaction } from "@codemirror/state";
 import { commitHistoryNow, pushJump } from "./jumps";
 import { docOf, modeOf, selOf, setSel } from "./util";
+import { completionController } from "../ui/completion";
 import type { CommandFn } from "./motion";
 
 function applySteps(cx: Context, steps: Step[], current: number): boolean {
@@ -277,6 +278,10 @@ export const miscCommands: Record<string, CommandFn> = {
   code_action: workspace("code_action"),
   diagnostics_picker: workspace("diagnostics_picker"),
   workspace_diagnostics_picker: workspace("workspace_diagnostics_picker"),
+  goto_next_change: workspace("goto_next_change"),
+  goto_prev_change: workspace("goto_prev_change"),
+  goto_first_change: workspace("goto_first_change"),
+  goto_last_change: workspace("goto_last_change"),
   goto_first_diag: workspace("goto_first_diag"),
   goto_last_diag: workspace("goto_last_diag"),
   goto_next_diag: workspace("goto_next_diag"),
@@ -292,7 +297,7 @@ export const miscCommands: Record<string, CommandFn> = {
   changed_file_picker: workspace("changed_file_picker"),
   select_references_to_symbol_under_cursor: workspace("select_references_to_symbol_under_cursor"),
   signature_help: workspace("signature_help"),
-  completion: workspace("completion"),
+  completion: (cx) => void completionController(cx.editor, cx.host).trigger(cx, true),
   format_selections: workspace("format_selections"),
   transpose_view: workspace("transpose_view"),
   goto_reference: workspace("goto_reference"),
@@ -321,10 +326,6 @@ export const miscCommands: Record<string, CommandFn> = {
 };
 
 export const UNSUPPORTED = [
-  "goto_next_change",
-  "goto_prev_change",
-  "goto_first_change",
-  "goto_last_change",
   "goto_next_tabstop",
   "goto_prev_tabstop",
   "suspend",

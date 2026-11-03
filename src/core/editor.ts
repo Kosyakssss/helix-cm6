@@ -21,6 +21,9 @@ import { autoDetectIndentStyle, indentStyleFromStr, type IndentStyle } from "../
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
 import type { Theme } from "../ui/theme";
+import type { UiLayer } from "./layers";
+import { WORKSPACE_BUILTINS, type WorkspaceProviders } from "../commands/workspace";
+import type { Matcher } from "./matcher";
 import { diagnosticsOf, type Diagnostic } from "../diagnostics";
 import { historyField } from "../state";
 
@@ -79,10 +82,11 @@ export interface UiHooks {
   jumpLabels?(host: Host, labels: JumpLabel[]): void;
 }
 
-export interface Workspace {
+export interface Workspace extends WorkspaceProviders {
   diagnostics?(host: Host): readonly Diagnostic[];
   cwd?(host: Host): string;
-  run(cx: Context, name: string, args: string[]): void;
+  versionControlHead?(host: Host): string;
+  run(cx: Context, name: string, args: string[]): void | false;
   openJump?(cx: Context, jump: Jump): void;
   variable?(cx: Context, name: Variable): string | null;
 }
@@ -221,8 +225,52 @@ export class HelixEditor {
   }
 
   workspaceCommand(cx: Context, name: string, args: string[] = []): void {
-    if (this.workspace) this.workspace.run(cx, name, args);
+    const builtin = WORKSPACE_BUILTINS[name];
+    if (builtin?.available(cx) && (!this.workspace || this.hasProvider(name))) {
+      void builtin.run(cx, args);
+      return;
+    }
+    if (this.workspace && this.workspace.run(cx, name, args) !== false) return;
+    if (builtin?.available(cx)) void builtin.run(cx, args);
     else this.setStatus(`${name} is not available in this editor`);
+  }
+
+  private hasProvider(name: string): boolean {
+    const workspace = this.workspace!;
+    const language = workspace.language;
+    switch (name) {
+      case "buffer_picker":
+        return workspace.buffers !== undefined;
+      case "file_picker":
+      case "file_picker_in_current_buffer_directory":
+        return workspace.files !== undefined;
+      case "global_search":
+        return workspace.search !== undefined;
+      case "changed_file_picker":
+        return workspace.changedFiles !== undefined;
+      case "goto_definition":
+      case "goto_declaration":
+      case "goto_type_definition":
+      case "goto_implementation":
+      case "goto_reference":
+        return language?.locations !== undefined;
+      case "hover":
+        return language?.hover !== undefined;
+      case "signature_help":
+        return language?.signatureHelp !== undefined;
+      case "code_action":
+        return language?.codeActions !== undefined;
+      case "rename_symbol":
+        return language?.rename !== undefined;
+      case "format_selections":
+        return language?.format !== undefined;
+      case "select_references_to_symbol_under_cursor":
+        return language?.highlights !== undefined;
+      case "symbol_picker":
+        return language?.symbols !== undefined;
+      default:
+        return false;
+    }
   }
 
   scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", sync: boolean): void {
@@ -335,8 +383,73 @@ export class HelixEditor {
     return this.workspace?.diagnostics?.(host) ?? diagnosticsOf(host.state);
   }
 
+  versionControlHead(host: Host): string {
+    return this.workspace?.versionControlHead?.(host) ?? "";
+  }
+
   workingDirectory(host: Host): string {
     return this.workspace?.cwd?.(host) ?? "";
+  }
+
+  layers: UiLayer[] = [];
+  lastPicker: UiLayer | null = null;
+  matcher: Matcher | null = null;
+  matcherLoader: (() => Promise<Matcher>) | null = null;
+  private layerListeners = new Set<() => void>();
+
+  onLayersChanged(listener: () => void): () => void {
+    this.layerListeners.add(listener);
+    return () => this.layerListeners.delete(listener);
+  }
+
+  renderLayers(host?: Host): void {
+    for (const listener of this.layerListeners) listener();
+    if (host) this.ui.render?.(host);
+  }
+
+  pushLayer(layer: UiLayer, host?: Host): void {
+    this.layers.push(layer);
+    this.renderLayers(host);
+  }
+
+  removeLayer(layer: UiLayer, host?: Host): void {
+    const index = this.layers.indexOf(layer);
+    if (index < 0) return;
+    this.layers.splice(index, 1);
+    layer.closed?.();
+    this.renderLayers(host);
+  }
+
+  async withMatcher(run: (matcher: Matcher) => void): Promise<void> {
+    if (!this.matcher && this.matcherLoader) this.matcher = await this.matcherLoader();
+    if (this.matcher) run(this.matcher);
+    else this.setError("the fuzzy matcher is not available");
+  }
+
+  private themeBeforePreview: Theme | null | undefined = undefined;
+
+  private themeChanged(): void {
+    this.onThemeChanged?.();
+    this.renderLayers();
+  }
+
+  setTheme(theme: Theme): void {
+    this.themeBeforePreview = undefined;
+    this.theme = theme;
+    this.themeChanged();
+  }
+
+  setThemePreview(theme: Theme): void {
+    if (this.themeBeforePreview === undefined) this.themeBeforePreview = this.theme;
+    this.theme = theme;
+    this.themeChanged();
+  }
+
+  unsetThemePreview(): void {
+    if (this.themeBeforePreview === undefined) return;
+    this.theme = this.themeBeforePreview;
+    this.themeBeforePreview = undefined;
+    this.themeChanged();
   }
 
   focusedHost(host: Host): Host {
@@ -382,6 +495,19 @@ export class HelixEditor {
       if (this.activePrompt === other) this.activePrompt = null;
       this.ui.promptChanged?.(other.host, this.activePrompt);
       this.ui.render?.(other.host);
+    }
+    const layer = this.activePrompt ? null : this.layers[this.layers.length - 1];
+    if (layer) {
+      const cx = new Context(this, host, null, null);
+      const result = layer.handleKey(key, cx);
+      if (result === "close" || result === "close-ignored") {
+        if (layer.modal && "options" in layer && layer.className === "hx-picker") this.lastPicker = layer;
+        this.removeLayer(layer);
+      }
+      for (const callback of cx.callbacks) callback();
+      this.renderLayers();
+      this.ui.render?.(host);
+      if (result === "consumed" || result === "close") return true;
     }
     if (this.activePrompt) {
       const prompt = this.activePrompt;

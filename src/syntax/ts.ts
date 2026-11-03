@@ -20,6 +20,10 @@ interface Exports {
   hm_node_child_count(node: number): number;
   hm_node_child(node: number, index: number, out: number): void;
   hm_node_parent(node: number, out: number): void;
+  hm_cursor_field_name(cursor: number): number;
+  hm_node_is_missing(node: number): number;
+  hm_node_kind(node: number): number;
+  hm_node_symbol_type(node: number): number;
   hm_node_next_sibling(node: number, out: number): void;
   hm_node_prev_sibling(node: number, out: number): void;
   hm_node_descendant(node: number, start: number, end: number, named: number, out: number): void;
@@ -247,6 +251,18 @@ export class Node {
     return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_symbol(p));
   }
 
+  get isMissing(): boolean {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_missing(p)) !== 0;
+  }
+
+  get isVisible(): boolean {
+    return this.isMissing || (this.isNamed && this.rt.nodeValue(this, (p) => this.rt.x.hm_node_symbol_type(p)) <= 1);
+  }
+
+  get kind(): string {
+    return this.rt.cString(this.rt.nodeValue(this, (p) => this.rt.x.hm_node_kind(p)));
+  }
+
   get isNamed(): boolean {
     return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_named(p)) !== 0;
   }
@@ -337,6 +353,11 @@ export class TreeCursor {
   get currentNode(): Node {
     this.rt.x.hm_cursor_node(this.ptr, this.rt.outPtr);
     return this.rt.readNode(this.rt.outPtr)!;
+  }
+
+  get fieldName(): string | null {
+    const ptr = this.rt.x.hm_cursor_field_name(this.ptr);
+    return ptr === 0 ? null : this.rt.cString(ptr);
   }
 
   gotoParent(): boolean {

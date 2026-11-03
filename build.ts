@@ -6,7 +6,7 @@ const out = resolve(root, "dist");
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-for (const file of ["regex/regex.wasm", "tree-sitter/tree-sitter.wasm"]) {
+for (const file of ["regex/regex.wasm", "tree-sitter/tree-sitter.wasm", "matcher/matcher.wasm"]) {
   const packed = Buffer.from(Bun.deflateSync(await Bun.file(resolve(root, file)).bytes(), { level: 9 })).toString("base64");
   writeFileSync(resolve(out, `${basename(file, ".wasm")}-wasm.js`), `export default ${JSON.stringify(packed)};\n`);
   writeFileSync(resolve(out, `${basename(file, ".wasm")}-wasm.d.ts`), "declare const packed: string;\nexport default packed;\n");

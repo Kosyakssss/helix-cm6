@@ -299,6 +299,11 @@ export class LanguageLoader implements InjectionLoader {
     });
   }
 
+  tagsQuery(id: LanguageId): Query | null {
+    const data = this.language(id);
+    return data.query("tags.scm", (text) => this.compile(data, text, "tags.scm"));
+  }
+
   rainbowQuery(id: LanguageId): RainbowQuery | null {
     const data = this.language(id);
     return data.query("rainbows.scm", (text) => {

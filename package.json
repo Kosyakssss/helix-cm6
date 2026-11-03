@@ -22,6 +22,7 @@
       "default": "./dist/languages.js"
     },
     "./regex.wasm": "./regex/regex.wasm",
+    "./matcher.wasm": "./matcher/matcher.wasm",
     "./tree-sitter.wasm": "./tree-sitter/tree-sitter.wasm",
     "./test/harness": "./test/harness.ts",
     "./test/oracle": "./test/oracle/oracle.ts",
@@ -33,6 +34,8 @@
     "src",
     "regex/regex.wasm",
     "regex/NOTICE",
+    "matcher/matcher.wasm",
+    "matcher/NOTICE",
     "tree-sitter/tree-sitter.wasm",
     "tree-sitter/NOTICE",
     "languages/languages.toml",

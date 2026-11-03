@@ -16,7 +16,7 @@ import { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
 import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
-import { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
+import { loadMatcher, loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 
 export interface GrammarSource {
   grammar(name: string): WasmBytes | null | Promise<WasmBytes | null>;
@@ -31,6 +31,7 @@ export interface HelixOptions {
   syntax?: WasmSource | false;
   shell?: ShellRunner;
   workspace?: Workspace;
+  matcher?: WasmSource;
 }
 
 export interface HelixDocument {
@@ -98,6 +99,7 @@ export function helix(options: HelixOptions = {}): Extension {
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
   editor.workspace = options.workspace ?? null;
+  editor.matcherLoader = () => loadMatcher(options.matcher);
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);
@@ -173,6 +175,9 @@ export function helix(options: HelixOptions = {}): Extension {
       .catch(() => editor.setError("the syntax tree failed to load"));
   };
 
+  editor.onThemeChanged = () => {
+    for (const open of views) open.dispatch({});
+  };
   let active: EditorView | null = null;
   const refresh = uiRefresher(editor);
   const rerender = () => {

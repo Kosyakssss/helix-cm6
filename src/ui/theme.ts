@@ -149,7 +149,7 @@ export function parseTheme(name: string, text: string, load: ThemeLoader | null 
     } catch (err) {
       warnings.push((err as Error).message);
     }
-  } else if (values.rainbow !== undefined) warnings.push(`Could not parse value as an array: '${String(values.rainbow)}'`);
+  } else if (values.rainbow !== undefined) warnings.push("Could not parse rainbow as an array");
   rainbow.forEach((style, i) => {
     styles.set(`rainbow.${i}`, style);
     scopes.push(`rainbow.${i}`);

@@ -1,5 +1,5 @@
 import { Prec, type Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, showPanel, type Panel } from "@codemirror/view";
+import { EditorView, showPanel, type Panel } from "@codemirror/view";
 import type { HelixEditor } from "../core/editor";
 import type { Host } from "../core/host";
 import { diagnosticsOf, type Severity } from "../diagnostics";
@@ -94,7 +94,7 @@ export function statuslineElement(name: string, editor: HelixEditor, host: Host,
     case "spacer":
       return plain(" ");
     case "version-control":
-      return plain(editor.workspace?.variable ? "" : "");
+      return plain(editor.versionControlHead(host));
     case "register":
       return focused && editor.selectedRegister ? plain(` reg=${editor.selectedRegister} `) : [];
     case "current-working-directory":
@@ -122,13 +122,6 @@ function renderGroup(parent: HTMLElement, cls: string, parts: readonly StatusPar
   const box = add(parent, "span", cls);
   for (const part of parts) add(box, "span", part.scope ? scopeClass(part.scope) : undefined, part.text);
 }
-
-const statuslinePlugin = ViewPlugin.fromClass(
-  class {
-    last = "";
-    update(): void {}
-  },
-);
 
 export function helixStatusline(): Extension {
   const panel = showPanel.of((view): Panel => {
@@ -158,7 +151,7 @@ export function helixStatusline(): Extension {
     render();
     return { dom, top: false, update: render };
   });
-  return [Prec.high(panel), statuslinePlugin];
+  return Prec.high(panel);
 }
 
 export const statuslineTheme = EditorView.baseTheme({

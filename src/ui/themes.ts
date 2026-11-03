@@ -1,5 +1,5 @@
 import type { Extension } from "@codemirror/state";
-import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { EditorView, ViewPlugin } from "@codemirror/view";
 import type { HelixEditor } from "../core/editor";
 import { helixEnv } from "../view/view";
 import { parseTheme, scopeClass, styleCss, themeStyle, type Theme, type ThemeLoader, type ThemeStyle } from "./theme";
@@ -172,7 +172,6 @@ export function helixThemes(options: ThemeOptions = {}): Extension {
           const editor = view.state.facet(helixEnv)?.editor;
           if (editor && !editor.themes) setEditorThemes(editor, options);
         }
-        update(_update: ViewUpdate): void {}
       },
     ),
     EditorView.editorAttributes.of((view) => {

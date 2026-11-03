@@ -12,6 +12,12 @@ import { commitHistoryNow, jumplistFor } from "./jumps";
 import { shell } from "./shell";
 import { Args, SHELL_SIGNATURE, split, Tokenizer, type Flag, type Signature } from "./command-line";
 import { expand } from "./expansion";
+import { diagnosticsOf } from "../diagnostics";
+import { highlightSpans } from "../syntax/highlight";
+import type { Node as SyntaxNode, TreeCursor } from "../syntax/ts";
+import { diffBaseOf, lastDiffHunks } from "../ui/diff";
+import { Popup } from "../ui/menu";
+import { DEFAULT_SCOPES } from "../ui/theme";
 
 export type PromptEvent = "update" | "validate" | "abort";
 
@@ -145,7 +151,169 @@ function ws(name: string, extra: Partial<TypableCommand> = {}): Pick<TypableComm
   return { ...extra, fun: validateOnly((cx, args) => cx.editor.workspaceCommand(cx, name, args.positional)) };
 }
 
+function hoverPopup(cx: Context, text: string): void {
+  const doc = docOf(cx);
+  cx.editor.pushLayer(new Popup(text, selOf(cx).primary().cursor(doc)), cx.host);
+}
+
+function prettyPrint(cursor: TreeCursor, depth: number): string {
+  const node = cursor.currentNode;
+  const visible = node.isVisible;
+  let out = "";
+  if (visible) {
+    out += " ".repeat(depth * 2);
+    const field = cursor.fieldName;
+    if (field) out += `${field}: `;
+    out += `(${node.kind}`;
+  }
+  if (cursor.gotoFirstChild()) {
+    do {
+      if (cursor.currentNode.isVisible) out += "\n";
+      out += prettyPrint(cursor, depth + 1);
+    } while (cursor.gotoNextSibling());
+    cursor.gotoParent();
+  }
+  if (visible) out += ")";
+  return out;
+}
+
+function prettyPrintTree(node: SyntaxNode): string {
+  if (node.childCount === 0) return node.isVisible ? `(${node.kind})` : `"${node.kind}"`;
+  const cursor = node.walk();
+  try {
+    return prettyPrint(cursor, 0);
+  } finally {
+    cursor.delete();
+  }
+}
+
 const DEFS: Omit<TypableCommand, "signature">[] = [
+  {
+    name: "tree-sitter-scopes",
+    aliases: [],
+    doc: "Display tree sitter scopes, primarily for theming and development.",
+    fun: validateOnly((cx) => {
+      const syntax = cx.editor.syntax?.(cx.host);
+      const doc = docOf(cx);
+      const scopes: string[] = [];
+      if (syntax) {
+        const byte = syntax.byteOf(selOf(cx).primary().cursor(doc));
+        for (let node: SyntaxNode | null = syntax.root.tree!.rootNode.descendantForByteRange(byte, byte); node; node = node.parent) scopes.push(node.kind);
+      }
+      hoverPopup(cx, `\`\`\`json\n${JSON.stringify(scopes.reverse())}\n\`\`\``);
+    }),
+  },
+  {
+    name: "tree-sitter-highlight-name",
+    aliases: [],
+    doc: "Display name of tree-sitter highlight scope under the cursor.",
+    fun: validateOnly((cx) => {
+      const syntax = cx.editor.syntax?.(cx.host);
+      if (!syntax) return;
+      const scopes = cx.editor.theme?.scopes ?? DEFAULT_SCOPES;
+      const [from, to] = cx.editor.visibleRange(cx.host);
+      const byte = syntax.byteOf(selOf(cx).primary().cursor(docOf(cx)));
+      const span = highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to)).find((s) => s.from <= byte && byte < s.to);
+      hoverPopup(cx, span ? span.scopes.map((h) => scopes[h]).join(", ") : "");
+    }),
+  },
+  {
+    name: "tree-sitter-layers",
+    aliases: [],
+    doc: "Display language names of tree-sitter injection layers under the cursor.",
+    fun: validateOnly((cx) => {
+      const syntax = cx.editor.syntax?.(cx.host);
+      if (!syntax) throw new Error("Syntax information is not available");
+      const byte = syntax.byteOf(selOf(cx).primary().cursor(docOf(cx)));
+      hoverPopup(cx, [...syntax.layersForByteRange(byte, byte)].map((layer) => syntax.loader.language(layer.language).config.languageId).join(", "));
+    }),
+  },
+  {
+    name: "tree-sitter-subtree",
+    aliases: ["ts-subtree"],
+    doc: "Display the smallest tree-sitter subtree that spans the primary selection, primarily for debugging queries.",
+    fun: validateOnly((cx) => {
+      const syntax = cx.editor.syntax?.(cx.host);
+      if (!syntax) return;
+      const primary = selOf(cx).primary();
+      const node = syntax.descendantForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
+      if (node) hoverPopup(cx, `\`\`\`tsq\n${prettyPrintTree(node)}\n\`\`\``);
+    }),
+  },
+  {
+    name: "theme",
+    aliases: [],
+    doc: "Change the editor theme (show current theme if no name specified).",
+    fun: (cx, args, event) => {
+      const name = args.positional[0];
+      const editor = cx.editor;
+      if (event === "abort") return editor.unsetThemePreview();
+      if (event === "update") {
+        if (!name) return editor.unsetThemePreview();
+        const theme = editor.themes?.load(name);
+        if (theme) editor.setThemePreview(theme);
+        return;
+      }
+      if (!name) {
+        editor.setStatus(editor.theme?.name ?? "default");
+        return;
+      }
+      const theme = editor.themes?.load(name);
+      if (!theme) throw new Error(`Could not load theme: File not found for: ${name}`);
+      editor.setTheme(theme);
+    },
+  },
+  {
+    name: "line-ending",
+    aliases: [],
+    doc: "Set the document's default line ending. Options: crlf, lf.",
+    fun: validateOnly((cx, args) => {
+      const arg = args.positional[0]?.toLowerCase();
+      if (arg === undefined) {
+        cx.editor.setStatus("line feed");
+        return;
+      }
+      if (arg.startsWith("lf")) return;
+      if (arg.startsWith("crlf")) throw new Error("this editor stores only line feeds");
+      throw new Error("invalid line ending");
+    }),
+  },
+  {
+    name: "reset-diff-change",
+    aliases: ["diffget", "diffg"],
+    doc: "Reset the diff change at the cursor position.",
+    fun: validateOnly((cx) => {
+      const base = cx.host.view ? diffBaseOf(cx.host.view) : null;
+      const hunks = lastDiffHunks(cx.host);
+      if (base === null || !hunks) throw new Error("Diff is not available in the current buffer");
+      const doc = docOf(cx);
+      const baseLines = base.split("\n");
+      const lineStart = (lines: number) => baseLines.slice(0, lines).reduce((n, l) => n + l.length + 1, 0);
+      const selected = selOf(cx).ranges.map((r) => [doc.lineAt(r.from()).number - 1, doc.lineAt(Math.max(r.from(), r.to() - 1)).number - 1] as const);
+      const touched = hunks.filter((h) => selected.some(([a, b]) => h.afterStart <= b && (h.afterEnd > a || (h.afterStart === h.afterEnd && h.afterStart >= a))));
+      if (touched.length === 0) throw new Error("There are no changes under any selection");
+      const pos = (line: number) => (line >= doc.lines ? doc.length : doc.line(line + 1).from);
+      apply(cx, changeSetOf(doc, touched.map((h) => [pos(h.afterStart), pos(h.afterEnd), base.slice(lineStart(h.beforeStart), Math.min(lineStart(h.beforeEnd), base.length))])));
+      commitHistoryNow(cx.host);
+      cx.editor.setStatus(`Reset ${touched.length} change${touched.length === 1 ? "" : "s"}`);
+    }),
+  },
+  {
+    name: "yank-diagnostic",
+    aliases: [],
+    doc: "Yank diagnostic(s) under primary cursor to register, or clipboard by default",
+    fun: validateOnly((cx, args) => {
+      const reg = args.positional[0] ?? "+";
+      if ([...reg].length !== 1) throw new Error(`Invalid register ${reg}`);
+      const primary = selOf(cx).primary();
+      const diag = diagnosticsOf(cx.host.state)
+        .filter((d) => primary.from() < Math.max(d.to, d.from + 1) && d.from < Math.max(primary.to(), primary.from() + 1))
+        .map((d) => d.message);
+      if (diag.length === 0) throw new Error("No diagnostics under primary selection");
+      cx.editor.registers.write(reg, diag);
+      cx.editor.setStatus(`Yanked ${diag.length} diagnostic${diag.length === 1 ? "" : "s"} to register ${reg}`);
+    }),
+  },
   { name: "exit", aliases: ["x", "xit"], doc: "Write changes to disk if the buffer is modified and then quit.", ...ws("write-quit") },
   { name: "exit!", aliases: ["x!", "xit!"], doc: "Force write and quit.", ...ws("write-quit") },
   { name: "quit", aliases: ["q"], doc: "Close the current view.", ...ws("quit") },
