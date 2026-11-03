@@ -2,7 +2,8 @@ import type { Text } from "@codemirror/state";
 import type { Context } from "../core/editor";
 import { Range, Selection } from "../selection";
 import { isWhitespace, lineIndex, lineWithEnding } from "../core/text";
-import { apply, changeSetOf, docOf, exitSelectMode, lineRange, lineToChar, selOf, type Change } from "./util";
+import type { LanguageConfiguration } from "../syntax/config";
+import { apply, changeSetOf, docOf, exitSelectMode, lineRange, lineToChar, selOf, syntaxOf, type Change } from "./util";
 
 export interface BlockToken {
   start: string;
@@ -173,10 +174,29 @@ export function splitLinesOfSelection(doc: Text, sel: Selection): Selection {
   return new Selection(ranges, 0);
 }
 
+function languageCommentTokens(cx: Context, pos: number): CommentTokens {
+  const loader = cx.editor.languages;
+  const syntax = syntaxOf(cx);
+  let config: LanguageConfiguration | null = null;
+  if (syntax && loader) {
+    const byte = syntax.byteOf(pos);
+    let lineLayer: LanguageConfiguration | null = null;
+    let blockLayer: LanguageConfiguration | null = null;
+    for (const layer of syntax.layersForByteRange(byte, byte)) {
+      const own = loader.language(layer.language).config;
+      if (own.commentTokens) lineLayer = own;
+      if (own.blockCommentTokens) blockLayer = own;
+    }
+    config = lineLayer ?? blockLayer;
+  }
+  config ??= cx.editor.languageConfig(cx.host);
+  return { line: config?.commentTokens ?? null, block: config?.blockCommentTokens ?? null };
+}
+
 export function runComments(cx: Context, kind: "toggle" | "line" | "block"): void {
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : { line: null, block: null };
+  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : languageCommentTokens(cx, sel.primary().cursor(doc));
   const cursorLine = lineIndex(doc, sel.primary().cursor(doc));
   const lineToken = tokens.line ? (getCommentToken(doc, tokens.line, cursorLine) ?? tokens.line[0] ?? null) : null;
   const blockTokens = tokens.block;

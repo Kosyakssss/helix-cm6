@@ -27,12 +27,24 @@ async function bundle(): Promise<Response> {
   return new Response(await built.outputs[0]!.text(), { headers: { "content-type": "text/javascript", "cache-control": "no-store" } });
 }
 
+const languages = resolve(root, "languages");
+const NAME = /^[A-Za-z0-9_.-]+$/;
+
+async function languageFile(dir: string, ...parts: string[]): Promise<Response> {
+  if (!parts.every((part) => NAME.test(part) && part !== "." && part !== "..")) return new Response("not found", { status: 404 });
+  const file = Bun.file(resolve(languages, dir, ...parts));
+  if (!(await file.exists())) return new Response("not found", { status: 404 });
+  return new Response(file, { headers: { "cache-control": "no-store" } });
+}
+
 const server = Bun.serve({
   port,
   hostname: "127.0.0.1",
   routes: {
     "/": () => new Response(Bun.file(resolve(root, "index.html")), { headers: { "cache-control": "no-store" } }),
     "/play.js": bundle,
+    "/grammars/:file": (req) => languageFile("grammars", req.params.file),
+    "/queries/:language/:file": (req) => languageFile("queries", req.params.language, req.params.file),
   },
   fetch: () => new Response("not found", { status: 404 }),
 });

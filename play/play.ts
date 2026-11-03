@@ -1,6 +1,7 @@
 import { Annotation, Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { helix, helixEditor, helixField, type Context, type HelixEditor } from "../src/index";
+import { helix, helixDocument, helixEditor, helixField, type Context, type GrammarSource, type HelixEditor } from "../src/index";
+import { languagesToml } from "../src/languages";
 import notes from "./samples/notes.md.txt" with { type: "text" };
 import markdownEdges from "./samples/markdown-edges.md.txt" with { type: "text" };
 import app from "./samples/app.ts.txt" with { type: "text" };
@@ -67,7 +68,18 @@ const sync = Annotation.define<boolean>();
 const views = new Map<string, EditorView>();
 const panes: Pane[] = [];
 let focused = 0;
-let extension: Extension = helix();
+const grammars: GrammarSource = {
+  grammar: async (name) => {
+    const response = await fetch(`/grammars/${name}.wasm`);
+    return response.ok ? response : null;
+  },
+  query: async (language, file) => {
+    const response = await fetch(`/queries/${language}/${file}`);
+    return response.ok ? response.text() : null;
+  },
+};
+const options = { languages: languagesToml, grammars };
+let extension: Extension = helix(options);
 let scratch = 0;
 let editor: HelixEditor | null = null;
 
@@ -102,6 +114,7 @@ function viewFor(pane: number, name: string): EditorView {
       doc: twin ? twin.state.doc : bufferOf(name).initial,
       extensions: [
         hx.of(extension),
+        helixDocument.of({ path: name }),
         wrap.of(setting("wrap", "1") === "1" ? EditorView.lineWrapping : []),
         EditorView.updateListener.of((update) => {
           if (update.focusChanged && update.view.hasFocus) focus(pane);
@@ -267,7 +280,7 @@ function setup(ed: HelixEditor): void {
           open("helix.toml");
           return;
         case "config-reload":
-          extension = helix({ config: textOf("helix.toml") });
+          extension = helix({ ...options, config: textOf("helix.toml") });
           reconfigure();
           current().focus();
           return;

@@ -13,6 +13,8 @@ import { setSel } from "../commands/util";
 import { getOption, setOption, toggleOption } from "./options";
 import { runComments, type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
+import type { LanguageConfiguration } from "../syntax/config";
+import type { LanguageId } from "../syntax/injections";
 import type { LanguageLoader } from "../syntax/loader";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
@@ -113,6 +115,7 @@ export class HelixEditor {
   commentTokens: ((host: Host, pos: number) => CommentTokens) | null = null;
   syntax: ((host: Host) => Syntax | null) | null = null;
   languages: LanguageLoader | null = null;
+  documentLanguage: { get(host: Host): LanguageId | null; set(host: Host, language: LanguageId | null): void } | null = null;
   regex: RustRegexEngine | null = null;
   pathCompleter: ((prefix: string) => string[]) | null = null;
   shell: ShellRunner | null = null;
@@ -265,11 +268,24 @@ export class HelixEditor {
     this.prompt(cx, {
       label: ":",
       history: ":",
-      complete: (input) => completeCommandLine(input, this.pathCompleter),
+      complete: (input) =>
+        completeCommandLine(input, {
+          path: this.pathCompleter,
+          languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? [],
+        }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
       onCancel: () => executeCommandLine(fresh(), "", "abort"),
     });
+  }
+
+  languageConfig(host: Host): LanguageConfiguration | null {
+    const id = this.documentLanguage?.get(host) ?? null;
+    return id === null || !this.languages ? null : this.languages.language(id).config;
+  }
+
+  languageName(host: Host): string | null {
+    return this.languageConfig(host)?.languageId ?? null;
   }
 
   isBusy(): boolean {

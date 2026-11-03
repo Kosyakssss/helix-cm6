@@ -59,6 +59,24 @@ const SIGNATURES: Record<string, Signature> = {
   "yank-diagnostic": sig(0, 1), read: sig(1, 1), echo: sig(1, null), noop: sig(0, null),
 };
 
+function setLanguage(cx: Context, args: Args): void {
+  const editor = cx.editor;
+  if (args.positional.length === 0) {
+    editor.setStatus(editor.languageName(cx.host) ?? "text");
+    return;
+  }
+  const name = args.positional[0]!;
+  const documents = editor.documentLanguage;
+  if (!documents) throw new Error("languages are not available");
+  if (name === "text") {
+    documents.set(cx.host, null);
+    return;
+  }
+  const id = editor.languages?.languageForName(name) ?? null;
+  if (id === null) throw new Error(`invalid language id: ${name}`);
+  documents.set(cx.host, id);
+}
+
 function validateOnly(fun: (cx: Context, args: Args) => void): TypableCommand["fun"] {
   return (cx, args, event) => {
     if (event === "validate") fun(cx, args);
@@ -312,6 +330,7 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
   { name: "set-option", aliases: ["set"], doc: "Set a config option at runtime.", fun: validateOnly((cx, args) => cx.editor.setOption(cx, args.positional)) },
   { name: "toggle-option", aliases: ["toggle"], doc: "Toggle a config option at runtime.", fun: validateOnly((cx, args) => cx.editor.toggleOption(cx, args.positional)) },
   { name: "get-option", aliases: ["get"], doc: "Get the current value of a config option.", fun: validateOnly((cx, args) => cx.editor.getOption(cx, args.positional)) },
+  { name: "set-language", aliases: ["lang"], doc: "Set the language of current buffer (show current language if no value specified).", fun: validateOnly(setLanguage) },
   { name: "echo", aliases: [], doc: "Prints the given arguments to the statusline.", fun: validateOnly((cx, args) => cx.editor.setStatus(args.positional.join(" "))) },
   { name: "noop", aliases: [], doc: "Does nothing.", fun: () => {} },
   { name: "redraw", aliases: [], doc: "Clear and re-render the whole UI", fun: validateOnly((cx) => cx.host.view?.requestMeasure()) },
@@ -343,11 +362,18 @@ export function executeCommand(cx: Context, cmd: TypableCommand, input: string, 
     fail(err);
     return;
   }
+  const run = (args: Args) => {
+    try {
+      cmd.fun(cx, args, event);
+    } catch (err) {
+      fail(err);
+    }
+  };
   if (!(parsed instanceof Promise)) {
-    cmd.fun(cx, parsed, event);
+    run(parsed);
     return;
   }
-  void cx.editor.whileBusy(parsed.then((args) => cmd.fun(cx, args, event), fail));
+  void cx.editor.whileBusy(parsed.then(run, fail));
 }
 
 export function executeCommandLine(cx: Context, input: string, event: PromptEvent): void {
@@ -395,7 +421,13 @@ function quoteCompletion(token: CompletionToken, candidate: string): Completion 
   return { start: token.contentStart, text: candidate.split(token.quote).join(token.quote + token.quote), label: candidate };
 }
 
-export function completeCommandLine(input: string, pathCompleter: ((prefix: string) => string[]) | null): Completion[] {
+export interface CommandLineCompleters {
+  path: ((prefix: string) => string[]) | null;
+  languages: () => string[];
+}
+
+export function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[] {
+  const pathCompleter = completers.path;
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);
@@ -408,6 +440,12 @@ export function completeCommandLine(input: string, pathCompleter: ((prefix: stri
     }
     const tok = token;
     if (PATH_COMMANDS.has(cmd.name) && pathCompleter) return pathCompleter(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
+    if (cmd.name === "set-language" && tokens.length <= 1) {
+      return [...completers.languages(), "text"]
+        .filter((k) => k.startsWith(tok.content))
+        .sort()
+        .map((k) => quoteCompletion(tok, k));
+    }
     if (OPTION_COMMANDS.has(cmd.name) && tokens.length <= 1) {
       return Object.keys(OPTIONS)
         .filter((k) => k.startsWith(tok.content))

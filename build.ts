@@ -13,7 +13,7 @@ for (const file of ["regex/regex.wasm", "tree-sitter/tree-sitter.wasm"]) {
 }
 
 const result = await Bun.build({
-  entrypoints: [resolve(root, "src/index.ts")],
+  entrypoints: [resolve(root, "src/index.ts"), resolve(root, "src/languages.ts")],
   outdir: out,
   format: "esm",
   target: "browser",
@@ -35,4 +35,5 @@ if (!result.success) {
 }
 const types = Bun.spawnSync(["bun", "x", "tsc", "-p", "tsconfig.build.json"], { cwd: root, stdout: "inherit", stderr: "inherit" });
 if (types.exitCode !== 0) process.exit(1);
+writeFileSync(resolve(out, "types/languages.d.ts"), "export declare const languagesToml: string;\n");
 process.stdout.write("built dist\n");

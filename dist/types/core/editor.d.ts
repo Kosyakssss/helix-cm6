@@ -8,6 +8,8 @@ import type { ShellRunner } from "../commands/shell";
 import type { Variable } from "../commands/expansion";
 import { type CommentTokens } from "../commands/comments";
 import type { Syntax } from "../syntax/syntax";
+import type { LanguageConfiguration } from "../syntax/config";
+import type { LanguageId } from "../syntax/injections";
 import type { LanguageLoader } from "../syntax/loader";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
@@ -103,6 +105,10 @@ export declare class HelixEditor {
     commentTokens: ((host: Host, pos: number) => CommentTokens) | null;
     syntax: ((host: Host) => Syntax | null) | null;
     languages: LanguageLoader | null;
+    documentLanguage: {
+        get(host: Host): LanguageId | null;
+        set(host: Host, language: LanguageId | null): void;
+    } | null;
     regex: RustRegexEngine | null;
     pathCompleter: ((prefix: string) => string[]) | null;
     shell: ShellRunner | null;
@@ -140,6 +146,8 @@ export declare class HelixEditor {
     getOption(cx: Context, args: string[]): void;
     prompt(cx: Context, request: PromptRequest): void;
     commandMode(cx: Context): void;
+    languageConfig(host: Host): LanguageConfiguration | null;
+    languageName(host: Host): string | null;
     isBusy(): boolean;
     whileBusy(work: void | Promise<void>): void | Promise<void>;
     handleKey(host: Host, key: string, options?: HandleKeyOptions): boolean;

@@ -1,4 +1,4 @@
-export { helix, helixEditor, type HelixOptions } from "./codemirror";
+export { helix, helixDocument, helixEditor, type GrammarSource, type HelixDocument, type HelixOptions } from "./codemirror";
 export { helixExtension, uiRefresher, uiSignature, type ViewEnv } from "./view/view";
 export { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 export { loadSyntax } from "./view/syntax";
@@ -23,5 +23,8 @@ export { gotoLineWithoutJumplist } from "./commands/motion";
 export { docOf, selOf, setSel } from "./commands/util";
 export type { CommentTokens } from "./commands/comments";
 export type { ShellBehavior, ShellOutput, ShellRunner } from "./commands/shell";
-export { createLoader, SyntaxSessions } from "./syntax/languages";
+export { createLoader, MARKDOWN_LANGUAGES, SyntaxSessions, type LoaderOptions } from "./syntax/languages";
+export { LanguageLoader, type LanguageSource, type QueryFile } from "./syntax/loader";
+export { parseLanguagesToml, type LanguageConfiguration } from "./syntax/config";
+export type { LanguageId } from "./syntax/injections";
 export type { Syntax } from "./syntax/syntax";

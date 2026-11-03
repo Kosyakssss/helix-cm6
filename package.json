@@ -13,6 +13,10 @@
       "types": "./dist/types/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./languages": {
+      "types": "./dist/types/languages.d.ts",
+      "default": "./dist/languages.js"
+    },
     "./regex.wasm": "./regex/regex.wasm",
     "./tree-sitter.wasm": "./tree-sitter/tree-sitter.wasm",
     "./test/harness": "./test/harness.ts",
@@ -27,6 +31,12 @@
     "regex/NOTICE",
     "tree-sitter/tree-sitter.wasm",
     "tree-sitter/NOTICE",
+    "languages/languages.toml",
+    "languages/build.ts",
+    "languages/NOTICE",
+    "tree-sitter/sdk.sh",
+    "tree-sitter/build.sh",
+    "tree-sitter/binding.c",
     "test/harness.ts",
     "test/oracle",
     "LICENSE"
@@ -39,7 +49,8 @@
     "browser": "bun test/browser/differential.ts",
     "views": "bun test/browser/views.ts",
     "play": "bun play/server.ts",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "grammars": "bun languages/build.ts"
   },
   "dependencies": {
     "smol-toml": "1.9.1"

@@ -140,7 +140,7 @@ function expandVariable(cx: Context, variable: Variable): string {
     case "workspace_directory":
       return "";
     case "language":
-      return "text";
+      return cx.editor.languageName(cx.host) ?? "text";
     case "selection":
       return doc.sliceString(primary.from(), primary.to());
     case "selection_line_start":

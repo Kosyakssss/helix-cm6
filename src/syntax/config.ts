@@ -134,8 +134,14 @@ function fileType(v: Value, what: string): FileType {
 }
 
 function blockToken(v: Value, what: string): BlockCommentToken {
+  if (Array.isArray(v) && v.length === 2) return { start: str(v[0], what), end: str(v[1], what) };
   if (!isTable(v)) throw new ConfigError(`${what}: expected a table`);
   return { start: str(v.start, what), end: str(v.end, what) };
+}
+
+function blockTokens(v: Value, what: string): BlockCommentToken[] {
+  if (Array.isArray(v) && !v.every((item) => typeof item === "string")) return v.map((b: Value) => blockToken(b, what));
+  return [blockToken(v, what)];
 }
 
 function autoPairs(v: Value, what: string): [string, string][] | null {
@@ -176,7 +182,7 @@ function languageConfig(v: Value): LanguageConfiguration {
     fileTypes: (Array.isArray(v["file-types"]) ? v["file-types"] : []).map((x) => fileType(x, at("file-types"))),
     shebangs: v.shebangs === undefined ? [] : strList(v.shebangs, at("shebangs")),
     commentTokens: comment === undefined ? null : typeof comment === "string" ? [comment] : strList(comment, at("comment-tokens")),
-    blockCommentTokens: block === undefined ? null : Array.isArray(block) ? block.map((b) => blockToken(b, at("block-comment-tokens"))) : [blockToken(block, at("block-comment-tokens"))],
+    blockCommentTokens: block === undefined ? null : blockTokens(block, at("block-comment-tokens")),
     textWidth: optNum(v["text-width"], at("text-width")),
     softWrap: isTable(soft)
       ? {

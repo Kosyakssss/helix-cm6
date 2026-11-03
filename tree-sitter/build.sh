@@ -3,21 +3,7 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 ts_rev=v0.26.9
 md_rev=f969cd3ae3f9fbd4e43205431d0ae286014c05b5
-sdk_version=29
-if [ -z "${WASI_SDK_PATH:-}" ]; then
-  case "$(uname -s)-$(uname -m)" in
-    Darwin-arm64) platform=arm64-macos ;;
-    Darwin-x86_64) platform=x86_64-macos ;;
-    Linux-aarch64) platform=arm64-linux ;;
-    Linux-x86_64) platform=x86_64-linux ;;
-    *) echo "unsupported platform" >&2; exit 1 ;;
-  esac
-  WASI_SDK_PATH="${XDG_CACHE_HOME:-$HOME/.cache}/helix-motions/wasi-sdk-$sdk_version.0-$platform"
-  if [ ! -x "$WASI_SDK_PATH/bin/clang" ]; then
-    mkdir -p "$(dirname "$WASI_SDK_PATH")"
-    curl -fsSL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$sdk_version/wasi-sdk-$sdk_version.0-$platform.tar.gz" | tar -xz -C "$(dirname "$WASI_SDK_PATH")"
-  fi
-fi
+WASI_SDK_PATH=$(sh "$here/sdk.sh")
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 git -c advice.detachedHead=false clone -q --depth 1 --branch "$ts_rev" https://github.com/tree-sitter/tree-sitter "$tmp/ts"

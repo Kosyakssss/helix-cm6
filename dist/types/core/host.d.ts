@@ -8,6 +8,7 @@ export interface Host {
     readonly view: EditorView | null;
     readonly id: string;
     readonly name: string;
+    readonly path?: string | null;
     readonly paneId: string;
 }
 export declare class HeadlessHost implements Host {

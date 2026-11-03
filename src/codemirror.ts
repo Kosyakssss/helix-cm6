@@ -7,21 +7,58 @@ import { loadConfig } from "./config-loader";
 import { buildKeymaps } from "./keymap";
 import { Registers } from "./registers";
 import type { SyntaxSessions } from "./syntax/languages";
+import type { LanguageId } from "./syntax/injections";
+import type { LanguageLoader, LanguageSource, QueryFile } from "./syntax/loader";
 import { SystemClipboard } from "./view/clipboard";
 import { loadSyntax } from "./view/syntax";
 import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
-import { loadRegex, type WasmSource } from "./view/wasm";
+import { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
+
+export interface GrammarSource {
+  grammar(name: string): WasmBytes | null | Promise<WasmBytes | null>;
+  query(language: string, file: QueryFile): string | null | Promise<string | null>;
+}
 
 export interface HelixOptions {
   config?: string;
+  languages?: string | readonly string[];
+  grammars?: GrammarSource;
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
 }
 
+export interface HelixDocument {
+  path?: string | null;
+  name?: string | null;
+  language?: string | null;
+}
+
 export const helixEditor = Facet.define<HelixEditor, HelixEditor | null>({ combine: (values) => values[0] ?? null });
+
+export const helixDocument = Facet.define<HelixDocument, HelixDocument>({
+  combine: (values) => Object.assign({}, ...values) as HelixDocument,
+});
+
+function languageSource(grammars: GrammarSource | undefined): LanguageSource | null {
+  if (!grammars) return null;
+  return {
+    grammar: async (name) => {
+      const bytes = await grammars.grammar(name);
+      return bytes === null ? null : wasmBytes(bytes);
+    },
+    query: (language, file) => grammars.query(language, file),
+  };
+}
+
+function detectLanguage(loader: LanguageLoader, view: EditorView): LanguageId | null {
+  const document = view.state.facet(helixDocument);
+  if (document.language) return document.language === "text" ? null : loader.languageForName(document.language);
+  if (!document.path) return null;
+  return loader.languageForFilename(document.path) ?? loader.languageForShebang(view.state.doc.sliceString(0, 1024));
+}
 
 export function helix(options: HelixOptions = {}): Extension {
   const loaded = loadConfig(options.config ?? null);
@@ -45,7 +82,13 @@ export function helix(options: HelixOptions = {}): Extension {
         dispatch: (...specs: TransactionSpec[]) => view.dispatch(...specs),
         view,
         id,
-        name: "[scratch]",
+        get name() {
+          const document = view.state.facet(helixDocument);
+          return document.name ?? document.path ?? "[scratch]";
+        },
+        get path() {
+          return view.state.facet(helixDocument).path ?? null;
+        },
         paneId: id,
       };
       hosts.set(view, host);
@@ -69,18 +112,35 @@ export function helix(options: HelixOptions = {}): Extension {
     if (syntax === false) return;
     void regex
       .catch(() => null)
-      .then((engine) => loadSyntax(win, syntax, { regex: engine }))
+      .then((engine) =>
+        loadSyntax(win, syntax, {
+          regex: engine,
+          languages: typeof options.languages === "string" ? [options.languages] : options.languages,
+          source: languageSource(options.grammars),
+        }),
+      )
       .then((loadedSessions) => {
         sessions = loadedSessions;
         editor.languages = loadedSessions.loader;
-        for (const open of views) loadedSessions.open(open, open.state.doc);
+        for (const open of views) loadedSessions.open(open, open.state.doc, detectLanguage(loadedSessions.loader, open));
+        editor.documentLanguage = {
+          get: (host) => (host.view ? loadedSessions.languageOf(host.view) : null),
+          set: (host, language) => {
+            if (host.view) loadedSessions.setLanguage(host.view, language);
+            rerender();
+          },
+        };
         editor.syntax = (host) => (host.view ? loadedSessions.get(host.view, host.state.doc) : null);
+        loadedSessions.loader.onLoad(rerender);
       })
       .catch(() => editor.setError("the syntax tree failed to load"));
   };
 
   let active: EditorView | null = null;
   const refresh = uiRefresher(editor);
+  const rerender = () => {
+    if (active?.dom.isConnected) refresh(hostFor(active));
+  };
   editor.ui = {
     notify: () =>
       queueMicrotask(() => {
@@ -126,7 +186,7 @@ export function helix(options: HelixOptions = {}): Extension {
     onViewOpen: (view) => {
       views.add(view);
       start(view);
-      sessions?.open(view, view.state.doc);
+      if (sessions) sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
     },
     onViewClose: (view) => {
       views.delete(view);

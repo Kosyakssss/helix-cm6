@@ -14,4 +14,8 @@ export declare const TYPABLE_MAP: Map<string, TypableCommand>;
 export declare function splitCommandLine(input: string): [string, string];
 export declare function executeCommand(cx: Context, cmd: TypableCommand, input: string, event: PromptEvent): void;
 export declare function executeCommandLine(cx: Context, input: string, event: PromptEvent): void;
-export declare function completeCommandLine(input: string, pathCompleter: ((prefix: string) => string[]) | null): Completion[];
+export interface CommandLineCompleters {
+    path: ((prefix: string) => string[]) | null;
+    languages: () => string[];
+}
+export declare function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[];

@@ -5906,7 +5906,7 @@ function expandVariable(cx, variable) {
     case "workspace_directory":
       return "";
     case "language":
-      return "text";
+      return cx.editor.languageName(cx.host) ?? "text";
     case "selection":
       return doc.sliceString(primary.from(), primary.to());
     case "selection_line_start":
@@ -6666,6 +6666,25 @@ var SIGNATURES = {
   echo: sig(1, null),
   noop: sig(0, null)
 };
+function setLanguage(cx, args) {
+  const editor = cx.editor;
+  if (args.positional.length === 0) {
+    editor.setStatus(editor.languageName(cx.host) ?? "text");
+    return;
+  }
+  const name = args.positional[0];
+  const documents = editor.documentLanguage;
+  if (!documents)
+    throw new Error("languages are not available");
+  if (name === "text") {
+    documents.set(cx.host, null);
+    return;
+  }
+  const id = editor.languages?.languageForName(name) ?? null;
+  if (id === null)
+    throw new Error(`invalid language id: ${name}`);
+  documents.set(cx.host, id);
+}
 function validateOnly(fun) {
   return (cx, args, event) => {
     if (event === "validate")
@@ -6929,6 +6948,7 @@ var DEFS = [
   { name: "set-option", aliases: ["set"], doc: "Set a config option at runtime.", fun: validateOnly((cx, args) => cx.editor.setOption(cx, args.positional)) },
   { name: "toggle-option", aliases: ["toggle"], doc: "Toggle a config option at runtime.", fun: validateOnly((cx, args) => cx.editor.toggleOption(cx, args.positional)) },
   { name: "get-option", aliases: ["get"], doc: "Get the current value of a config option.", fun: validateOnly((cx, args) => cx.editor.getOption(cx, args.positional)) },
+  { name: "set-language", aliases: ["lang"], doc: "Set the language of current buffer (show current language if no value specified).", fun: validateOnly(setLanguage) },
   { name: "echo", aliases: [], doc: "Prints the given arguments to the statusline.", fun: validateOnly((cx, args) => cx.editor.setStatus(args.positional.join(" "))) },
   { name: "noop", aliases: [], doc: "Does nothing.", fun: () => {} },
   { name: "redraw", aliases: [], doc: "Clear and re-render the whole UI", fun: validateOnly((cx) => cx.host.view?.requestMeasure()) }
@@ -6957,11 +6977,18 @@ function executeCommand(cx, cmd, input, event) {
     fail(err);
     return;
   }
+  const run = (args) => {
+    try {
+      cmd.fun(cx, args, event);
+    } catch (err) {
+      fail(err);
+    }
+  };
   if (!(parsed instanceof Promise)) {
-    cmd.fun(cx, parsed, event);
+    run(parsed);
     return;
   }
-  cx.editor.whileBusy(parsed.then((args) => cmd.fun(cx, args, event), fail));
+  cx.editor.whileBusy(parsed.then(run, fail));
 }
 function executeCommandLine(cx, input, event) {
   const [command, rest] = split(input);
@@ -6997,7 +7024,8 @@ function quoteCompletion(token, candidate) {
   }
   return { start: token.contentStart, text: candidate.split(token.quote).join(token.quote + token.quote), label: candidate };
 }
-function completeCommandLine(input, pathCompleter) {
+function completeCommandLine(input, completers) {
+  const pathCompleter = completers.path;
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);
@@ -7013,6 +7041,9 @@ function completeCommandLine(input, pathCompleter) {
     const tok = token;
     if (PATH_COMMANDS.has(cmd.name) && pathCompleter)
       return pathCompleter(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
+    if (cmd.name === "set-language" && tokens.length <= 1) {
+      return [...completers.languages(), "text"].filter((k) => k.startsWith(tok.content)).sort().map((k) => quoteCompletion(tok, k));
+    }
     if (OPTION_COMMANDS.has(cmd.name) && tokens.length <= 1) {
       return Object.keys(OPTIONS).filter((k) => k.startsWith(tok.content)).sort().map((k) => ({ start: tok.start, text: k, label: k }));
     }
@@ -7476,10 +7507,30 @@ function splitLinesOfSelection(doc, sel) {
   }
   return new Selection(ranges, 0);
 }
+function languageCommentTokens(cx, pos) {
+  const loader = cx.editor.languages;
+  const syntax = syntaxOf(cx);
+  let config = null;
+  if (syntax && loader) {
+    const byte = syntax.byteOf(pos);
+    let lineLayer = null;
+    let blockLayer = null;
+    for (const layer of syntax.layersForByteRange(byte, byte)) {
+      const own = loader.language(layer.language).config;
+      if (own.commentTokens)
+        lineLayer = own;
+      if (own.blockCommentTokens)
+        blockLayer = own;
+    }
+    config = lineLayer ?? blockLayer;
+  }
+  config ??= cx.editor.languageConfig(cx.host);
+  return { line: config?.commentTokens ?? null, block: config?.blockCommentTokens ?? null };
+}
 function runComments(cx, kind) {
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : { line: null, block: null };
+  const tokens = cx.editor.commentTokens ? cx.editor.commentTokens(cx.host, sel.primary().cursor(doc)) : languageCommentTokens(cx, sel.primary().cursor(doc));
   const cursorLine = lineIndex(doc, sel.primary().cursor(doc));
   const lineToken = tokens.line ? getCommentToken(doc, tokens.line, cursorLine) ?? tokens.line[0] ?? null : null;
   const blockTokens = tokens.block;
@@ -7578,6 +7629,7 @@ class HelixEditor {
   commentTokens = null;
   syntax = null;
   languages = null;
+  documentLanguage = null;
   regex = null;
   pathCompleter = null;
   shell = null;
@@ -7707,11 +7759,21 @@ class HelixEditor {
     this.prompt(cx, {
       label: ":",
       history: ":",
-      complete: (input) => completeCommandLine(input, this.pathCompleter),
+      complete: (input) => completeCommandLine(input, {
+        path: this.pathCompleter,
+        languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? []
+      }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
       onCancel: () => executeCommandLine(fresh(), "", "abort")
     });
+  }
+  languageConfig(host) {
+    const id = this.documentLanguage?.get(host) ?? null;
+    return id === null || !this.languages ? null : this.languages.language(id).config;
+  }
+  languageName(host) {
+    return this.languageConfig(host)?.languageId ?? null;
   }
   isBusy() {
     return this.busy > 0;
@@ -8901,9 +8963,16 @@ function fileType(v, what) {
   throw new ConfigError(`${what}: expected string or table`);
 }
 function blockToken(v, what) {
+  if (Array.isArray(v) && v.length === 2)
+    return { start: str(v[0], what), end: str(v[1], what) };
   if (!isTable(v))
     throw new ConfigError(`${what}: expected a table`);
   return { start: str(v.start, what), end: str(v.end, what) };
+}
+function blockTokens(v, what) {
+  if (Array.isArray(v) && !v.every((item) => typeof item === "string"))
+    return v.map((b) => blockToken(b, what));
+  return [blockToken(v, what)];
 }
 function autoPairs(v, what) {
   if (v === undefined || v === false)
@@ -8947,7 +9016,7 @@ function languageConfig(v) {
     fileTypes: (Array.isArray(v["file-types"]) ? v["file-types"] : []).map((x) => fileType(x, at("file-types"))),
     shebangs: v.shebangs === undefined ? [] : strList(v.shebangs, at("shebangs")),
     commentTokens: comment === undefined ? null : typeof comment === "string" ? [comment] : strList(comment, at("comment-tokens")),
-    blockCommentTokens: block === undefined ? null : Array.isArray(block) ? block.map((b) => blockToken(b, at("block-comment-tokens"))) : [blockToken(block, at("block-comment-tokens"))],
+    blockCommentTokens: block === undefined ? null : blockTokens(block, at("block-comment-tokens")),
     textWidth: optNum(v["text-width"], at("text-width")),
     softWrap: isTable(soft) ? {
       enable: optBool(soft.enable, at("soft-wrap.enable")),
@@ -12119,6 +12188,28 @@ function makeViewOps(scrolloff) {
 
 // src/codemirror.ts
 var helixEditor = Facet2.define({ combine: (values) => values[0] ?? null });
+var helixDocument = Facet2.define({
+  combine: (values) => Object.assign({}, ...values)
+});
+function languageSource(grammars) {
+  if (!grammars)
+    return null;
+  return {
+    grammar: async (name) => {
+      const bytes = await grammars.grammar(name);
+      return bytes === null ? null : wasmBytes(bytes);
+    },
+    query: (language, file) => grammars.query(language, file)
+  };
+}
+function detectLanguage(loader, view) {
+  const document = view.state.facet(helixDocument);
+  if (document.language)
+    return document.language === "text" ? null : loader.languageForName(document.language);
+  if (!document.path)
+    return null;
+  return loader.languageForFilename(document.path) ?? loader.languageForShebang(view.state.doc.sliceString(0, 1024));
+}
 function helix2(options = {}) {
   const loaded = loadConfig(options.config ?? null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
@@ -12140,7 +12231,13 @@ function helix2(options = {}) {
         dispatch: (...specs) => view.dispatch(...specs),
         view,
         id,
-        name: "[scratch]",
+        get name() {
+          const document = view.state.facet(helixDocument);
+          return document.name ?? document.path ?? "[scratch]";
+        },
+        get path() {
+          return view.state.facet(helixDocument).path ?? null;
+        },
         paneId: id
       };
       hosts.set(view, host);
@@ -12163,16 +12260,33 @@ function helix2(options = {}) {
     const syntax = options.syntax;
     if (syntax === false)
       return;
-    regex.catch(() => null).then((engine) => loadSyntax(win, syntax, { regex: engine })).then((loadedSessions) => {
+    regex.catch(() => null).then((engine) => loadSyntax(win, syntax, {
+      regex: engine,
+      languages: typeof options.languages === "string" ? [options.languages] : options.languages,
+      source: languageSource(options.grammars)
+    })).then((loadedSessions) => {
       sessions = loadedSessions;
       editor.languages = loadedSessions.loader;
       for (const open of views)
-        loadedSessions.open(open, open.state.doc);
+        loadedSessions.open(open, open.state.doc, detectLanguage(loadedSessions.loader, open));
+      editor.documentLanguage = {
+        get: (host) => host.view ? loadedSessions.languageOf(host.view) : null,
+        set: (host, language) => {
+          if (host.view)
+            loadedSessions.setLanguage(host.view, language);
+          rerender();
+        }
+      };
       editor.syntax = (host) => host.view ? loadedSessions.get(host.view, host.state.doc) : null;
+      loadedSessions.loader.onLoad(rerender);
     }).catch(() => editor.setError("the syntax tree failed to load"));
   };
   let active = null;
   const refresh = uiRefresher(editor);
+  const rerender = () => {
+    if (active?.dom.isConnected)
+      refresh(hostFor(active));
+  };
   editor.ui = {
     notify: () => queueMicrotask(() => {
       if (active?.dom.isConnected)
@@ -12218,7 +12332,8 @@ function helix2(options = {}) {
     onViewOpen: (view) => {
       views.add(view);
       start(view);
-      sessions?.open(view, view.state.doc);
+      if (sessions)
+        sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
     },
     onViewClose: (view) => {
       views.delete(view);
@@ -12316,6 +12431,8 @@ export {
   Context,
   HeadlessHost,
   HelixEditor,
+  LanguageLoader,
+  MARKDOWN_LANGUAGES,
   MemoryClipboard,
   Range,
   Registers,
@@ -12337,6 +12454,7 @@ export {
   fromNative,
   gotoLineWithoutJumplist,
   helix2 as helix,
+  helixDocument,
   helixEditor,
   helixExtension,
   helixField,
@@ -12350,6 +12468,7 @@ export {
   makeViewOps,
   nextGraphemeBoundary,
   parseKey,
+  parseLanguagesToml,
   parseMacro,
   plain,
   prevGraphemeBoundary,
