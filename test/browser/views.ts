@@ -153,7 +153,7 @@ async function run(type: BrowserType): Promise<string[]> {
   check("p of a line after a last line without a newline adds a line", (await extra("final3", "xyjp")).doc, "one\ntwo\none");
   check("e on a whole last line stays charwise", (await extra("final4", "jeyP")).doc, "one\ntwotwo");
 
-  type UiState = { status: string; numbers: string[]; diagnostics: number; underline: number; diff: number; heading: string | null; headingColor: string | null; spaces: number; guides: number; rulers: number; column: number; picker: number; pickerRows: number; preview: string | null; popup: string | null; menu: string[]; theme: boolean; message: string | null; doc: string; cursor: number };
+  type UiState = { status: string; numbers: string[]; diagnostics: number; underline: number; diff: number; heading: string | null; headingColor: string | null; spaces: number; guides: number; rulers: number; column: number; wrap: boolean | null; picker: number; pickerRows: number; preview: string | null; popup: string | null; menu: string[]; theme: boolean; message: string | null; doc: string; cursor: number };
   const uiState = () => page.evaluate(() => (window as unknown as { helixUiState(): UiState }).helixUiState());
   const uiKeys = async (keys: string) => {
     await extra("ui", keys);
@@ -185,6 +185,11 @@ async function run(type: BrowserType): Promise<string[]> {
   check("a ruler is drawn", (await uiState()).rulers, 1);
   await uiKeys(":set cursorcolumn true<ret>");
   check("the cursor column is drawn", (await uiState()).column, 1);
+  await uiKeys(":set soft-wrap.enable true<ret>");
+  await page.waitForTimeout(300);
+  check("the wrap indicator sits beside the wrapped text", (await uiState()).wrap, true);
+  await uiKeys(":set soft-wrap.enable false<ret>");
+  await page.waitForTimeout(100);
   await uiKeys(":theme demo<ret>");
   ui = await uiState();
   check("a theme applies", [ui.theme, ui.headingColor], [true, "rgb(68, 85, 102)"]);

@@ -1,4 +1,4 @@
-import { add, make } from "../view/dom";
+import { add, make, setProps } from "../view/dom";
 
 function inline(parent: HTMLElement, text: string): void {
   const pattern = /(`+)(.+?)\1|\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*|_(.+?)_|\[([^\]]+)\]\(([^)]+)\)/g;
@@ -42,8 +42,7 @@ export function renderMarkdown(parent: HTMLElement, text: string): void {
     const list = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
     if (list) {
       const row = make(doc, "div", "hx-md-item");
-      row.style.paddingInlineStart = `${list[1]!.length + 2}ch`;
-      row.style.textIndent = "-2ch";
+      setProps(row, { "padding-inline-start": `${list[1]!.length + 2}ch`, "text-indent": "-2ch" });
       add(row, "span", "hx-s-markup-list", `${/\d/.test(list[2]!) ? list[2]! : "•"} `);
       inline(row, list[3]!);
       parent.appendChild(row);

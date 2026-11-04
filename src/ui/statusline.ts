@@ -18,7 +18,7 @@ const SCRATCH = "[scratch]";
 
 function counts(severities: readonly string[], list: readonly { severity: Severity | null }[]): StatusPart[] {
   const totals: Record<string, number> = { hint: 0, info: 0, warning: 0, error: 0 };
-  for (const d of list) totals[d.severity ?? "hint"]! += 1;
+  for (const d of list) totals[d.severity ?? "hint"] = (totals[d.severity ?? "hint"] ?? 0) + 1;
   const parts: StatusPart[] = [];
   for (const severity of severities) {
     const n = totals[severity] ?? 0;

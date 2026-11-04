@@ -42,8 +42,8 @@ export class Matcher {
   private constructor(private readonly x: Exports) {}
 
   static async load(bytes: Uint8Array): Promise<Matcher> {
-    const module = (await WebAssembly.instantiate(bytes as BufferSource)) as unknown as WebAssembly.WebAssemblyInstantiatedSource;
-    return new Matcher(module.instance.exports as unknown as Exports);
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    return new Matcher(instance.exports as unknown as Exports);
   }
 
   private withText<T>(text: string, use: (ptr: number, len: number) => T): T {

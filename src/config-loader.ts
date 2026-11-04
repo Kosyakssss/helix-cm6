@@ -77,7 +77,7 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
         break;
       }
       case "shell": {
-        if (Array.isArray(value) && value.every((v) => typeof v === "string")) config.shell = value;
+        if (Array.isArray(value) && value.every((v) => typeof v === "string")) config.shell = value.map(String);
         else warnings.push("editor.shell: expected a list of strings");
         break;
       }

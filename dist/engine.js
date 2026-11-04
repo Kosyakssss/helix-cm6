@@ -32,6 +32,7 @@ import {
   gotoLineWithoutJumplist2,
   escapeRegex2,
   compilePattern2,
+  pasteImpl2,
   setDiagnostics2,
   diagnosticsField2,
   helixEnv2,
@@ -80,7 +81,7 @@ import {
   helixThemes2,
   helixGutters2,
   helixUi2
-} from "./chunk-kyas7ngg.js";
+} from "./chunk-hsb9x0kb.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -232,6 +233,7 @@ export {
   parseLanguagesToml2 as parseLanguagesToml,
   parseMacro2 as parseMacro,
   parseTheme2 as parseTheme,
+  pasteImpl2 as pasteImpl,
   plain,
   prevGraphemeBoundary2 as prevGraphemeBoundary,
   print,

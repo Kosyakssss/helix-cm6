@@ -48,7 +48,7 @@ const finalLine = (id: string) => {
 const uiParent = document.createElement("div");
 uiParent.id = "ui";
 document.body.appendChild(uiParent);
-const uiText = "# Title *em*\n\nsome  text\n\tindented line\n\nsecond word second\n";
+const uiText = `# Title *em*\n\nsome  text\n\tindented line\n\nsecond word second\n\n${"long wrapped line ".repeat(40)}\n`;
 const uiView = new EditorView({
   parent: uiParent,
   doc: uiText,
@@ -121,6 +121,13 @@ Object.assign(window, {
       popup: text(".hx-popup-body"),
       menu: [...dom.querySelectorAll(".hx-menu-label")].map((e) => e.textContent),
       theme: [...dom.classList].some((c) => c.startsWith("hx-theme-")),
+      wrap: (() => {
+        const indicator = dom.querySelector(".hx-wrap-indicator")?.getBoundingClientRect();
+        const line = [...dom.querySelectorAll(".cm-line")].find((l) => l.textContent!.startsWith("long wrapped"));
+        if (!indicator || !line) return null;
+        const style = getComputedStyle(line);
+        return indicator.right <= line.getBoundingClientRect().left + parseFloat(style.paddingLeft) + 1;
+      })(),
       message: dom.querySelector(".hx-message:not(.hx-hidden)")?.textContent ?? null,
       doc: uiView.state.doc.toString(),
       cursor: uiView.state.field(helixField).selection.primary().cursor(uiView.state.doc),

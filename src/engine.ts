@@ -49,6 +49,7 @@ export { nextGraphemeBoundary, prevGraphemeBoundary } from "./graphemes";
 export { commitHistoryNow, jumplistFor, pushJump, type Jump } from "./commands/jumps";
 export { gotoLineWithoutJumplist } from "./commands/motion";
 export { docOf, selOf, setSel } from "./commands/util";
+export { pasteImpl } from "./commands/edit";
 export type { CommentTokens } from "./commands/comments";
 export type { ShellBehavior, ShellOutput, ShellRunner } from "./commands/shell";
 export { createLoader, MARKDOWN_LANGUAGES, SyntaxSessions, type LoaderOptions } from "./syntax/languages";

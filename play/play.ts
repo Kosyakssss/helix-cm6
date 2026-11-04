@@ -66,6 +66,7 @@ const filesEl = doc.getElementById("files")!;
 const hx = new Compartment();
 const sync = Annotation.define<boolean>();
 const views = new Map<string, EditorView>();
+const dirty = new Set<string>();
 const panes: Pane[] = [];
 let focused = 0;
 const grammars: GrammarSource = {
@@ -142,6 +143,7 @@ function viewFor(pane: number, name: string): EditorView {
         helixDocument.of({ path: name }),
         EditorView.updateListener.of((update) => {
           if (update.focusChanged && update.view.hasFocus) focus(pane);
+          if (update.docChanged) dirty.add(name);
           if (update.docChanged && !update.transactions.some((tr) => tr.annotation(sync))) {
             for (const other of viewsOf(name)) {
               if (other === update.view) continue;
@@ -308,7 +310,7 @@ const features: LanguageFeatures = {
 function workspace() {
   return {
     language: features,
-    buffers: (): WorkspaceBuffer[] => buffers.map((b) => ({ id: b.name, path: b.name, name: b.name, modified: textOf(b.name) !== b.initial })),
+    buffers: (): WorkspaceBuffer[] => buffers.map((b) => ({ id: b.name, path: b.name, name: b.name, modified: dirty.has(b.name) })),
     openBuffer: (_cx: Context, id: string) => open(id),
     files: () => buffers.map((b) => b.name),
     openFile: (_cx: Context, path: string, target: { line?: number; from?: number; to?: number } | null) => {
@@ -344,6 +346,7 @@ function workspace() {
         case "write":
         case "write-all":
           cx.editor.markSaved(cx.host);
+          dirty.delete(panes[focused]!.buffer);
           cx.editor.setStatus(`"${panes[focused]!.buffer}" kept in memory; the playground writes nothing to disk`);
           return;
         case "reload": {

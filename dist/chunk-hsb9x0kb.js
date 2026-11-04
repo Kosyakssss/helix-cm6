@@ -22,12 +22,16 @@ var helixHooks2 = Facet.define({
       command: command.length > 0 ? first(command) : undefined,
       motionRanges: ranges.length > 0 ? (host) => ranges.flatMap((r) => r(host)) : undefined,
       focused: focused.length > 0 ? (host) => focused.reduce((found, f) => found ?? f(host), null) : undefined,
-      stopBeforeEnd: values.some((v) => v.stopBeforeEnd)
+      stopBeforeEnd: (host) => values.some((v) => typeof v.stopBeforeEnd === "function" ? v.stopBeforeEnd(host) : v.stopBeforeEnd === true)
     };
   }
 });
 function hooksOf(host) {
   return host.state.facet(helixHooks2);
+}
+function stopsBeforeEnd(hooks, host) {
+  const stop = hooks.stopBeforeEnd;
+  return typeof stop === "function" ? stop(host) : stop === true;
 }
 function rangeAt(ranges, pos) {
   for (const r of ranges)
@@ -1495,7 +1499,14 @@ function moveVisualVertically(view, range, dir, count, behaviour, ranges = [], p
     const from = inside?.kind === "row" ? forward ? doc.lineAt(Math.max(inside.from, inside.to - 1)).from : inside.from : pos;
     const moved = view.moveVertically(EditorSelection3.cursor(from, 1, undefined, goal), forward);
     let next = sameVisualRow(view, from, moved.head) ? null : moved.head;
-    let hit = next === null ? null : rangeAt(ranges, next);
+    let hit = next === null ? null : crossedRange(doc, ranges, from, next, forward) ?? rangeAt(ranges, next);
+    if (next === null && inside === null && ranges.length > 0) {
+      const beyond = crossedRange(doc, ranges, from, forward ? doc.length + 1 : -1, forward);
+      if (beyond && doc.lineAt(from).number + (forward ? 1 : -1) === doc.lineAt(forward ? beyond.from : Math.max(beyond.to - 1, 0)).number) {
+        next = forward ? beyond.from : beyond.to;
+        hit = beyond;
+      }
+    }
     while (next !== null && hit?.kind === "skip") {
       const beyond = forward ? hit.to : hit.from - 1;
       next = beyond < 0 || beyond > doc.length ? null : atGoal(view, beyond, moved.goalColumn);
@@ -1515,6 +1526,20 @@ function moveVisualVertically(view, range, dir, count, behaviour, ranges = [], p
   if (behaviour === "extend" && line.number === doc.lines && line.length === 0)
     return range;
   return range.putCursor(doc, pos, behaviour === "extend").withGoal(goal);
+}
+function crossedRange(doc, ranges, from, to, forward) {
+  if (forward) {
+    for (const range of ranges)
+      if (range.from > from && range.from <= to)
+        return range;
+    return null;
+  }
+  for (let i = ranges.length - 1;i >= 0; i--) {
+    const range = ranges[i];
+    if (range.to <= from && (range.to > to || range.to === to && to > 0 && doc.lineAt(to).from !== to))
+      return range;
+  }
+  return null;
 }
 function atGoal(view, pos, goal) {
   const line = view.state.doc.lineAt(pos);
@@ -2070,8 +2095,10 @@ function moveHorizontal(cx, dir, behaviour) {
     const next = moveHorizontally(doc, primary, dir, 1, behaviour);
     const cursor = next.cursor(doc);
     const edge = edgeOf(dir, false, behaviour, count - i, primary.goalColumn);
-    const atEnd = hooks.stopBeforeEnd === true && dir === "forward" && behaviour === "move" && cursor >= doc.length && doc.length > 0;
+    const atEnd = stopsBeforeEnd(hooks, cx.host) && dir === "forward" && behaviour === "move" && cursor >= doc.length && doc.length > 0;
     if (cursor === primary.cursor(doc) || atEnd) {
+      if (!atEnd && !next.eq(primary))
+        setSel2(cx, selOf2(cx).transform(() => next));
       hooks.edge?.(edge, cx.host);
       return;
     }
@@ -4120,17 +4147,17 @@ function autoDetectIndentStyle(doc) {
       }
       if ((prevIsTabs === isTabs || prevCount === 0) && prevCount < count) {
         if (isTabs)
-          histogram[0]++;
+          histogram[0] = histogram[0] + 1;
         else {
           const amount = count - prevCount;
           if (amount <= MAX_INDENT)
-            histogram[amount]++;
+            histogram[amount] = histogram[amount] + 1;
         }
       }
       prevIsTabs = isTabs;
       prevCount = count;
     }
-  histogram[0] *= 2;
+  histogram[0] = histogram[0] * 2;
   if (histogram[1] > 1)
     histogram[1] = Math.floor(histogram[1] / 2);
   let indent = 0;
@@ -6273,7 +6300,7 @@ function yankMainSelection(cx, register) {
     cx.editor.setError(err.message);
   }
 }
-function pasteImpl(cx, values, action, count) {
+function pasteImpl2(cx, values, action, count) {
   if (values.length === 0)
     return;
   const mode = modeOf(cx);
@@ -6324,7 +6351,7 @@ function paste(cx, register, pos, count) {
   const values = cx.editor.registers.read(register, cx.editor.registerEnv(cx.host));
   if (!values)
     return;
-  pasteImpl(cx, values, pos, count);
+  pasteImpl2(cx, values, pos, count);
 }
 function replaceSelectionsWithRegister(cx, register, count) {
   const values = cx.editor.registers.read(register, cx.editor.registerEnv(cx.host));
@@ -7779,6 +7806,7 @@ var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace
 var OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
 function helixExtension2(env) {
   const { editor } = env;
+  let lastKeydown = null;
   const onKey = (event, view) => {
     const host = env.hostFor(view);
     const value = view.state.field(helixField2, false);
@@ -7808,12 +7836,15 @@ function helixExtension2(env) {
       return false;
     if (OS_NAVIGATION.has(event.key) && event.ctrlKey && !event.altKey && !event.metaKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
       return false;
+    lastKeydown = { view, key: event.key };
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k)
     });
-    if (!consumed && !dead)
+    if (!consumed && !dead) {
+      lastKeydown = null;
       return false;
+    }
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -7829,7 +7860,12 @@ function helixExtension2(env) {
       }, 0);
       return false;
     },
+    keyup() {
+      lastKeydown = null;
+      return false;
+    },
     keydown(event, view) {
+      lastKeydown = null;
       if (event.isComposing || event.key === "Process") {
         const value = view.state.field(helixField2, false);
         if (!value || value.mode === "insert" && !editor.activePrompt)
@@ -7860,6 +7896,10 @@ function helixExtension2(env) {
     }
   });
   const swallowInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
+    if (lastKeydown && lastKeydown.view !== view && lastKeydown.key === text) {
+      lastKeydown = null;
+      return true;
+    }
     const value = view.state.field(helixField2, false);
     if (!value || value.mode === "insert" && !editor.activePrompt)
       return false;
@@ -7954,7 +7994,7 @@ function helixExtension2(env) {
       event.preventDefault();
       const cx = new Context2(editor, env.hostFor(view), editor.count, null);
       editor.count = null;
-      pasteImpl(cx, [text], value.mode === "normal" ? "before" : "cursor", cx.count());
+      pasteImpl2(cx, [text], value.mode === "normal" ? "before" : "cursor", cx.count());
       exitSelectMode(cx);
       return true;
     }
@@ -8163,8 +8203,7 @@ function renderMarkdown(parent, text) {
     const list = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
     if (list) {
       const row = make(doc, "div", "hx-md-item");
-      row.style.paddingInlineStart = `${list[1].length + 2}ch`;
-      row.style.textIndent = "-2ch";
+      setProps(row, { "padding-inline-start": `${list[1].length + 2}ch`, "text-indent": "-2ch" });
       add(row, "span", "hx-s-markup-list", `${/\d/.test(list[2]) ? list[2] : "•"} `);
       inline(row, list[3]);
       parent.appendChild(row);
@@ -11046,7 +11085,7 @@ var diffPlugin = ViewPlugin4.fromClass(class {
     this.timer = win.setTimeout(() => {
       this.timer = null;
       this.compute();
-    }, 50);
+    }, 150);
   }
   compute() {
     const view = this.view;
@@ -13706,6 +13745,33 @@ var WORKSPACE_BUILTINS = {
     }
   },
   symbol_picker: { available: always, run: symbolPicker },
+  workspace_symbol_picker: {
+    available: hasLanguage("workspaceSymbols"),
+    run: (cx) => {
+      const language = cx.editor.workspace.language;
+      let current = null;
+      let latest = 0;
+      cx.editor.withMatcher((matcher) => {
+        const options = {
+          columns: symbolColumns(),
+          primaryColumn: 1,
+          items: [],
+          onSelect: (cx, s, action) => openLocation(cx, s, action),
+          preview: (s) => previewLocation(cx, s),
+          dynamic: (query) => {
+            const request = ++latest;
+            language.workspaceSymbols(cx, query).then((list) => {
+              if (request === latest)
+                current?.replaceItems(list);
+            });
+          }
+        };
+        current = new Picker2(cx.editor, cx.host, matcher, options);
+        cx.editor.pushLayer(current, cx.host);
+        options.dynamic("");
+      });
+    }
+  },
   buffer_picker: { available: (cx) => cx.editor.workspace?.buffers !== undefined, run: bufferPicker },
   file_picker: { available: (cx) => cx.editor.workspace?.files !== undefined, run: (cx, args) => filePicker(cx, args[0] ?? null) },
   file_picker_in_current_buffer_directory: {
@@ -13993,6 +14059,8 @@ class HelixEditor2 {
         return language?.highlights !== undefined;
       case "symbol_picker":
         return language?.symbols !== undefined;
+      case "workspace_symbol_picker":
+        return language?.workspaceSymbols !== undefined;
       default:
         return false;
     }
@@ -14240,11 +14308,15 @@ class HelixEditor2 {
       this.pseudoPending.push(key);
     else
       this.pseudoPending = [];
-    if (mode(host) !== "insert")
+    const alive = host.state.field(helixField2, false) !== undefined;
+    if (alive && mode(host) !== "insert")
       commitHistoryNow2(host);
     for (const callback of cx.callbacks)
       callback();
-    this.ui.render?.(host);
+    if (alive)
+      this.ui.render?.(host);
+    else
+      this.ui.render?.(this.focusedHost(host));
     return consumed;
   }
   feedKeys(host, keys, options = {}) {
@@ -14273,7 +14345,7 @@ class HelixEditor2 {
     this.autoinfo = this.keymaps.sticky;
     const execute = (command) => {
       executeCommand2(cx, command);
-      const current = mode(cx.host);
+      const current = cx.host.state.field(helixField2, false)?.mode ?? lastMode;
       if (current !== lastMode && current === "insert") {
         this.lastInsert = { command, keys: [] };
       }
@@ -14450,7 +14522,7 @@ function applyEditor(config, editor, warnings) {
       }
       case "shell": {
         if (Array.isArray(value) && value.every((v) => typeof v === "string"))
-          config.shell = value;
+          config.shell = value.map(String);
         else
           warnings.push("editor.shell: expected a list of strings");
         break;
@@ -16318,8 +16390,8 @@ class Matcher2 {
     this.x = x;
   }
   static async load(bytes) {
-    const module = await WebAssembly.instantiate(bytes);
-    return new Matcher2(module.instance.exports);
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    return new Matcher2(instance.exports);
   }
   withText(text, use) {
     const encoded = encoder2.encode(text);
@@ -17130,7 +17202,8 @@ class BoxMarker {
 function contentLeft(view) {
   const scroller = view.scrollDOM.getBoundingClientRect();
   const line = view.contentDOM.querySelector(".cm-line");
-  const padding = line ? parseFloat(view.dom.ownerDocument.defaultView?.getComputedStyle(line).paddingLeft ?? "0") : 0;
+  const style = line ? view.dom.ownerDocument.defaultView?.getComputedStyle(line) : null;
+  const padding = style ? parseFloat(style.paddingLeft) + parseFloat(style.textIndent) : 0;
   return (view.contentDOM.getBoundingClientRect().left - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft + padding;
 }
 function rulersOf(view) {
@@ -17254,7 +17327,7 @@ var hangingIndent = ViewPlugin5.fromClass(class {
         const indent = indentColumns(line.text, tabWidth) ?? 0;
         const hang = (indent <= wrap.maxIndentRetain ? indent : 0) + indicator;
         if (hang > 0)
-          builder.add(line.from, line.from, Decoration2.line({ attributes: { style: `padding-inline-start: ${hang}ch; text-indent: -${hang}ch` } }));
+          builder.add(line.from, line.from, Decoration2.line({ attributes: { style: `padding-inline-start: calc(var(--hx-line-padding, 6px) + ${hang}ch); text-indent: -${hang}ch` } }));
         pos = line.to + 1;
       }
     }
@@ -17425,7 +17498,7 @@ function helixDiagnostics2() {
 }
 
 // src/ui/highlight.ts
-import { RangeSetBuilder as RangeSetBuilder4 } from "@codemirror/state";
+import { RangeSetBuilder as RangeSetBuilder4, StateEffect as StateEffect8 } from "@codemirror/state";
 import { Decoration as Decoration4, EditorView as EditorView10, ViewPlugin as ViewPlugin6 } from "@codemirror/view";
 function syntaxOf2(view) {
   const env = view.state.facet(helixEnv2);
@@ -17460,25 +17533,57 @@ function build2(view, syntax) {
   }
   return builder.finish();
 }
-var highlightPlugin = ViewPlugin6.fromClass(class {
-  decorations;
-  syntax;
-  scopes;
-  constructor(view) {
-    this.syntax = syntaxOf2(view);
-    this.scopes = scopesOf(view);
-    this.decorations = build2(view, this.syntax);
-  }
-  update(update) {
-    const syntax = syntaxOf2(update.view);
-    const scopes = scopesOf(update.view);
-    if (update.docChanged || update.viewportChanged || syntax !== this.syntax || scopes !== this.scopes) {
-      this.syntax = syntax;
-      this.scopes = scopes;
-      this.decorations = build2(update.view, syntax);
+var LARGE_DOCUMENT = 1e5;
+var refresh = StateEffect8.define();
+function syntaxPlugin(buildFor, key) {
+  return ViewPlugin6.fromClass(class {
+    view;
+    decorations;
+    syntax;
+    key;
+    timer = null;
+    constructor(view) {
+      this.view = view;
+      this.syntax = syntaxOf2(view);
+      this.key = key(view);
+      this.decorations = buildFor(view, this.syntax);
     }
-  }
-}, { decorations: (v) => v.decorations });
+    update(update) {
+      const refreshed = update.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)));
+      if (update.docChanged && !refreshed && update.state.doc.length > LARGE_DOCUMENT) {
+        this.decorations = this.decorations.map(update.changes);
+        this.schedule(update.view);
+        return;
+      }
+      if (this.timer !== null && !refreshed)
+        return;
+      const syntax = syntaxOf2(update.view);
+      const current = key(update.view);
+      if (update.docChanged || update.viewportChanged || refreshed || syntax !== this.syntax || current !== this.key) {
+        this.syntax = syntax;
+        this.key = current;
+        this.decorations = buildFor(update.view, syntax);
+      }
+    }
+    schedule(view) {
+      const win = view.dom.ownerDocument.defaultView;
+      if (!win)
+        return;
+      if (this.timer !== null)
+        win.clearTimeout(this.timer);
+      this.timer = win.setTimeout(() => {
+        this.timer = null;
+        if (view.dom.isConnected)
+          view.dispatch({ effects: refresh.of(null) });
+      }, 120);
+    }
+    destroy() {
+      if (this.timer !== null)
+        this.view.dom.ownerDocument.defaultView?.clearTimeout(this.timer);
+    }
+  }, { decorations: (v) => v.decorations });
+}
+var highlightPlugin = syntaxPlugin(build2, scopesOf);
 function rainbowEnabled(view) {
   const env = view.state.facet(helixEnv2);
   if (!env)
@@ -17502,25 +17607,7 @@ function buildRainbow(view, syntax) {
   decorations.sort((a, b) => a.from - b.from || a.to - b.to);
   return Decoration4.set(decorations.map((d) => d.value.range(d.from, d.to)));
 }
-var rainbowPlugin = ViewPlugin6.fromClass(class {
-  decorations;
-  syntax;
-  enabled;
-  constructor(view) {
-    this.syntax = syntaxOf2(view);
-    this.enabled = rainbowEnabled(view);
-    this.decorations = buildRainbow(view, this.syntax);
-  }
-  update(update) {
-    const syntax = syntaxOf2(update.view);
-    const enabled = rainbowEnabled(update.view);
-    if (update.docChanged || update.viewportChanged || syntax !== this.syntax || enabled !== this.enabled) {
-      this.syntax = syntax;
-      this.enabled = enabled;
-      this.decorations = buildRainbow(update.view, syntax);
-    }
-  }
-}, { decorations: (v) => v.decorations });
+var rainbowPlugin = syntaxPlugin(buildRainbow, rainbowEnabled);
 var syntaxTheme = EditorView10.baseTheme({
   ".hx-s-attribute": { color: "light-dark(#7c5e10, #d7ba7d)" },
   ".hx-s-keyword": { color: "light-dark(#7a3e9d, #c586c0)" },
@@ -17686,7 +17773,7 @@ var SCRATCH = "[scratch]";
 function counts(severities, list) {
   const totals = { hint: 0, info: 0, warning: 0, error: 0 };
   for (const d of list)
-    totals[d.severity ?? "hint"] += 1;
+    totals[d.severity ?? "hint"] = (totals[d.severity ?? "hint"] ?? 0) + 1;
   const parts = [];
   for (const severity of severities) {
     const n = totals[severity] ?? 0;
@@ -18035,4 +18122,4 @@ function helixUi2(options = {}) {
   ];
 }
 
-export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, setDiagnostics2, diagnosticsField2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, Popup2, Menu2, helixCompletion2, parseTheme2, helixSetDiffBase2, helixDiff2, Picker2, Context2, HelixEditor2, loadConfig2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, FuzzyPattern2, Matcher2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, onHelixStatus2, statusOf2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixBufferline2, helixDecorations2, helixDiagnostics2, helixHighlighting2, helixOverlays2, statuslineOf2, helixStatusline2, helixThemes2, helixGutters2, helixUi2 };
+export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setDiagnostics2, diagnosticsField2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, Popup2, Menu2, helixCompletion2, parseTheme2, helixSetDiffBase2, helixDiff2, Picker2, Context2, HelixEditor2, loadConfig2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, FuzzyPattern2, Matcher2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, onHelixStatus2, statusOf2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixBufferline2, helixDecorations2, helixDiagnostics2, helixHighlighting2, helixOverlays2, statuslineOf2, helixStatusline2, helixThemes2, helixGutters2, helixUi2 };

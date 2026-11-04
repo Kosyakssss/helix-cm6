@@ -151,7 +151,14 @@ export function moveVisualVertically(
     const from = inside?.kind === "row" ? (forward ? doc.lineAt(Math.max(inside.from, inside.to - 1)).from : inside.from) : pos;
     const moved = view.moveVertically(EditorSelection.cursor(from, 1, undefined, goal), forward);
     let next: number | null = sameVisualRow(view, from, moved.head) ? null : moved.head;
-    let hit = next === null ? null : rangeAt(ranges, next);
+    let hit = next === null ? null : (crossedRange(doc, ranges, from, next, forward) ?? rangeAt(ranges, next));
+    if (next === null && inside === null && ranges.length > 0) {
+      const beyond = crossedRange(doc, ranges, from, forward ? doc.length + 1 : -1, forward);
+      if (beyond && doc.lineAt(from).number + (forward ? 1 : -1) === doc.lineAt(forward ? beyond.from : Math.max(beyond.to - 1, 0)).number) {
+        next = forward ? beyond.from : beyond.to;
+        hit = beyond;
+      }
+    }
     while (next !== null && hit?.kind === "skip") {
       const beyond: number = forward ? hit.to : hit.from - 1;
       next = beyond < 0 || beyond > doc.length ? null : atGoal(view, beyond, moved.goalColumn);
@@ -170,6 +177,18 @@ export function moveVisualVertically(
   const line = doc.lineAt(pos);
   if (behaviour === "extend" && line.number === doc.lines && line.length === 0) return range;
   return range.putCursor(doc, pos, behaviour === "extend").withGoal(goal);
+}
+
+function crossedRange(doc: Text, ranges: readonly MotionRange[], from: number, to: number, forward: boolean): MotionRange | null {
+  if (forward) {
+    for (const range of ranges) if (range.from > from && range.from <= to) return range;
+    return null;
+  }
+  for (let i = ranges.length - 1; i >= 0; i--) {
+    const range = ranges[i]!;
+    if (range.to <= from && (range.to > to || (range.to === to && to > 0 && doc.lineAt(to).from !== to))) return range;
+  }
+  return null;
 }
 
 function atGoal(view: EditorView, pos: number, goal: number | undefined): number {

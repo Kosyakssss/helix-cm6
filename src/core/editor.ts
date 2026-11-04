@@ -25,7 +25,7 @@ import type { UiLayer } from "./layers";
 import { WORKSPACE_BUILTINS, type WorkspaceProviders } from "../commands/workspace";
 import type { Matcher } from "./matcher";
 import { diagnosticsOf, type Diagnostic } from "../diagnostics";
-import { historyField } from "../state";
+import { helixField, historyField } from "../state";
 
 export type OnKeyCallback = (cx: Context, key: string) => void;
 export type OnKeyKind = "pseudoPending" | "fallback";
@@ -268,6 +268,8 @@ export class HelixEditor {
         return language?.highlights !== undefined;
       case "symbol_picker":
         return language?.symbols !== undefined;
+      case "workspace_symbol_picker":
+        return language?.workspaceSymbols !== undefined;
       default:
         return false;
     }
@@ -534,9 +536,11 @@ export class HelixEditor {
     this.onNextKeyState = cx.onNextKeyCallback;
     if (this.onNextKeyState?.kind === "pseudoPending") this.pseudoPending.push(key);
     else this.pseudoPending = [];
-    if (mode(host) !== "insert") commitHistoryNow(host);
+    const alive = host.state.field(helixField, false) !== undefined;
+    if (alive && mode(host) !== "insert") commitHistoryNow(host);
     for (const callback of cx.callbacks) callback();
-    this.ui.render?.(host);
+    if (alive) this.ui.render?.(host);
+    else this.ui.render?.(this.focusedHost(host));
     return consumed;
   }
 
@@ -567,7 +571,7 @@ export class HelixEditor {
     this.autoinfo = this.keymaps.sticky;
     const execute = (command: MappableCommand) => {
       executeCommand(cx, command);
-      const current = mode(cx.host);
+      const current = cx.host.state.field(helixField, false)?.mode ?? lastMode;
       if (current !== lastMode && current === "insert") {
         this.lastInsert = { command, keys: [] };
       }

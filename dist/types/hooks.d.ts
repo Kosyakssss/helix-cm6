@@ -19,8 +19,9 @@ export interface HelixHooks {
     enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
     command?(name: string, cx: Context): boolean;
     focused?(host: Host): Host | null;
-    stopBeforeEnd?: boolean;
+    stopBeforeEnd?: boolean | ((host: Host) => boolean);
 }
 export declare const helixHooks: Facet<HelixHooks, HelixHooks>;
 export declare function hooksOf(host: Host): HelixHooks;
+export declare function stopsBeforeEnd(hooks: HelixHooks, host: Host): boolean;
 export declare function rangeAt(ranges: readonly MotionRange[], pos: number): MotionRange | null;

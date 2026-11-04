@@ -44,7 +44,7 @@ const diffPlugin = ViewPlugin.fromClass(
       this.timer = win.setTimeout(() => {
         this.timer = null;
         this.compute();
-      }, 50);
+      }, 150);
     }
 
     private compute(): void {

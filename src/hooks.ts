@@ -23,7 +23,7 @@ export interface HelixHooks {
   enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
   command?(name: string, cx: Context): boolean;
   focused?(host: Host): Host | null;
-  stopBeforeEnd?: boolean;
+  stopBeforeEnd?: boolean | ((host: Host) => boolean);
 }
 
 function first<A extends unknown[]>(calls: ((...args: A) => boolean)[]): (...args: A) => boolean {
@@ -44,13 +44,18 @@ export const helixHooks = Facet.define<HelixHooks, HelixHooks>({
       command: command.length > 0 ? first(command) : undefined,
       motionRanges: ranges.length > 0 ? (host) => ranges.flatMap((r) => r(host)) : undefined,
       focused: focused.length > 0 ? (host) => focused.reduce<Host | null>((found, f) => found ?? f(host), null) : undefined,
-      stopBeforeEnd: values.some((v) => v.stopBeforeEnd),
+      stopBeforeEnd: (host) => values.some((v) => (typeof v.stopBeforeEnd === "function" ? v.stopBeforeEnd(host) : v.stopBeforeEnd === true)),
     };
   },
 });
 
 export function hooksOf(host: Host): HelixHooks {
   return host.state.facet(helixHooks);
+}
+
+export function stopsBeforeEnd(hooks: HelixHooks, host: Host): boolean {
+  const stop = hooks.stopBeforeEnd;
+  return typeof stop === "function" ? stop(host) : stop === true;
 }
 
 export function rangeAt(ranges: readonly MotionRange[], pos: number): MotionRange | null {

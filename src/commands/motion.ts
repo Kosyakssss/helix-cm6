@@ -24,7 +24,7 @@ import { Range, Selection, type Direction } from "../selection";
 import { charAt, lineIndex, nextCharPos, prevCharPos } from "../core/text";
 import { docOf, firstNonWhitespaceChar, lineEndCharIndex, lineToChar, modeOf, selOf, setSel } from "./util";
 import { pushJump } from "./jumps";
-import { hooksOf, rangeAt, type HelixEdge, type MotionRange } from "../hooks";
+import { hooksOf, rangeAt, stopsBeforeEnd, type HelixEdge, type MotionRange } from "../hooks";
 
 export type CommandFn = (cx: Context, arg?: string) => void;
 
@@ -67,8 +67,9 @@ function moveHorizontal(cx: Context, dir: Direction, behaviour: Movement): void 
     const next = moveHorizontally(doc, primary, dir, 1, behaviour);
     const cursor = next.cursor(doc);
     const edge = edgeOf(dir, false, behaviour, count - i, primary.goalColumn);
-    const atEnd = hooks.stopBeforeEnd === true && dir === "forward" && behaviour === "move" && cursor >= doc.length && doc.length > 0;
+    const atEnd = stopsBeforeEnd(hooks, cx.host) && dir === "forward" && behaviour === "move" && cursor >= doc.length && doc.length > 0;
     if (cursor === primary.cursor(doc) || atEnd) {
+      if (!atEnd && !next.eq(primary)) setSel(cx, selOf(cx).transform(() => next));
       hooks.edge?.(edge, cx.host);
       return;
     }

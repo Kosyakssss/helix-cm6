@@ -148,6 +148,8 @@ const OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
 export function helixExtension(env: ViewEnv): Extension {
   const { editor } = env;
 
+  let lastKeydown: { view: EditorView; key: string } | null = null;
+
   const onKey = (event: KeyboardEvent, view: EditorView): boolean => {
     const host = env.hostFor(view);
     const value = view.state.field(helixField, false);
@@ -170,11 +172,15 @@ export function helixExtension(env: ViewEnv): Extension {
     }
     if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key))) return false;
     if (OS_NAVIGATION.has(event.key) && event.ctrlKey && !event.altKey && !event.metaKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key)) return false;
+    lastKeydown = { view, key: event.key };
     const consumed = editor.handleKey(host, key, {
       nativeInsert: true,
       passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k),
     });
-    if (!consumed && !dead) return false;
+    if (!consumed && !dead) {
+      lastKeydown = null;
+      return false;
+    }
     event.preventDefault();
     event.stopPropagation();
     return true;
@@ -190,7 +196,12 @@ export function helixExtension(env: ViewEnv): Extension {
         }, 0);
         return false;
       },
+      keyup() {
+        lastKeydown = null;
+        return false;
+      },
       keydown(event, view) {
+        lastKeydown = null;
         if (event.isComposing || event.key === "Process") {
           const value = view.state.field(helixField, false);
           if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
@@ -222,6 +233,10 @@ export function helixExtension(env: ViewEnv): Extension {
 
   const swallowInput = Prec.highest(
     EditorView.inputHandler.of((view, _from, _to, text) => {
+      if (lastKeydown && lastKeydown.view !== view && lastKeydown.key === text) {
+        lastKeydown = null;
+        return true;
+      }
       const value = view.state.field(helixField, false);
       if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
       if (view.compositionStarted) {

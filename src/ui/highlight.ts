@@ -1,4 +1,4 @@
-import { RangeSetBuilder, type Extension } from "@codemirror/state";
+import { RangeSetBuilder, StateEffect, type Extension } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { highlightSpans, rainbowSpans } from "../syntax/highlight";
 import type { Syntax } from "../syntax/syntax";
@@ -40,28 +40,55 @@ function build(view: EditorView, syntax: Syntax | null): DecorationSet {
   return builder.finish();
 }
 
-const highlightPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    syntax: Syntax | null;
-    scopes: readonly string[];
-    constructor(view: EditorView) {
-      this.syntax = syntaxOf(view);
-      this.scopes = scopesOf(view);
-      this.decorations = build(view, this.syntax);
-    }
-    update(update: ViewUpdate) {
-      const syntax = syntaxOf(update.view);
-      const scopes = scopesOf(update.view);
-      if (update.docChanged || update.viewportChanged || syntax !== this.syntax || scopes !== this.scopes) {
-        this.syntax = syntax;
-        this.scopes = scopes;
-        this.decorations = build(update.view, syntax);
+const LARGE_DOCUMENT = 100_000;
+const refresh = StateEffect.define<null>();
+
+function syntaxPlugin(buildFor: (view: EditorView, syntax: Syntax | null) => DecorationSet, key: (view: EditorView) => unknown) {
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet;
+      syntax: Syntax | null;
+      key: unknown;
+      private timer: number | null = null;
+      constructor(readonly view: EditorView) {
+        this.syntax = syntaxOf(view);
+        this.key = key(view);
+        this.decorations = buildFor(view, this.syntax);
       }
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
+      update(update: ViewUpdate) {
+        const refreshed = update.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)));
+        if (update.docChanged && !refreshed && update.state.doc.length > LARGE_DOCUMENT) {
+          this.decorations = this.decorations.map(update.changes);
+          this.schedule(update.view);
+          return;
+        }
+        if (this.timer !== null && !refreshed) return;
+        const syntax = syntaxOf(update.view);
+        const current = key(update.view);
+        if (update.docChanged || update.viewportChanged || refreshed || syntax !== this.syntax || current !== this.key) {
+          this.syntax = syntax;
+          this.key = current;
+          this.decorations = buildFor(update.view, syntax);
+        }
+      }
+      private schedule(view: EditorView): void {
+        const win = view.dom.ownerDocument.defaultView;
+        if (!win) return;
+        if (this.timer !== null) win.clearTimeout(this.timer);
+        this.timer = win.setTimeout(() => {
+          this.timer = null;
+          if (view.dom.isConnected) view.dispatch({ effects: refresh.of(null) });
+        }, 120);
+      }
+      destroy() {
+        if (this.timer !== null) this.view.dom.ownerDocument.defaultView?.clearTimeout(this.timer);
+      }
+    },
+    { decorations: (v) => v.decorations },
+  );
+}
+
+const highlightPlugin = syntaxPlugin(build, scopesOf);
 
 function rainbowEnabled(view: EditorView): boolean {
   const env = view.state.facet(helixEnv);
@@ -85,28 +112,7 @@ function buildRainbow(view: EditorView, syntax: Syntax | null): DecorationSet {
   return Decoration.set(decorations.map((d) => d.value.range(d.from, d.to)));
 }
 
-const rainbowPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    syntax: Syntax | null;
-    enabled: boolean;
-    constructor(view: EditorView) {
-      this.syntax = syntaxOf(view);
-      this.enabled = rainbowEnabled(view);
-      this.decorations = buildRainbow(view, this.syntax);
-    }
-    update(update: ViewUpdate) {
-      const syntax = syntaxOf(update.view);
-      const enabled = rainbowEnabled(update.view);
-      if (update.docChanged || update.viewportChanged || syntax !== this.syntax || enabled !== this.enabled) {
-        this.syntax = syntax;
-        this.enabled = enabled;
-        this.decorations = buildRainbow(update.view, syntax);
-      }
-    }
-  },
-  { decorations: (v) => v.decorations },
-);
+const rainbowPlugin = syntaxPlugin(buildRainbow, rainbowEnabled);
 
 const syntaxTheme = EditorView.baseTheme({
   ".hx-s-attribute": { color: "light-dark(#7c5e10, #d7ba7d)" },

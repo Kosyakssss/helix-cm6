@@ -431,7 +431,7 @@ function bufferPicker(cx: Context): void {
 function filePicker(cx: Context, root: string | null): void {
   const workspace = cx.editor.workspace!;
   const files = workspace.files!(cx, root);
-  const items: PickerOptions<string>["items"] = Array.isArray(files) || files instanceof Promise ? (files as readonly string[] | Promise<readonly string[]>) : (files as AsyncIterable<readonly string[]>);
+  const items: PickerOptions<string>["items"] = Array.isArray(files) || files instanceof Promise ? (files as readonly string[] | Promise<readonly string[]>) : (files);
   picker(cx, {
     columns: [{ name: "path", format: (p: string) => p, paths: true }],
     items,
@@ -454,7 +454,7 @@ function globalSearch(cx: Context): void {
           { name: "contents", format: (m: SearchMatch) => m.text.trim() },
         ],
         primaryColumn: 1,
-        items: results as PickerOptions<SearchMatch>["items"],
+        items: results,
         onSelect: (cx, m, action) => openLocation(cx, { path: m.path, line: m.line }, action),
         preview: (m) => filePreview(cx.editor, m.path, { line: m.line }),
       });
@@ -485,6 +485,32 @@ export const WORKSPACE_BUILTINS: Record<string, Builtin> = {
     },
   },
   symbol_picker: { available: always, run: symbolPicker },
+  workspace_symbol_picker: {
+    available: hasLanguage("workspaceSymbols"),
+    run: (cx) => {
+      const language = cx.editor.workspace!.language!;
+      let current: Picker<SymbolInfo> | null = null;
+      let latest = 0;
+      void cx.editor.withMatcher((matcher) => {
+        const options: PickerOptions<SymbolInfo> = {
+          columns: symbolColumns(),
+          primaryColumn: 1,
+          items: [],
+          onSelect: (cx, s, action) => openLocation(cx, s, action),
+          preview: (s) => previewLocation(cx, s),
+          dynamic: (query) => {
+            const request = ++latest;
+            void language.workspaceSymbols!(cx, query).then((list) => {
+              if (request === latest) current?.replaceItems(list);
+            });
+          },
+        };
+        current = new Picker<SymbolInfo>(cx.editor, cx.host, matcher, options);
+        cx.editor.pushLayer(current, cx.host);
+        options.dynamic!("");
+      });
+    },
+  },
   buffer_picker: { available: (cx) => cx.editor.workspace?.buffers !== undefined, run: bufferPicker },
   file_picker: { available: (cx) => cx.editor.workspace?.files !== undefined, run: (cx, args) => filePicker(cx, args[0] ?? null) },
   file_picker_in_current_buffer_directory: {
@@ -506,7 +532,7 @@ export const WORKSPACE_BUILTINS: Record<string, Builtin> = {
           { name: "path", format: (f: { path: string; status: string }) => f.path, paths: true },
         ],
         primaryColumn: 1,
-        items: files as PickerOptions<{ path: string; status: string }>["items"],
+        items: files,
         onSelect: (cx, f, action) => workspace.openFile?.(cx, f.path, null, action),
         preview: (f) => filePreview(cx.editor, f.path, null),
       });

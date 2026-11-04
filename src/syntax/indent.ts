@@ -63,16 +63,16 @@ export function autoDetectIndentStyle(doc: Text): IndentStyle | null {
       if (count > 256) continue outer;
     }
     if ((prevIsTabs === isTabs || prevCount === 0) && prevCount < count) {
-      if (isTabs) histogram[0]!++;
+      if (isTabs) histogram[0] = histogram[0]! + 1;
       else {
         const amount = count - prevCount;
-        if (amount <= MAX_INDENT) histogram[amount]!++;
+        if (amount <= MAX_INDENT) histogram[amount] = histogram[amount]! + 1;
       }
     }
     prevIsTabs = isTabs;
     prevCount = count;
   }
-  histogram[0]! *= 2;
+  histogram[0] = histogram[0]! * 2;
   if (histogram[1]! > 1) histogram[1] = Math.floor(histogram[1]! / 2);
   let indent = 0;
   for (let i = 0; i < histogram.length; i++) if (histogram[i]! >= histogram[indent]!) indent = i;

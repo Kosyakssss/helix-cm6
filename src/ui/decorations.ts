@@ -216,7 +216,8 @@ class BoxMarker implements LayerMarker {
 function contentLeft(view: EditorView): number {
   const scroller = view.scrollDOM.getBoundingClientRect();
   const line = view.contentDOM.querySelector(".cm-line");
-  const padding = line ? parseFloat(view.dom.ownerDocument.defaultView?.getComputedStyle(line).paddingLeft ?? "0") : 0;
+  const style = line ? view.dom.ownerDocument.defaultView?.getComputedStyle(line) : null;
+  const padding = style ? parseFloat(style.paddingLeft) + parseFloat(style.textIndent) : 0;
   return (view.contentDOM.getBoundingClientRect().left - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft + padding;
 }
 
@@ -337,7 +338,7 @@ const hangingIndent = ViewPlugin.fromClass(
           const line = doc.lineAt(pos);
           const indent = indentColumns(line.text, tabWidth) ?? 0;
           const hang = (indent <= wrap.maxIndentRetain ? indent : 0) + indicator;
-          if (hang > 0) builder.add(line.from, line.from, Decoration.line({ attributes: { style: `padding-inline-start: ${hang}ch; text-indent: -${hang}ch` } }));
+          if (hang > 0) builder.add(line.from, line.from, Decoration.line({ attributes: { style: `padding-inline-start: calc(var(--hx-line-padding, 6px) + ${hang}ch); text-indent: -${hang}ch` } }));
           pos = line.to + 1;
         }
       }
