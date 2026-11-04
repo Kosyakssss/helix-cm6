@@ -23,6 +23,7 @@ jobs:
       - run: sh tree-sitter/build.sh && git diff --exit-code tree-sitter
       - run: rustup toolchain install 1.99.1 --profile minimal --target wasm32-unknown-unknown
       - run: sh regex/build.sh && git diff --exit-code regex
+      - run: sh matcher/build.sh && git diff --exit-code matcher
 
   oracle:
     runs-on: ubuntu-latest
@@ -39,8 +40,8 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: test/oracle/cache-*.json
-          key: oracle-${{ hashFiles('test/oracle/setup.sh', 'test/oracle/oracle.rs', 'test/oracle/suites.ts', 'test/oracle/fuzz.ts', 'test/oracle/languages.txt') }}
-          restore-keys: oracle-
+          key: oracle-v2-${{ hashFiles('test/oracle/setup.sh', 'test/oracle/oracle.rs', 'test/oracle/suites.ts', 'test/oracle/fuzz.ts', 'test/oracle/languages.txt') }}
+          restore-keys: oracle-v2-
       - run: HELIX_DIR="$RUNNER_TEMP/helix" bun test
       - run: bun x playwright-core install --with-deps chromium-headless-shell firefox webkit
       - run: HELIX_DIR="$RUNNER_TEMP/helix" bun run browser

@@ -186,6 +186,7 @@ export declare class HelixEditor {
     matcherLoader: (() => Promise<Matcher>) | null;
     private layerListeners;
     onLayersChanged(listener: () => void): () => void;
+    hasOverlays(): boolean;
     renderLayers(host?: Host): void;
     pushLayer(layer: UiLayer, host?: Host): void;
     removeLayer(layer: UiLayer, host?: Host): void;

@@ -153,6 +153,10 @@ function ws(name: string, extra: Partial<TypableCommand> = {}): Pick<TypableComm
 
 function hoverPopup(cx: Context, text: string): void {
   const doc = docOf(cx);
+  if (!cx.editor.hasOverlays()) {
+    cx.editor.setStatus(text.replace(/^```\w*\n|\n```$/g, ""));
+    return;
+  }
   cx.editor.pushLayer(new Popup(text, selOf(cx).primary().cursor(doc)), cx.host);
 }
 

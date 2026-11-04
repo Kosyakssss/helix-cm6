@@ -40,6 +40,8 @@ export interface ViewEnv {
   onViewClose(view: EditorView): void;
   statusBar?(view: EditorView): HTMLElement | null;
   joinStatus?(view: EditorView, joined: boolean): void;
+  panelOwner?(view: EditorView): EditorView | null;
+  panelGuest?(view: EditorView): EditorView | null;
 }
 
 export const helixEnv = Facet.define<ViewEnv, ViewEnv | null>({ combine: (values) => values[0] ?? null });
@@ -384,8 +386,20 @@ export function helixExtension(env: ViewEnv): Extension {
 
 function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTMLElement, prompt: HTMLElement, message: HTMLElement): void {
   const { editor } = env;
-  const host = env.hostFor(view);
-  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && view.hasFocus ? editor.activePrompt : null;
+  const owner = env.panelOwner?.(view) ?? null;
+  if (owner && owner !== view) {
+    prompt.replaceChildren();
+    info.replaceChildren();
+    message.textContent = "";
+    for (const part of [prompt, info, message]) part.classList.add("hx-hidden");
+    dom.classList.add("hx-panel-empty");
+    return;
+  }
+  const guest = env.panelGuest?.(view) ?? null;
+  const source = guest?.hasFocus ? guest : view;
+  const focused = source.hasFocus;
+  const host = env.hostFor(source);
+  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
   prompt.replaceChildren();
   prompt.classList.toggle("hx-hidden", !active);
   if (active) {
@@ -400,7 +414,7 @@ function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTM
     add(prompt, "span", "hx-prompt-cursor", active.line.slice(active.cursor, active.cursor + 1) || " ");
     add(prompt, "span", undefined, active.line.slice(active.cursor + 1));
   }
-  const status = !active && view.hasFocus ? editor.status : null;
+  const status = !active && focused ? editor.status : null;
   message.textContent = status?.message ?? "";
   message.classList.toggle("hx-hidden", !status);
   message.classList.toggle("hx-message-error", status?.severity === "error");
@@ -418,9 +432,9 @@ function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTM
       if (view.dom.isConnected) view.dispatch({ effects: EditorView.scrollIntoView(view.state.selection.main.head, { y: "nearest" }) });
     });
   }
-  if (view.hasFocus) env.joinStatus?.(view, !!covered && (!!active || !!status));
+  if (focused) env.joinStatus?.(view, !!covered && (!!active || !!status));
   info.replaceChildren();
-  const auto = editor.config.autoInfo && view.hasFocus ? editor.autoinfo : null;
+  const auto = editor.config.autoInfo && focused ? editor.autoinfo : null;
   info.classList.toggle("hx-hidden", !auto);
   if (!auto) return;
   const title = add(info, "div", "hx-autoinfo-title");

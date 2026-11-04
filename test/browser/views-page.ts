@@ -34,6 +34,11 @@ const rangesView = hooked("ranges", "one\nhidden\nhidden\ntwo\nrow one\nrow two\
   enter: (range, edge) => (entered.push(`${range.from}-${range.to}:${edge.direction}:${edge.count}`), true),
 });
 const commandView = hooked("command", "abc\n", {
+  key: (key, cx) => {
+    if (key !== "A-O") return false;
+    cx.editor.setStatus("took the key");
+    return true;
+  },
   command: (name, cx) => {
     if (name !== "move_char_right") return false;
     cx.editor.setStatus("overridden");

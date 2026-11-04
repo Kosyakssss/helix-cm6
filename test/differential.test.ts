@@ -40,7 +40,7 @@ test("code suite matches Helix with each language's grammar and queries", async 
 }, 1_800_000);
 
 test("syntax highlighting matches Helix", async () => {
-  const scopes = parseTheme("default", readFileSync(resolve(import.meta.dir, "../../helix/theme.toml"), "utf8")).scopes;
+  const scopes = parseTheme("default", readFileSync(resolve(process.env.HELIX_DIR ?? resolve(import.meta.dir, "../../helix"), "theme.toml"), "utf8")).scopes;
   const cases = highlightSuite(scopes);
   const results = await oracleAsync(cases);
   const loader = await highlightLoader();

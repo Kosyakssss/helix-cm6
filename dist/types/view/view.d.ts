@@ -16,6 +16,8 @@ export interface ViewEnv {
     onViewClose(view: EditorView): void;
     statusBar?(view: EditorView): HTMLElement | null;
     joinStatus?(view: EditorView, joined: boolean): void;
+    panelOwner?(view: EditorView): EditorView | null;
+    panelGuest?(view: EditorView): EditorView | null;
 }
 export declare const helixEnv: Facet<ViewEnv, ViewEnv | null>;
 export declare function helixExtension(env: ViewEnv): Extension;

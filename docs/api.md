@@ -81,6 +81,7 @@ helixHooks.of({
   edge(edge, host) { return false; },
   motionRanges(host) { return []; },
   enter(range, edge, host) { return false; },
+  key(key, cx) { return false; },
   command(name, cx) { return false; },
   focused(host) { return null; },
   stopBeforeEnd: false,
@@ -93,6 +94,7 @@ helixHooks.of({
 | `stopBeforeEnd` | `l` stops on the last character instead of the cell after it, and calls `edge` there. For small editors such as table cells. |
 | `motionRanges` | Ranges that `h`, `j`, `k` and `l` treat specially: `skip` jumps over the range, `row` is one row, and `enter` calls `enter`. |
 | `enter` | A motion reached an `enter` range. Return `true` if the app handled it. |
+| `key` | Runs in normal and select mode before the keymap, when no keys are pending. Return `true` if the app took the key. |
 | `command` | Runs before a static command. Return `true` to replace it. |
 | `focused` | The editor that macros and `.` should replay in now, if focus moved. |
 

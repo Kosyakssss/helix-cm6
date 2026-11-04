@@ -147,6 +147,7 @@ async function run(type: BrowserType): Promise<string[]> {
   check("k skips backward over a skip range", (await extra("ranges", "kk")).head, 0);
   check("a command hook replaces a command", await extra("command", "l").then((r) => [r.head, r.status]), [0, "overridden"]);
   await page.evaluate(() => (window as unknown as { helixRunIn(a: string, b: string): boolean }).helixRunIn("command", "move_line_down"));
+  check("a key hook takes a key before the keymap", (await extra("command", "<A-O>")).status, "took the key");
   check("helixRun runs a command", (await extra("command", "")).head, 4);
   check("x on a last line without a newline pastes above as a line", (await extra("final1", "jxyP")).doc, "one\ntwo\ntwo");
   check("x and p on a last line without a newline pastes below as a line", (await extra("final2", "jxyp")).doc, "one\ntwo\ntwo");

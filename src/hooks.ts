@@ -21,6 +21,7 @@ export interface HelixHooks {
   edge?(edge: HelixEdge, host: Host): boolean;
   motionRanges?(host: Host): readonly MotionRange[];
   enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
+  key?(key: string, cx: Context): boolean;
   command?(name: string, cx: Context): boolean;
   focused?(host: Host): Host | null;
   stopBeforeEnd?: boolean | ((host: Host) => boolean);
@@ -36,12 +37,14 @@ export const helixHooks = Facet.define<HelixHooks, HelixHooks>({
     const edge = values.flatMap((v) => (v.edge ? [v.edge.bind(v)] : []));
     const enter = values.flatMap((v) => (v.enter ? [v.enter.bind(v)] : []));
     const command = values.flatMap((v) => (v.command ? [v.command.bind(v)] : []));
+    const key = values.flatMap((v) => (v.key ? [v.key.bind(v)] : []));
     const ranges = values.flatMap((v) => (v.motionRanges ? [v.motionRanges.bind(v)] : []));
     const focused = values.flatMap((v) => (v.focused ? [v.focused.bind(v)] : []));
     return {
       edge: edge.length > 0 ? first(edge) : undefined,
       enter: enter.length > 0 ? first(enter) : undefined,
       command: command.length > 0 ? first(command) : undefined,
+      key: key.length > 0 ? first(key) : undefined,
       motionRanges: ranges.length > 0 ? (host) => ranges.flatMap((r) => r(host)) : undefined,
       focused: focused.length > 0 ? (host) => focused.reduce<Host | null>((found, f) => found ?? f(host), null) : undefined,
       stopBeforeEnd: (host) => values.some((v) => (typeof v.stopBeforeEnd === "function" ? v.stopBeforeEnd(host) : v.stopBeforeEnd === true)),

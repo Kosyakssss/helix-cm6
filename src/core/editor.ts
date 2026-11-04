@@ -404,6 +404,10 @@ export class HelixEditor {
     return () => this.layerListeners.delete(listener);
   }
 
+  hasOverlays(): boolean {
+    return this.layerListeners.size > 0;
+  }
+
   renderLayers(host?: Host): void {
     for (const listener of this.layerListeners) listener();
     if (host) this.ui.render?.(host);
@@ -529,6 +533,8 @@ export class HelixEditor {
       if (currentMode === "insert") {
         consumed = this.insertMode(cx, key, options);
         this.lastInsert.keys.push(key);
+      } else if (this.keymaps.pending().length === 0 && !this.onNextKeyState && hooksOf(host).key?.(key, cx)) {
+        this.count = null;
       } else {
         this.commandMode_(currentMode, cx, key);
       }

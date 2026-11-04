@@ -14,12 +14,14 @@ var helixHooks2 = Facet.define({
     const edge = values.flatMap((v) => v.edge ? [v.edge.bind(v)] : []);
     const enter = values.flatMap((v) => v.enter ? [v.enter.bind(v)] : []);
     const command = values.flatMap((v) => v.command ? [v.command.bind(v)] : []);
+    const key = values.flatMap((v) => v.key ? [v.key.bind(v)] : []);
     const ranges = values.flatMap((v) => v.motionRanges ? [v.motionRanges.bind(v)] : []);
     const focused = values.flatMap((v) => v.focused ? [v.focused.bind(v)] : []);
     return {
       edge: edge.length > 0 ? first(edge) : undefined,
       enter: enter.length > 0 ? first(enter) : undefined,
       command: command.length > 0 ? first(command) : undefined,
+      key: key.length > 0 ? first(key) : undefined,
       motionRanges: ranges.length > 0 ? (host) => ranges.flatMap((r) => r(host)) : undefined,
       focused: focused.length > 0 ? (host) => focused.reduce((found, f) => found ?? f(host), null) : undefined,
       stopBeforeEnd: (host) => values.some((v) => typeof v.stopBeforeEnd === "function" ? v.stopBeforeEnd(host) : v.stopBeforeEnd === true)
@@ -8044,8 +8046,21 @@ function helixExtension2(env) {
 }
 function renderPanel(view, env, dom, info, prompt, message) {
   const { editor } = env;
-  const host = env.hostFor(view);
-  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && view.hasFocus ? editor.activePrompt : null;
+  const owner = env.panelOwner?.(view) ?? null;
+  if (owner && owner !== view) {
+    prompt.replaceChildren();
+    info.replaceChildren();
+    message.textContent = "";
+    for (const part of [prompt, info, message])
+      part.classList.add("hx-hidden");
+    dom.classList.add("hx-panel-empty");
+    return;
+  }
+  const guest = env.panelGuest?.(view) ?? null;
+  const source = guest?.hasFocus ? guest : view;
+  const focused = source.hasFocus;
+  const host = env.hostFor(source);
+  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
   prompt.replaceChildren();
   prompt.classList.toggle("hx-hidden", !active);
   if (active) {
@@ -8060,7 +8075,7 @@ function renderPanel(view, env, dom, info, prompt, message) {
     add(prompt, "span", "hx-prompt-cursor", active.line.slice(active.cursor, active.cursor + 1) || " ");
     add(prompt, "span", undefined, active.line.slice(active.cursor + 1));
   }
-  const status = !active && view.hasFocus ? editor.status : null;
+  const status = !active && focused ? editor.status : null;
   message.textContent = status?.message ?? "";
   message.classList.toggle("hx-hidden", !status);
   message.classList.toggle("hx-message-error", status?.severity === "error");
@@ -8079,10 +8094,10 @@ function renderPanel(view, env, dom, info, prompt, message) {
         view.dispatch({ effects: EditorView2.scrollIntoView(view.state.selection.main.head, { y: "nearest" }) });
     });
   }
-  if (view.hasFocus)
+  if (focused)
     env.joinStatus?.(view, !!covered && (!!active || !!status));
   info.replaceChildren();
-  const auto = editor.config.autoInfo && view.hasFocus ? editor.autoinfo : null;
+  const auto = editor.config.autoInfo && focused ? editor.autoinfo : null;
   info.classList.toggle("hx-hidden", !auto);
   if (!auto)
     return;
@@ -11315,6 +11330,10 @@ function ws(name, extra = {}) {
 }
 function hoverPopup(cx, text) {
   const doc = docOf2(cx);
+  if (!cx.editor.hasOverlays()) {
+    cx.editor.setStatus(text.replace(/^```\w*\n|\n```$/g, ""));
+    return;
+  }
   cx.editor.pushLayer(new Popup2(text, selOf2(cx).primary().cursor(doc)), cx.host);
 }
 function prettyPrint(cursor, depth) {
@@ -14169,6 +14188,9 @@ class HelixEditor2 {
     this.layerListeners.add(listener);
     return () => this.layerListeners.delete(listener);
   }
+  hasOverlays() {
+    return this.layerListeners.size > 0;
+  }
   renderLayers(host) {
     for (const listener of this.layerListeners)
       listener();
@@ -14299,6 +14321,8 @@ class HelixEditor2 {
       if (currentMode === "insert") {
         consumed = this.insertMode(cx, key, options);
         this.lastInsert.keys.push(key);
+      } else if (this.keymaps.pending().length === 0 && !this.onNextKeyState && hooksOf(host).key?.(key, cx)) {
+        this.count = null;
       } else {
         this.commandMode_(currentMode, cx, key);
       }

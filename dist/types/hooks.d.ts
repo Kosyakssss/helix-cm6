@@ -17,6 +17,7 @@ export interface HelixHooks {
     edge?(edge: HelixEdge, host: Host): boolean;
     motionRanges?(host: Host): readonly MotionRange[];
     enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
+    key?(key: string, cx: Context): boolean;
     command?(name: string, cx: Context): boolean;
     focused?(host: Host): Host | null;
     stopBeforeEnd?: boolean | ((host: Host) => boolean);
