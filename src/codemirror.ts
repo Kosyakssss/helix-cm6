@@ -1,7 +1,8 @@
 import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
 import { Context, HelixEditor } from "./core/editor";
-import type { AppCommand, AppCommandInfo, HelixApp } from "./commands/app";
+import { commandContext, type AppCommand, type HelixApp, type HelixCommand, type HelixCommandSpec } from "./commands/app";
+import type { HelixCommandName } from "./commands/names";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
 import { loadConfig } from "./config-loader";
@@ -24,6 +25,8 @@ export interface GrammarSource {
   query(language: string, file: QueryFile): string | null | Promise<string | null>;
 }
 
+export type HelixCommands = { [name in HelixCommandName]?: HelixCommand | HelixCommandSpec } & { [name: string]: HelixCommand | HelixCommandSpec | undefined };
+
 export interface HelixOptions {
   config?: string;
   languages?: string | readonly string[];
@@ -31,7 +34,7 @@ export interface HelixOptions {
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
-  commands?: Record<string, AppCommand | AppCommandInfo> | ((name: string) => AppCommand | AppCommandInfo | null);
+  commands?: HelixCommands;
   keys?: KeyLayer;
   openJump?: HelixApp["openJump"];
   variable?: HelixApp["variable"];
@@ -101,16 +104,24 @@ function detectLanguage(loader: LanguageLoader, view: EditorView): LanguageId | 
   return loader.languageForFilename(document.path) ?? loader.languageForShebang(view.state.doc.sliceString(0, 1024));
 }
 
+function adapted(command: HelixCommand | HelixCommandSpec): AppCommand | { run: AppCommand; doc?: string; complete?: (input: string) => readonly string[] } {
+  const wrap = (run: HelixCommand): AppCommand => (cx, args) => run(commandContext(cx, args));
+  return typeof command === "function" ? wrap(command) : { ...command, run: wrap(command.run) };
+}
+
 export function helix(options: HelixOptions = {}): Extension {
-  const commands = options.commands;
-  const lookup = (name: string): AppCommand | AppCommandInfo | null => (typeof commands === "function" ? commands(name) : (commands?.[name] ?? null));
+  const commands = options.commands ?? {};
+  const lookup = (name: string) => {
+    const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
+    return found ? adapted(found) : null;
+  };
   const loaded = loadConfig(options.config ?? null, undefined, (name) => lookup(name) !== null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
   editor.app = {
     command: lookup,
-    commandNames: () => (typeof commands === "object" ? Object.keys(commands) : []),
+    commandNames: () => Object.keys(commands),
     openJump: options.openJump,
     variable: options.variable,
   };

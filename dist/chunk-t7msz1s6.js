@@ -8750,6 +8750,9 @@ var snippetCommands = {
 };
 
 // src/commands/app.ts
+function commandContext(cx, args = []) {
+  return { view: cx.host.view, args, count: cx.countRaw, register: cx.register };
+}
 var APP_COMMANDS2 = {
   file_picker: null,
   file_picker_in_current_directory: "file_picker",
@@ -10233,7 +10236,7 @@ var DEFS = [
     doc: "Reset the diff change at the cursor position.",
     fun: validateOnly((cx) => {
       const { base, hunks } = changesOf2(cx.host.state);
-      if (base === null)
+      if (base == null)
         throw new Error("Diff is not available in the current buffer");
       const doc = docOf2(cx);
       const baseLines = base.split(`
@@ -10539,7 +10542,8 @@ function completeCommandLine(input, completers) {
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);
-    if (!cmd)
+    const appComplete = completers.appComplete?.(cmd?.name ?? command) ?? null;
+    if (!cmd && !appComplete)
       return [];
     const tokens = completionTokens(input).slice(1);
     let token = tokens[tokens.length - 1];
@@ -10549,6 +10553,10 @@ function completeCommandLine(input, completers) {
       token = { start: input.length, contentStart: input.length, content: "", quote: null, terminated: false };
     }
     const tok = token;
+    if (appComplete)
+      return appComplete(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
+    if (!cmd)
+      return [];
     if (PATH_COMMANDS.has(cmd.name) && pathCompleter)
       return pathCompleter(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
     if (cmd.name === "set-language" && tokens.length <= 1) {
@@ -11344,11 +11352,16 @@ class HelixEditor2 {
     const command = this.appCommand(name);
     if (!command)
       return false;
-    const result = command(cx, args);
-    if (result === false)
-      return false;
-    if (result instanceof Promise)
-      result.catch((err) => this.setError(err instanceof Error ? err.message : String(err)));
+    const fail = (err) => this.setError(err instanceof Error ? err.message : String(err));
+    try {
+      const result = command(cx, args);
+      if (result === false)
+        return false;
+      if (result instanceof Promise)
+        result.catch(fail);
+    } catch (err) {
+      fail(err);
+    }
     return true;
   }
   scroll(cx, amount, dir, sync) {
@@ -11396,7 +11409,11 @@ class HelixEditor2 {
         path: this.pathCompleter,
         languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? [],
         available: (name) => this.appCommand(name) !== null,
-        appNames: () => [...this.app?.commandNames?.() ?? []].filter((name) => !(name in APP_COMMANDS2))
+        appNames: () => [...this.app?.commandNames?.() ?? []].filter((name) => !(name in APP_COMMANDS2)),
+        appComplete: (name) => {
+          const found = this.app?.command(name);
+          return typeof found === "object" && found?.complete ? found.complete : null;
+        }
       }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
@@ -15849,16 +15866,23 @@ function detectLanguage(loader, view) {
     return null;
   return loader.languageForFilename(document.path) ?? loader.languageForShebang(view.state.doc.sliceString(0, 1024));
 }
+function adapted(command) {
+  const wrap = (run) => (cx, args) => run(commandContext(cx, args));
+  return typeof command === "function" ? wrap(command) : { ...command, run: wrap(command.run) };
+}
 function helix2(options = {}) {
-  const commands = options.commands;
-  const lookup = (name) => typeof commands === "function" ? commands(name) : commands?.[name] ?? null;
+  const commands = options.commands ?? {};
+  const lookup = (name) => {
+    const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
+    return found ? adapted(found) : null;
+  };
   const loaded = loadConfig2(options.config ?? null, undefined, (name) => lookup(name) !== null);
   const editor = new HelixEditor2(buildKeymaps2(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
   editor.app = {
     command: lookup,
-    commandNames: () => typeof commands === "object" ? Object.keys(commands) : [],
+    commandNames: () => Object.keys(commands),
     openJump: options.openJump,
     variable: options.variable
   };

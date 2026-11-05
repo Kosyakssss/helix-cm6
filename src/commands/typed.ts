@@ -273,7 +273,7 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
     doc: "Reset the diff change at the cursor position.",
     fun: validateOnly((cx) => {
       const { base, hunks } = changesOf(cx.host.state);
-      if (base === null) throw new Error("Diff is not available in the current buffer");
+      if (base == null) throw new Error("Diff is not available in the current buffer");
       const doc = docOf(cx);
       const baseLines = base.split("\n");
       const lineStart = (lines: number) => baseLines.slice(0, lines).reduce((n, l) => n + l.length + 1, 0);
@@ -582,6 +582,7 @@ export interface CommandLineCompleters {
   languages: () => string[];
   available: (name: string) => boolean;
   appNames: () => Iterable<string>;
+  appComplete?: (name: string) => ((input: string) => readonly string[]) | null;
 }
 
 export function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[] {
@@ -590,7 +591,8 @@ export function completeCommandLine(input: string, completers: CommandLineComple
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
     const cmd = TYPABLE_MAP.get(command);
-    if (!cmd) return [];
+    const appComplete = completers.appComplete?.(cmd?.name ?? command) ?? null;
+    if (!cmd && !appComplete) return [];
     const tokens = completionTokens(input).slice(1);
     let token = tokens[tokens.length - 1];
     if (!token || (token.quote === null && /\s$/.test(input)) || token.terminated) {
@@ -598,6 +600,8 @@ export function completeCommandLine(input: string, completers: CommandLineComple
       token = { start: input.length, contentStart: input.length, content: "", quote: null, terminated: false };
     }
     const tok = token;
+    if (appComplete) return appComplete(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
+    if (!cmd) return [];
     if (PATH_COMMANDS.has(cmd.name) && pathCompleter) return pathCompleter(tok.content).slice(0, 200).map((c) => quoteCompletion(tok, c));
     if (cmd.name === "set-language" && tokens.length <= 1) {
       return [...completers.languages(), "text"]

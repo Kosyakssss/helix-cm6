@@ -20,5 +20,6 @@ export interface CommandLineCompleters {
     languages: () => string[];
     available: (name: string) => boolean;
     appNames: () => Iterable<string>;
+    appComplete?: (name: string) => ((input: string) => readonly string[]) | null;
 }
 export declare function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[];

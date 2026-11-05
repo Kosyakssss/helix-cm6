@@ -1,12 +1,33 @@
+import type { EditorView } from "@codemirror/view";
 import type { Context } from "../core/editor";
 import type { Jump } from "./jumps";
 import type { Variable } from "./expansion";
 
-export type AppCommand = (cx: Context, args: readonly string[]) => void | false | Promise<void>;
+export type AppCommand = (cx: Context, args: readonly string[]) => unknown;
 
 export interface AppCommandInfo {
   run: AppCommand;
   doc?: string;
+  complete?: (input: string) => readonly string[];
+}
+
+export interface HelixCommandContext {
+  readonly view: EditorView;
+  readonly args: readonly string[];
+  readonly count: number | null;
+  readonly register: string | null;
+}
+
+export type HelixCommand = (cx: HelixCommandContext) => unknown;
+
+export interface HelixCommandSpec {
+  run: HelixCommand;
+  doc?: string;
+  complete?: (input: string) => readonly string[];
+}
+
+export function commandContext(cx: Context, args: readonly string[] = []): HelixCommandContext {
+  return { view: cx.host.view!, args, count: cx.countRaw, register: cx.register };
 }
 
 export interface HelixApp {

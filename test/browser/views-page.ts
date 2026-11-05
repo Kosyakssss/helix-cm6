@@ -69,7 +69,7 @@ const appView = new EditorView({
       config: '[keys.normal]\nQ = "my:thing"\nW = "hover"\nE = ":my:thing one two"\n',
       commands: {
         file_picker: () => void opened.push("file_picker"),
-        "my:thing": { doc: "Do my thing", run: (_cx, args) => void opened.push(`my:thing ${args.join(" ")}`.trim()) },
+        "my:thing": { doc: "Do my thing", run: ({ args }) => void opened.push(`my:thing ${args.join(" ")}`.trim()) },
         write: () => void opened.push("write"),
       },
     }),

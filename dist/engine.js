@@ -81,7 +81,7 @@ import {
   helixHighlights2,
   helixRainbow2,
   helixGutter2
-} from "./chunk-vbpea9h7.js";
+} from "./chunk-t7msz1s6.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);

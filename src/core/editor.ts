@@ -229,9 +229,14 @@ export class HelixEditor {
   runApp(cx: Context, name: string, args: readonly string[] = []): boolean {
     const command = this.appCommand(name);
     if (!command) return false;
-    const result = command(cx, args);
-    if (result === false) return false;
-    if (result instanceof Promise) result.catch((err: unknown) => this.setError(err instanceof Error ? err.message : String(err)));
+    const fail = (err: unknown) => this.setError(err instanceof Error ? err.message : String(err));
+    try {
+      const result = command(cx, args);
+      if (result === false) return false;
+      if (result instanceof Promise) result.catch(fail);
+    } catch (err) {
+      fail(err);
+    }
     return true;
   }
 
@@ -293,6 +298,10 @@ export class HelixEditor {
           languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? [],
           available: (name) => this.appCommand(name) !== null,
           appNames: () => [...(this.app?.commandNames?.() ?? [])].filter((name) => !(name in APP_COMMANDS)),
+          appComplete: (name) => {
+            const found = this.app?.command(name);
+            return typeof found === "object" && found?.complete ? found.complete : null;
+          },
         }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
