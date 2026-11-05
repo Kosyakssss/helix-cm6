@@ -32,11 +32,12 @@ import {
   helixHost2,
   helixEditor2,
   helixInstance,
+  syntaxLoaded,
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-v3phh5qs.js";
-__chunks(import.meta.url,["mhecex07","v3phh5qs","28qqb8e8"],[["./index.js",1],["./chunk-v3phh5qs.js"],["./languages.js"]],0);
+} from "./chunk-hrjbpv57.js";
+__chunks(import.meta.url,["m9e6ww4h","hrjbpv57","28qqb8e8"],[["./index.js",1],["./chunk-hrjbpv57.js"],["./languages.js"]],0);
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {
@@ -231,6 +232,9 @@ function helixHighlights(view, from, to, scopes = DEFAULT_SCOPES) {
     scopes: span.scopes.map((h) => scopes[h])
   }));
 }
+function helixSyntaxChanged(update) {
+  return update.transactions.some((tr) => tr.annotation(syntaxLoaded) === true);
+}
 function helixRainbow(view, from, to, levels = 6) {
   const { editor, host } = parts(view);
   const syntax = editor.syntax?.(host);
@@ -331,6 +335,7 @@ export {
   helixSetRegister,
   helixSnippet,
   helixStatus,
+  helixSyntaxChanged,
   helixTabstops,
   helixType
 };

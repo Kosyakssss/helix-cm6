@@ -64,6 +64,7 @@ export interface HelixInstance {
     warnings(): readonly string[];
 }
 export declare const helixInstance: Facet<HelixInstance, HelixInstance | null>;
+export declare const syntaxLoaded: import("@codemirror/state").AnnotationType<boolean>;
 export declare const helixDocument: Facet<HelixDocument, HelixDocument>;
 export declare function selectionInfo(selection: Jump["selection"], doc: EditorView["state"]["doc"]): HelixSelection;
 export declare function helix(options?: HelixOptions): Extension;

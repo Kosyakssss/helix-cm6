@@ -12,7 +12,9 @@ export interface SyntaxOptions {
 export async function loadSyntax(win: Window, wasm?: WasmSource, options: SyntaxOptions = {}): Promise<SyntaxSessions> {
   const bytes = wasm === undefined ? await unpack((await import("../../tree-sitter/tree-sitter.wasm")).default) : await wasmBytes(wasm);
   return new SyntaxSessions(await createLoader(bytes, options), (work) => {
-    if (typeof win.requestIdleCallback === "function") win.requestIdleCallback(work, { timeout: 2000 });
-    else win.setTimeout(work, 0);
+    win.setTimeout(() => {
+      if (typeof win.requestIdleCallback === "function") win.requestIdleCallback(work, { timeout: 2000 });
+      else work();
+    }, 100);
   });
 }

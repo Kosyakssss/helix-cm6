@@ -30,7 +30,7 @@ var __chunks = (base, ids, nodes, entry) => {
 };
 
 // src/codemirror.ts
-import { Facet as Facet4 } from "@codemirror/state";
+import { Annotation as Annotation2, Facet as Facet4 } from "@codemirror/state";
 import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
 
 // src/hooks.ts
@@ -14118,6 +14118,7 @@ class SyntaxCursor {
 }
 
 // src/syntax/languages.ts
+var QUIET_MS = 300;
 var MARKDOWN_LANGUAGES2 = `[[language]]
 name = "markdown"
 scope = "source.md"
@@ -14306,6 +14307,7 @@ class SyntaxSessions2 {
   schedule;
   entries = new Map;
   idle = false;
+  lastChange = 0;
   constructor(loader, schedule = null) {
     this.loader = loader;
     this.schedule = schedule;
@@ -14402,21 +14404,29 @@ class SyntaxSessions2 {
         return null;
       }
     }
-    for (const { changes, newDoc } of entry.pending.splice(0)) {
-      entry.syntax.applyChanges(changes, newDoc);
-      entry.doc = newDoc;
+    const pending = entry.pending.splice(0);
+    const last = pending[pending.length - 1];
+    if (last) {
+      entry.syntax.applyChanges(pending.map((p) => p.changes).reduce((all, next) => all.compose(next)), last.newDoc);
+      entry.doc = last.newDoc;
     }
     return entry.syntax;
   }
   scheduleIdle() {
+    this.lastChange = performance.now();
     if (!this.schedule || this.idle)
       return;
     this.idle = true;
-    this.schedule(() => {
+    const run = () => {
+      if (performance.now() - this.lastChange < QUIET_MS) {
+        this.schedule(run);
+        return;
+      }
       this.idle = false;
       for (const entry of this.entries.values())
         this.flush(entry);
-    });
+    };
+    this.schedule(run);
   }
 }
 
@@ -14581,10 +14591,12 @@ async function loadRegex2(source) {
 async function loadSyntax2(win, wasm, options = {}) {
   const bytes = wasm === undefined ? await unpack((await import("./tree-sitter-wasm.js")).default) : await wasmBytes2(wasm);
   return new SyntaxSessions2(await createLoader2(bytes, options), (work) => {
-    if (typeof win.requestIdleCallback === "function")
-      win.requestIdleCallback(work, { timeout: 2000 });
-    else
-      win.setTimeout(work, 0);
+    win.setTimeout(() => {
+      if (typeof win.requestIdleCallback === "function")
+        win.requestIdleCallback(work, { timeout: 2000 });
+      else
+        work();
+    }, 100);
   });
 }
 
@@ -15900,6 +15912,7 @@ function helixHost2(view) {
 }
 var helixEditor2 = Facet4.define({ combine: (values) => values[0] ?? null });
 var helixInstance = Facet4.define({ combine: (values) => values[0] ?? null });
+var syntaxLoaded = Annotation2.define();
 var helixDocument2 = Facet4.define({
   combine: (values) => Object.assign({}, ...values)
 });
@@ -16046,6 +16059,7 @@ function helix2(options = {}) {
           if (host.view)
             loadedSessions.setLanguage(host.view, language);
           editor.detectIndent(host);
+          host.view?.dispatch({ annotations: syntaxLoaded.of(true) });
           rerender();
         }
       };
@@ -16054,10 +16068,10 @@ function helix2(options = {}) {
         editor.detectIndent(hostFor(open));
       loadedSessions.loader.onLoad(() => {
         for (const open of views)
-          open.dispatch({});
+          open.dispatch({ annotations: syntaxLoaded.of(true) });
       });
       for (const open of views)
-        open.dispatch({});
+        open.dispatch({ annotations: syntaxLoaded.of(true) });
     }).catch(() => editor.setError("the syntax tree failed to load"));
   };
   let active = null;
@@ -16160,4 +16174,4 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, helixDocument2, selectionInfo, helix2 };
+export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, syntaxLoaded, helixDocument2, selectionInfo, helix2 };

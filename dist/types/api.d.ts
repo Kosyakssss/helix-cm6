@@ -1,5 +1,5 @@
 import { Facet } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import type { EditorView, ViewUpdate } from "@codemirror/view";
 import { type HelixCommandContext } from "./commands/app";
 import type { HelixRunnable } from "./commands/names";
 import type { Config } from "./config";
@@ -71,6 +71,7 @@ export interface HelixHighlight {
     scopes: readonly string[];
 }
 export declare function helixHighlights(view: EditorView, from: number, to: number, scopes?: readonly string[]): HelixHighlight[];
+export declare function helixSyntaxChanged(update: ViewUpdate): boolean;
 export interface HelixRainbowSpan {
     from: number;
     to: number;

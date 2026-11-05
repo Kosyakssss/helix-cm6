@@ -18,6 +18,7 @@ export declare class SyntaxSessions {
     private readonly schedule;
     private entries;
     private idle;
+    private lastChange;
     constructor(loader: LanguageLoader, schedule?: ((work: () => void) => void) | null);
     private latest;
     private defaultLanguage;

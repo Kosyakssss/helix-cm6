@@ -24,6 +24,7 @@ export {
   helixSetRegister,
   helixSnippet,
   helixStatus,
+  helixSyntaxChanged,
   helixTabstops,
   helixType,
   type HelixCommandInfo,

@@ -1,4 +1,4 @@
-import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
+import { Annotation, Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
 import { HelixEditor } from "./core/editor";
 import { commandContext, type AppCommand, type HelixCommand, type HelixCommandSpec } from "./commands/app";
@@ -86,6 +86,8 @@ export interface HelixInstance {
 }
 
 export const helixInstance = Facet.define<HelixInstance, HelixInstance | null>({ combine: (values) => values[0] ?? null });
+
+export const syntaxLoaded = Annotation.define<boolean>();
 
 export const helixDocument = Facet.define<HelixDocument, HelixDocument>({
   combine: (values) => Object.assign({}, ...values) as HelixDocument,
@@ -235,15 +237,16 @@ export function helix(options: HelixOptions = {}): Extension {
           set: (host, language) => {
             if (host.view) loadedSessions.setLanguage(host.view, language);
             editor.detectIndent(host);
+            host.view?.dispatch({ annotations: syntaxLoaded.of(true) });
             rerender();
           },
         };
         editor.syntax = (host) => (host.view ? loadedSessions.get(host.view, host.state.doc) : null);
         for (const open of views) editor.detectIndent(hostFor(open));
         loadedSessions.loader.onLoad(() => {
-          for (const open of views) open.dispatch({});
+          for (const open of views) open.dispatch({ annotations: syntaxLoaded.of(true) });
         });
-        for (const open of views) open.dispatch({});
+        for (const open of views) open.dispatch({ annotations: syntaxLoaded.of(true) });
       })
       .catch(() => editor.setError("the syntax tree failed to load"));
   };

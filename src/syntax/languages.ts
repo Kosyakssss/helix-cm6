@@ -6,6 +6,8 @@ import { LanguageLoader, type LanguageSource } from "./loader";
 import { Syntax } from "./syntax";
 import { Language, Runtime } from "./ts";
 
+const QUIET_MS = 300;
+
 export const MARKDOWN_LANGUAGES = `[[language]]
 name = "markdown"
 scope = "source.md"
@@ -115,6 +117,7 @@ interface Session {
 export class SyntaxSessions {
   private entries = new Map<unknown, Session>();
   private idle = false;
+  private lastChange = 0;
 
   constructor(
     readonly loader: LanguageLoader,
@@ -217,19 +220,27 @@ export class SyntaxSessions {
         return null;
       }
     }
-    for (const { changes, newDoc } of entry.pending.splice(0)) {
-      entry.syntax.applyChanges(changes, newDoc);
-      entry.doc = newDoc;
+    const pending = entry.pending.splice(0);
+    const last = pending[pending.length - 1];
+    if (last) {
+      entry.syntax.applyChanges(pending.map((p) => p.changes).reduce((all, next) => all.compose(next)), last.newDoc);
+      entry.doc = last.newDoc;
     }
     return entry.syntax;
   }
 
   private scheduleIdle(): void {
+    this.lastChange = performance.now();
     if (!this.schedule || this.idle) return;
     this.idle = true;
-    this.schedule(() => {
+    const run = () => {
+      if (performance.now() - this.lastChange < QUIET_MS) {
+        this.schedule!(run);
+        return;
+      }
       this.idle = false;
       for (const entry of this.entries.values()) this.flush(entry);
-    });
+    };
+    this.schedule(run);
   }
 }

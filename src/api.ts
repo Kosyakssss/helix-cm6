@@ -1,5 +1,5 @@
 import { Facet } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import type { EditorView, ViewUpdate } from "@codemirror/view";
 import { APP_COMMANDS } from "./commands/app";
 import { commandContext, type HelixCommandContext } from "./commands/app";
 import { COMMAND_DOCS } from "./commands/docs";
@@ -12,7 +12,7 @@ import { splitCommandLine, TYPABLE, TYPABLE_MAP } from "./commands/typed";
 import { setSel } from "./commands/util";
 import type { Config } from "./config";
 import { Context, type HelixEditor } from "./core/editor";
-import { helixEditor, helixHost, helixInstance, selectionInfo, type HelixConfiguration, type HelixSelection } from "./codemirror";
+import { helixEditor, helixHost, helixInstance, selectionInfo, syntaxLoaded, type HelixConfiguration, type HelixSelection } from "./codemirror";
 import type { Host } from "./core/host";
 import { changesOf, setChanges, type Changes } from "./changes";
 import { diagnosticsOf, setDiagnostics, severityRank, type Diagnostic, type Severity } from "./diagnostics";
@@ -264,6 +264,10 @@ export function helixHighlights(view: EditorView, from: number, to: number, scop
     to: syntax.posOf(span.to),
     scopes: span.scopes.map((h) => scopes[h]!),
   }));
+}
+
+export function helixSyntaxChanged(update: ViewUpdate): boolean {
+  return update.transactions.some((tr) => tr.annotation(syntaxLoaded) === true);
 }
 
 export interface HelixRainbowSpan {
