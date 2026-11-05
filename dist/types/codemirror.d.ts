@@ -35,10 +35,12 @@ export interface HelixSelection {
 export interface HelixJump extends HelixSelection {
     path: string;
 }
-export interface HelixOptions {
+export interface HelixConfiguration {
     config?: string | Record<string, unknown> | null;
     commands?: HelixCommands;
     keys?: HelixKeys | readonly HelixKeys[];
+}
+export interface HelixOptions extends HelixConfiguration {
     languages?: string | readonly string[];
     grammars?: HelixGrammars;
     regex?: WasmSource;
@@ -57,6 +59,11 @@ export interface HelixDocument {
 }
 export declare function helixHost(view: EditorView): Host | null;
 export declare const helixEditor: Facet<HelixEditor, HelixEditor | null>;
+export interface HelixInstance {
+    configure(changes: HelixConfiguration): readonly string[];
+    warnings(): readonly string[];
+}
+export declare const helixInstance: Facet<HelixInstance, HelixInstance | null>;
 export declare const helixDocument: Facet<HelixDocument, HelixDocument>;
 export declare function selectionInfo(selection: Jump["selection"], doc: EditorView["state"]["doc"]): HelixSelection;
 export declare function helix(options?: HelixOptions): Extension;

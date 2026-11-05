@@ -30,10 +30,11 @@ import {
   statusOf2,
   helixHost2,
   helixEditor2,
+  helixInstance,
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-0fvx8rg7.js";
+} from "./chunk-jx1cbdtr.js";
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {
@@ -138,6 +139,17 @@ function helixMarkSaved(view) {
 function helixStatus(view) {
   const { editor, host } = parts(view);
   return statusOf2(editor, host, view.hasFocus);
+}
+function helixConfig(view) {
+  return parts(view).editor.config;
+}
+function helixConfigWarnings(view) {
+  parts(view);
+  return view.state.facet(helixInstance).warnings();
+}
+function helixConfigure(view, changes) {
+  parts(view);
+  return view.state.facet(helixInstance).configure(changes);
 }
 function helixRegister(view, name) {
   const { editor, host } = parts(view);
@@ -257,6 +269,9 @@ export {
   helixAppKeys2 as helixAppKeys,
   helixChanges,
   helixCommandList,
+  helixConfig,
+  helixConfigWarnings,
+  helixConfigure,
   helixDiagnostics,
   helixDocument2 as helixDocument,
   helixEdit,

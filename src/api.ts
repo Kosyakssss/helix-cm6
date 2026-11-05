@@ -10,8 +10,9 @@ import { insertSnippet } from "./commands/snippet";
 import { executeCommand, runTypable, STATIC_COMMANDS } from "./commands";
 import { splitCommandLine, TYPABLE, TYPABLE_MAP } from "./commands/typed";
 import { setSel } from "./commands/util";
+import type { Config } from "./config";
 import { Context, type HelixEditor } from "./core/editor";
-import { helixEditor, helixHost, selectionInfo, type HelixSelection } from "./codemirror";
+import { helixEditor, helixHost, helixInstance, selectionInfo, type HelixConfiguration, type HelixSelection } from "./codemirror";
 import type { Host } from "./core/host";
 import { changesOf, setChanges, type Changes } from "./changes";
 import { diagnosticsOf, setDiagnostics, severityRank, type Diagnostic, type Severity } from "./diagnostics";
@@ -152,6 +153,20 @@ export function helixMarkSaved(view: EditorView): void {
 export function helixStatus(view: EditorView): HelixStatus {
   const { editor, host } = parts(view);
   return statusOf(editor, host, view.hasFocus)!;
+}
+
+export function helixConfig(view: EditorView): Readonly<Config> {
+  return parts(view).editor.config;
+}
+
+export function helixConfigWarnings(view: EditorView): readonly string[] {
+  parts(view);
+  return view.state.facet(helixInstance)!.warnings();
+}
+
+export function helixConfigure(view: EditorView, changes: HelixConfiguration): readonly string[] {
+  parts(view);
+  return view.state.facet(helixInstance)!.configure(changes);
 }
 
 export function helixRegister(view: EditorView, name: string): readonly string[] {

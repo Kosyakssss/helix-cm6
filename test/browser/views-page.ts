@@ -4,6 +4,9 @@ import {
   helix,
   helixAppKeys,
   helixChanges,
+  helixConfig,
+  helixConfigure,
+  helixConfigWarnings,
   helixDiagnostics,
   helixDocument,
   helixEdit,
@@ -136,8 +139,8 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   const jumps: HelixJump[] = [];
   const extension = helix({
     syntax: false,
-    config: '[keys.normal]\nT = "tabs:close"\nB = "broken"\nS = "slow_broken"\n',
-    keys: [helixAppKeys, { normal: { space: { t: { name: "Tabs", c: "tabs:close" } }, "C-s": ":write" } }],
+    config: '[editor]\nscrolloff = 9\nnot-a-key = 1\n[keys.normal]\nX = "nope_no"\n',
+    keys: [helixAppKeys, { normal: { space: { t: { name: "Tabs", c: "tabs:close" } }, "C-s": ":write", Y: "fle_picker", Z: ["tabs:close", "tabs:close"] } }],
     commands: {
       file_picker: () => "any value is fine",
       goto_definition: ({ view }) => helixSelect(view, 10, { jump: true }),
@@ -169,8 +172,19 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("a plain view is a clear error", thrown, "helix-cm6: this view has no helix() extension");
   plain.destroy();
 
+  const warnings = helixConfigWarnings(view);
+  check("a mistyped option warns", warnings.some((w) => w.includes("not-a-key")), true);
+  check("a mistyped key in the config warns", warnings.some((w) => w.includes("nope_no")), true);
+  check("a mistyped command in the app's keys warns", warnings.some((w) => w.includes("fle_picker")), true);
+  check("warnings show as a message", helixStatus(view).message?.text.startsWith("config: "), true);
+  check("options are data", helixConfig(view).scrolloff, 9);
+  check("reload returns warnings", helixConfigure(view, { config: '[editor]\nscrolloff = 3\ncolor-modes = true\n[keys.normal]\nQ = "file_picker"\n', keys: helixAppKeys }), []);
+  check("reload changes options", helixConfig(view).scrolloff, 3);
   helixMessage(view, null);
   check("a message clears", helixStatus(view).message, null);
+  helixConfigure(view, { config: null, keys: [helixAppKeys, { normal: { space: { t: { name: "Tabs", c: "tabs:close" } }, "C-s": ":write" } }] });
+  check("a null config resets options", helixConfig(view).scrolloff, 5);
+
   helixType(view, "gd");
   check("a jump selects a position", [helixSelection(view).primary.cursor, helixStatus(view).line], [10, 1]);
   helixType(view, "<C-o>");
@@ -224,6 +238,7 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("helixRun says when a typed command needs the app", helixRun(view, ":open x"), false);
   check("helixRun runs a macro", helixRun(view, "@gg"), true);
 
+  helixConfigure(view, { config: '[keys.normal]\nT = "tabs:close"\nB = "broken"\nS = "slow_broken"\n' });
   helixType(view, '"a3T');
   check("a command gets the count and register", calls.at(-1), "close  3 a");
   helixRun(view, ":tabs:close x y");

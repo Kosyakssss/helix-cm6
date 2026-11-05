@@ -1,7 +1,10 @@
-export { helix, helixDocument, type HelixCommands, type HelixDocument, type HelixGrammars, type HelixJump, type HelixOptions, type HelixRange, type HelixSelection } from "./codemirror";
+export { helix, helixDocument, type HelixCommands, type HelixConfiguration, type HelixDocument, type HelixGrammars, type HelixJump, type HelixOptions, type HelixRange, type HelixSelection } from "./codemirror";
 export {
   helixChanges,
   helixCommandList,
+  helixConfig,
+  helixConfigure,
+  helixConfigWarnings,
   helixDiagnostics,
   helixEdit,
   helixEnabled,
@@ -40,6 +43,7 @@ export { helixAppKeys } from "./keymap";
 export type { HelixKeyBinding, HelixKeys, HelixKeyTable } from "./config-loader";
 export type { HelixCommand, HelixCommandContext, HelixCommandSpec } from "./commands/app";
 export type { HelixCommandName, HelixRunnable, HelixStaticCommandName, HelixTypedCommandName } from "./commands/names";
+export type { Config as HelixConfig } from "./config";
 export type { EdgeDirection as HelixEdgeDirection, HelixEdge, MotionRange as HelixMotionRange } from "./hooks";
 export type { HelixInfo, HelixInfoRow, HelixMessage, HelixPromptStatus, HelixStatus } from "./view/status";
 export type { Mode as HelixMode } from "./state";

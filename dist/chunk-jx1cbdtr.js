@@ -15865,6 +15865,7 @@ function helixHost2(view) {
   return hostOf.get(view) ?? null;
 }
 var helixEditor2 = Facet4.define({ combine: (values) => values[0] ?? null });
+var helixInstance = Facet4.define({ combine: (values) => values[0] ?? null });
 var helixDocument2 = Facet4.define({
   combine: (values) => Object.assign({}, ...values)
 });
@@ -15896,9 +15897,10 @@ function adapted(command) {
   return typeof command === "function" ? wrap(command) : { ...command, run: wrap(command.run) };
 }
 function helix2(options = {}) {
-  const source = options.config ?? null;
-  const commands = options.commands ?? {};
-  const keys = options.keys;
+  let source = options.config ?? null;
+  let commands = options.commands ?? {};
+  let keys = options.keys;
+  let warnings = [];
   const lookup = (name) => {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
@@ -15926,7 +15928,7 @@ function helix2(options = {}) {
     editor.config = loaded.config;
     editor.keymaps = buildKeymaps2(loaded.keys, { app: app.keys, available: (name) => editor.hasCommand(name) });
     editor.autoinfo = null;
-    const warnings = [...loaded.warnings, ...app.warnings];
+    warnings = [...loaded.warnings, ...app.warnings];
     if (warnings.length > 0)
       editor.setError(`config: ${warnings[0]}${warnings.length > 1 ? ` (and ${warnings.length - 1} more)` : ""}`);
   };
@@ -16082,7 +16084,25 @@ function helix2(options = {}) {
         active = null;
     }
   });
-  return [extension, helixEditor2.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
+  const instance = {
+    configure(changes) {
+      if (changes.config !== undefined)
+        source = changes.config;
+      if (changes.commands)
+        commands = changes.commands;
+      if (changes.keys)
+        keys = changes.keys;
+      load();
+      for (const open of views) {
+        editor.detectIndent(hostFor(open));
+        open.dispatch({});
+      }
+      rerender();
+      return warnings;
+    },
+    warnings: () => warnings
+  };
+  return [extension, helixEditor2.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-export { hostHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, isAppCommandName, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixDocument2, selectionInfo, helix2 };
+export { hostHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, isAppCommandName, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, helixDocument2, selectionInfo, helix2 };

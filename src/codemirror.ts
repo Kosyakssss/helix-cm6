@@ -47,10 +47,13 @@ export interface HelixJump extends HelixSelection {
   path: string;
 }
 
-export interface HelixOptions {
+export interface HelixConfiguration {
   config?: string | Record<string, unknown> | null;
   commands?: HelixCommands;
   keys?: HelixKeys | readonly HelixKeys[];
+}
+
+export interface HelixOptions extends HelixConfiguration {
   languages?: string | readonly string[];
   grammars?: HelixGrammars;
   regex?: WasmSource;
@@ -76,6 +79,13 @@ export function helixHost(view: EditorView): Host | null {
 }
 
 export const helixEditor = Facet.define<HelixEditor, HelixEditor | null>({ combine: (values) => values[0] ?? null });
+
+export interface HelixInstance {
+  configure(changes: HelixConfiguration): readonly string[];
+  warnings(): readonly string[];
+}
+
+export const helixInstance = Facet.define<HelixInstance, HelixInstance | null>({ combine: (values) => values[0] ?? null });
 
 export const helixDocument = Facet.define<HelixDocument, HelixDocument>({
   combine: (values) => Object.assign({}, ...values) as HelixDocument,
@@ -110,9 +120,10 @@ function adapted(command: HelixCommand | HelixCommandSpec): AppCommand | { run: 
 }
 
 export function helix(options: HelixOptions = {}): Extension {
-  const source = options.config ?? null;
-  const commands = options.commands ?? {};
-  const keys = options.keys;
+  let source = options.config ?? null;
+  let commands = options.commands ?? {};
+  let keys = options.keys;
+  let warnings: readonly string[] = [];
   const lookup = (name: string) => {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
@@ -139,7 +150,7 @@ export function helix(options: HelixOptions = {}): Extension {
     editor.config = loaded.config;
     editor.keymaps = buildKeymaps(loaded.keys, { app: app.keys, available: (name) => editor.hasCommand(name) });
     editor.autoinfo = null;
-    const warnings = [...loaded.warnings, ...app.warnings];
+    warnings = [...loaded.warnings, ...app.warnings];
     if (warnings.length > 0) editor.setError(`config: ${warnings[0]}${warnings.length > 1 ? ` (and ${warnings.length - 1} more)` : ""}`);
   };
   load();
@@ -291,5 +302,20 @@ export function helix(options: HelixOptions = {}): Extension {
       if (active === view) active = null;
     },
   });
-  return [extension, helixEditor.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
+  const instance: HelixInstance = {
+    configure(changes) {
+      if (changes.config !== undefined) source = changes.config;
+      if (changes.commands) commands = changes.commands;
+      if (changes.keys) keys = changes.keys;
+      load();
+      for (const open of views) {
+        editor.detectIndent(hostFor(open));
+        open.dispatch({});
+      }
+      rerender();
+      return warnings;
+    },
+    warnings: () => warnings,
+  };
+  return [extension, helixEditor.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
