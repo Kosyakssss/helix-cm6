@@ -62,7 +62,7 @@ export interface PromptRequest {
   history?: string;
   complete?: (input: string) => Completion[];
   onChange?: (input: string) => void;
-  onAccept: (input: string) => void;
+  onAccept?: (input: string) => void;
   onCancel?: () => void;
   wordUnderCursor?: () => string;
 }
@@ -282,6 +282,7 @@ export class HelixEditor {
   }
 
   prompt(cx: Context, request: PromptRequest): void {
+    this.activePrompt?.request.onCancel?.();
     this.activePrompt = new Prompt(this, cx.host, request);
     this.ui.promptChanged?.(cx.host, this.activePrompt);
   }
@@ -337,6 +338,10 @@ export class HelixEditor {
     const history = host.state.field(historyField, false);
     if (!history) return false;
     return history.pending !== null || history.current !== (this.savedRevisions.get(host.id) ?? 0);
+  }
+
+  forgetSaved(host: Host): void {
+    this.savedRevisions.delete(host.id);
   }
 
   markSaved(host: Host): void {

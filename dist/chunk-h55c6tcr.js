@@ -1,5 +1,5 @@
 // src/codemirror.ts
-import { Facet as Facet5 } from "@codemirror/state";
+import { Facet as Facet4 } from "@codemirror/state";
 import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
 
 // src/hooks.ts
@@ -7951,7 +7951,7 @@ var diagnosticsField2 = StateField4.define({
 });
 var ORDER = { hint: 0, info: 1, warning: 2, error: 3 };
 function severityRank(severity) {
-  return severity === null ? -1 : ORDER[severity];
+  return severity == null ? -1 : ORDER[severity];
 }
 function diagnosticsOf(state) {
   return state.field(diagnosticsField2, false) ?? [];
@@ -10476,7 +10476,7 @@ function splitCommandLine(input) {
   const [command, rest] = split(input);
   return [command, rest];
 }
-function executeCommand(cx, cmd, input, event) {
+function executeCommand2(cx, cmd, input, event) {
   if (event !== "validate") {
     cmd.fun(cx, Args.parse(input, cmd.signature, false, (token) => token.content), event);
     return;
@@ -10507,7 +10507,7 @@ function executeCommandLine(cx, input, event) {
   if (command === "")
     return;
   if (/^\d+$/.test(command) && rest.trim() === "") {
-    executeCommand(cx, TYPABLE_MAP.get("goto"), command, event);
+    executeCommand2(cx, TYPABLE_MAP.get("goto"), command, event);
     return;
   }
   const cmd = TYPABLE_MAP.get(command);
@@ -10516,7 +10516,7 @@ function executeCommandLine(cx, input, event) {
       cx.editor.setError(`no such command: '${command}'`);
     return;
   }
-  executeCommand(cx, cmd, rest, event);
+  executeCommand2(cx, cmd, rest, event);
 }
 var PATH_COMMANDS = new Set(["open", "vsplit", "hsplit", "read", "move", "move!", "write", "write!"]);
 var OPTION_COMMANDS = new Set(["set-option", "toggle-option", "get-option"]);
@@ -10601,7 +10601,7 @@ var STATIC_COMMANDS = {
 function isKnownCommand(name) {
   return name in STATIC_COMMANDS || UNSUPPORTED.includes(name) || isAppCommandName(name);
 }
-function executeCommand2(cx, command, arg) {
+function executeCommand(cx, command, arg) {
   switch (command.kind) {
     case "static": {
       if (hooksOf(cx.host).command?.(command.name, cx))
@@ -10847,7 +10847,7 @@ class Prompt {
           }
           input = this.line;
         }
-        this.request.onAccept(input);
+        this.request.onAccept?.(input);
         return "closed";
       }
       case "C-p":
@@ -11339,7 +11339,7 @@ class HelixEditor2 {
     this.app?.openJump?.(cx, jump);
   }
   runStatic(cx, name) {
-    executeCommand2(cx, { kind: "static", name });
+    executeCommand(cx, { kind: "static", name });
   }
   appCommand(name) {
     if (!this.app)
@@ -11396,6 +11396,7 @@ class HelixEditor2 {
     getOption(this, args);
   }
   prompt(cx, request) {
+    this.activePrompt?.request.onCancel?.();
     this.activePrompt = new Prompt(this, cx.host, request);
     this.ui.promptChanged?.(cx.host, this.activePrompt);
   }
@@ -11443,6 +11444,9 @@ class HelixEditor2 {
     if (!history)
       return false;
     return history.pending !== null || history.current !== (this.savedRevisions.get(host.id) ?? 0);
+  }
+  forgetSaved(host) {
+    this.savedRevisions.delete(host.id);
   }
   markSaved(host) {
     const history = host.state.field(historyField2, false);
@@ -11565,7 +11569,7 @@ class HelixEditor2 {
     const result = this.keymaps.get(m, key);
     this.autoinfo = this.keymaps.sticky;
     const execute = (command) => {
-      executeCommand2(cx, command);
+      executeCommand(cx, command);
       const current = cx.host.state.field(helixField2, false)?.mode ?? lastMode;
       if (current !== lastMode && current === "insert") {
         this.lastInsert = { command, keys: [] };
@@ -11610,7 +11614,7 @@ class HelixEditor2 {
         } else {
           const again = this.keymaps.get("insert", ev);
           if (again.kind === "matched")
-            executeCommand2(cx, again.command);
+            executeCommand(cx, again.command);
         }
       }
       return true;
@@ -11618,7 +11622,7 @@ class HelixEditor2 {
     return true;
   }
   insertChar(cx, ch) {
-    executeCommand2(cx, { kind: "static", name: "__insert_char" }, ch);
+    executeCommand(cx, { kind: "static", name: "__insert_char" }, ch);
   }
   commandMode_(m, cx, key) {
     const digit = /^[0-9]$/.test(key) ? Number(key) : null;
@@ -11636,7 +11640,7 @@ class HelixEditor2 {
     if (key === "." && this.keymaps.pending().length === 0) {
       const times = this.count ?? 1;
       for (let i = 0;i < times; i++) {
-        executeCommand2(cx, this.lastInsert.command);
+        executeCommand(cx, this.lastInsert.command);
         const focused = this.focusedHost(cx.host);
         const insert = focused === cx.host ? cx : new Context2(this, focused, null, null);
         for (const k of [...this.lastInsert.keys]) {
@@ -14553,7 +14557,6 @@ async function loadSyntax2(win, wasm, options = {}) {
 }
 
 // src/view/status.ts
-import { Facet as Facet3 } from "@codemirror/state";
 function describe(editor, command) {
   if (command.kind === "static")
     return editor.commandDoc(command.name);
@@ -14579,7 +14582,6 @@ function infoOf2(editor) {
   }
   return { title: auto.name, rows: [...grouped].map(([doc, row]) => ({ keys: row.keys.join(", "), doc, available: row.available })) };
 }
-var onHelixStatus2 = Facet3.define();
 function statusOf2(editor, host, focused) {
   const state = host.state.field(helixField2, false);
   if (!state)
@@ -14611,10 +14613,10 @@ function statusOf2(editor, host, focused) {
     register: focused ? editor.selectedRegister : null,
     recording: editor.macroRecording?.register ?? null,
     selections: state.selection.ranges.length,
-    primary: state.selection.primaryIndex,
+    primaryIndex: state.selection.primaryIndex,
     line: line.number,
     column,
-    message: editor.status,
+    message: editor.status && { text: editor.status.message, severity: editor.status.severity },
     language: editor.languageName(host) ?? "text"
   };
 }
@@ -14743,7 +14745,7 @@ var helixTheme = EditorView.baseTheme({
 });
 
 // src/view/view.ts
-import { EditorState as EditorState3, Facet as Facet4, Prec, RangeSetBuilder } from "@codemirror/state";
+import { EditorState as EditorState3, Facet as Facet3, Prec, RangeSetBuilder } from "@codemirror/state";
 import {
   Decoration,
   EditorView as EditorView2,
@@ -15250,7 +15252,7 @@ function cursorLayers(editor) {
 }
 
 // src/view/view.ts
-var helixEnv2 = Facet4.define({ combine: (values) => values[0] ?? null });
+var helixEnv2 = Facet3.define({ combine: (values) => values[0] ?? null });
 
 class LabelWidget extends WidgetType {
   text;
@@ -15858,44 +15860,18 @@ function makeViewOps2(scrolloff) {
 }
 
 // src/codemirror.ts
-function helixStatus2(view) {
-  const editor = view.state.facet(helixEditor2);
-  const host = editor ? hostOf.get(view) : undefined;
-  return editor && host ? statusOf2(editor, host, view.hasFocus) : null;
-}
-function helixRun2(view, command) {
-  const editor = view.state.facet(helixEditor2);
-  const host = editor ? hostOf.get(view) : undefined;
-  if (!editor || !host)
-    return false;
-  const cx = new Context2(editor, host, null, null);
-  if (command.startsWith(":"))
-    runTypable(cx, command.slice(1));
-  else if (command.startsWith("@"))
-    executeCommand2(cx, { kind: "macro", keys: command.slice(1) });
-  else
-    executeCommand2(cx, { kind: "static", name: command });
-  for (const callback of cx.callbacks)
-    callback();
-  editor.ui.render?.(host);
-  return true;
-}
-function helixKeys2(view, keys) {
-  const editor = view.state.facet(helixEditor2);
-  const host = editor ? hostOf.get(view) : undefined;
-  if (!editor || !host)
-    return false;
-  editor.feedKeys(host, keys);
-  return true;
-}
 var hostOf = new WeakMap;
-function helixHost(view) {
+function helixHost2(view) {
   return hostOf.get(view) ?? null;
 }
-var helixEditor2 = Facet5.define({ combine: (values) => values[0] ?? null });
-var helixDocument2 = Facet5.define({
+var helixEditor2 = Facet4.define({ combine: (values) => values[0] ?? null });
+var helixDocument2 = Facet4.define({
   combine: (values) => Object.assign({}, ...values)
 });
+function selectionInfo(selection, doc) {
+  const ranges = selection.ranges.map((r) => ({ anchor: r.anchor, head: r.head, from: r.from(), to: r.to(), cursor: r.cursor(doc) }));
+  return { ranges, primary: ranges[selection.primaryIndex], primaryIndex: selection.primaryIndex };
+}
 function languageSource(grammars) {
   if (!grammars)
     return null;
@@ -15920,23 +15896,41 @@ function adapted(command) {
   return typeof command === "function" ? wrap(command) : { ...command, run: wrap(command.run) };
 }
 function helix2(options = {}) {
+  const source = options.config ?? null;
   const commands = options.commands ?? {};
+  const keys = options.keys;
   const lookup = (name) => {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
   };
   const known = (name) => lookup(name) !== null;
-  const loaded = loadConfig2(options.config ?? null, undefined, known);
-  const editor = new HelixEditor2(buildKeymaps2(loaded.keys), loaded.config);
+  const editor = new HelixEditor2(buildKeymaps2(), defaultConfig2());
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
   editor.app = {
     command: lookup,
     commandNames: () => Object.keys(commands),
-    openJump: options.openJump,
-    variable: options.variable
+    openJump: (cx, jump) => {
+      if (cx.host.view)
+        options.openJump?.({ path: jump.docId, ...selectionInfo(jump.selection, cx.host.state.doc) }, cx.host.view);
+    },
+    variable: (cx, name) => cx.host.view ? options.variable?.(name, cx.host.view) ?? null : null
   };
-  editor.keymaps = buildKeymaps2(loaded.keys, { app: loadKeys(options.keys, known).keys, available: (name) => editor.hasCommand(name) });
+  if (options.completePath) {
+    const complete = options.completePath;
+    editor.pathCompleter = (prefix) => [...complete(prefix)];
+  }
+  const load = () => {
+    const loaded = loadConfig2(source, undefined, known);
+    const app = loadKeys(keys, known);
+    editor.config = loaded.config;
+    editor.keymaps = buildKeymaps2(loaded.keys, { app: app.keys, available: (name) => editor.hasCommand(name) });
+    editor.autoinfo = null;
+    const warnings = [...loaded.warnings, ...app.warnings];
+    if (warnings.length > 0)
+      editor.setError(`config: ${warnings[0]}${warnings.length > 1 ? ` (and ${warnings.length - 1} more)` : ""}`);
+  };
+  load();
   const clipboard = new SystemClipboard2;
   editor.registers = new Registers2(clipboard);
   editor.viewOps = makeViewOps2(() => editor.config.scrolloff);
@@ -15945,14 +15939,16 @@ function helix2(options = {}) {
   const hostFor = (view) => {
     let host = hosts.get(view);
     if (!host) {
-      const id = `editor-${++count}`;
+      const pane = `editor-${++count}`;
       host = {
         get state() {
           return view.state;
         },
         dispatch: (...specs) => view.dispatch(...specs),
         view,
-        id,
+        get id() {
+          return view.state.facet(helixDocument2).path ?? pane;
+        },
         get name() {
           const document = view.state.facet(helixDocument2);
           return document.name ?? document.path ?? "[scratch]";
@@ -15960,7 +15956,7 @@ function helix2(options = {}) {
         get path() {
           return view.state.facet(helixDocument2).path ?? null;
         },
-        paneId: id
+        paneId: pane
       };
       hosts.set(view, host);
       hostOf.set(view, host);
@@ -16059,16 +16055,14 @@ function helix2(options = {}) {
     onRender: (view) => {
       if (view.hasFocus)
         active = view;
-      const listeners = view.state.facet(onHelixStatus2);
-      if (listeners.length === 0)
+      if (!options.onStatus)
         return;
       const status = statusOf2(editor, hostFor(view), view === active);
       const key = JSON.stringify(status);
       if (!status || lastStatus.get(view) === key)
         return;
       lastStatus.set(view, key);
-      for (const listener of listeners)
-        listener(status, view);
+      options.onStatus(status, view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -16083,6 +16077,7 @@ function helix2(options = {}) {
       views.delete(view);
       sessions?.close(view);
       editor.indentStyles.delete(hostFor(view).id);
+      editor.forgetSaved(hostFor(view));
       if (active === view)
         active = null;
     }
@@ -16090,113 +16085,4 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-// src/api.ts
-function helixCommandList2() {
-  const names = new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS2)]);
-  return [...names].sort().map((name) => ({ name, doc: COMMAND_DOCS[name] ?? name, app: isAppCommandName(name) }));
-}
-function helixTypedCommandList2() {
-  return TYPABLE.map((c) => ({ name: c.name, aliases: c.aliases, doc: c.doc, app: c.app ?? null }));
-}
-function parts(view) {
-  const editor = view.state.facet(helixEditor2);
-  const host = editor ? helixHost(view) : null;
-  return editor && host ? { editor, host } : null;
-}
-function context(view) {
-  const found = parts(view);
-  return found ? new Context2(found.editor, found.host, null, null) : null;
-}
-function helixEdit2(view, edits) {
-  const cx = context(view);
-  if (cx)
-    applyTextEdits2(cx, edits);
-}
-function helixSelect2(view, ranges, primary = 0) {
-  const cx = context(view);
-  if (!cx || ranges.length === 0)
-    return;
-  setSel2(cx, new Selection2(ranges.map((r) => new Range2(r.anchor, r.head)), primary).ensureInvariants(view.state.doc));
-}
-function helixSnippet2(view, source, options = {}) {
-  const cx = context(view);
-  return cx ? insertSnippet(cx, source, options) : false;
-}
-function helixTabstops2(view) {
-  const found = parts(view);
-  const snippet = found?.editor.snippets.get(found.host.id);
-  if (!snippet)
-    return [];
-  return snippet.allTabstops().flatMap((tabstop) => tabstop.ranges.map((span) => ({ from: span.start, to: span.end, choices: tabstop.choices })));
-}
-function helixMessage2(view, text, severity = "info") {
-  const found = parts(view);
-  if (!found)
-    return;
-  if (severity === "error")
-    found.editor.setError(text);
-  else
-    found.editor.setStatus(text);
-  found.editor.ui.render?.(found.host);
-}
-function helixPrompt2(view, request) {
-  const cx = context(view);
-  if (cx)
-    cx.editor.prompt(cx, request);
-}
-function helixHighlights2(view, from, to, scopes = DEFAULT_SCOPES) {
-  const found = parts(view);
-  const syntax = found?.editor.syntax?.(found.host);
-  if (!syntax)
-    return [];
-  return highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to)).map((span) => ({
-    from: syntax.posOf(span.from),
-    to: syntax.posOf(span.to),
-    scopes: span.scopes.map((h) => scopes[h])
-  }));
-}
-function helixRainbow2(view, from, to, levels = 6) {
-  const found = parts(view);
-  const syntax = found?.editor.syntax?.(found.host);
-  if (!syntax)
-    return [];
-  return rainbowSpans(syntax, levels, syntax.byteOf(from), syntax.byteOf(to)).map((span) => ({
-    from: syntax.posOf(span.from),
-    to: syntax.posOf(span.to),
-    level: span.highlight
-  }));
-}
-function helixGutter2(view, fromLine, toLine) {
-  const found = parts(view);
-  const value = view.state.field(helixField2, false);
-  if (!found || !value)
-    return [];
-  const doc = view.state.doc;
-  const cursorLines = new Set(value.selection.ranges.map((r) => doc.lineAt(r.cursor(doc)).number));
-  const primary = doc.lineAt(value.selection.primary().cursor(doc)).number;
-  const relative = found.editor.config.lineNumber === "relative" && value.mode !== "insert" && view.hasFocus;
-  const severities = new Map;
-  for (const d of diagnosticsOf(view.state)) {
-    const line = doc.lineAt(d.from).number;
-    const severity = d.severity ?? "warning";
-    const known = severities.get(line);
-    if (!known || severityRank(severity) >= severityRank(known))
-      severities.set(line, severity);
-  }
-  const { hunks } = changesOf2(view.state);
-  const out = [];
-  for (let line = Math.max(1, fromLine);line <= Math.min(doc.lines, toLine); line++) {
-    const index = line - 1;
-    const hunk = hunks.find((h) => h.afterStart === h.afterEnd ? h.afterStart === index : h.afterStart <= index && index < h.afterEnd);
-    out.push({
-      line,
-      number: relative && line !== primary ? Math.abs(primary - line) : line,
-      selected: cursorLines.has(line),
-      diagnostic: severities.get(line) ?? null,
-      change: !hunk ? null : hunk.beforeStart === hunk.beforeEnd ? "added" : hunk.afterStart === hunk.afterEnd ? "removed" : "changed"
-    });
-  }
-  return out;
-}
-
-export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixSnippet2, helixTabstops2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };
+export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, APP_COMMANDS2, isAppCommandName, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixDocument2, selectionInfo, helix2 };

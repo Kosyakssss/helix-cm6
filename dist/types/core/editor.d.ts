@@ -45,7 +45,7 @@ export interface PromptRequest {
     history?: string;
     complete?: (input: string) => Completion[];
     onChange?: (input: string) => void;
-    onAccept: (input: string) => void;
+    onAccept?: (input: string) => void;
     onCancel?: () => void;
     wordUnderCursor?: () => string;
 }
@@ -158,6 +158,7 @@ export declare class HelixEditor {
     languageName(host: Host): string | null;
     private savedRevisions;
     isModified(host: Host): boolean;
+    forgetSaved(host: Host): void;
     markSaved(host: Host): void;
     focusedHost(host: Host): Host;
     isBusy(): boolean;

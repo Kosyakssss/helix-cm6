@@ -8,7 +8,7 @@ export interface Hunk {
 }
 
 export interface Changes {
-  base: string | null;
+  base?: string | null;
   hunks: readonly Hunk[];
 }
 

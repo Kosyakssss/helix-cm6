@@ -179,7 +179,7 @@ async function run(type: BrowserType): Promise<string[]> {
   check("e on a whole last line stays charwise", (await extra("final4", "jeyP")).doc, "one\ntwotwo");
 
   const call = <T>(name: string, arg?: unknown) => page.evaluate(([n, a]) => (window as unknown as Record<string, (x: unknown) => T>)[n as string]!(a), [name, arg] as const);
-  const status = (name: string) => call<{ info: { rows: { keys: string; doc: string; available: boolean }[] } | null; prompt: { label: string; input: string; cursor: number; completions: string[]; selected: number | null } | null; message: { message: string } | null; diagnostics: { error: number }; line: number }>("helixStatusOf", name);
+  const status = (name: string) => call<{ info: { rows: { keys: string; doc: string; available: boolean }[] } | null; prompt: { label: string; input: string; cursor: number; completions: string[]; selected: number | null } | null; message: { text: string } | null; diagnostics: { error: number }; line: number }>("helixStatusOf", name);
   await page.click("#app .cm-content");
   await extra("app", "<space>");
   const menu = (await status("app")).info!.rows;
@@ -224,6 +224,8 @@ async function run(type: BrowserType): Promise<string[]> {
   const mouseHead = (await extra("mouse", "")).head;
   await page.click("#mouse .cm-content", { position: { x: 60, y: 6 } });
   check("mouse = false ignores clicks", (await extra("mouse", "")).head, mouseHead);
+
+  for (const [what, got, want] of await page.evaluate(() => (window as unknown as { helixApiChecks(): Promise<[string, unknown, unknown][]> }).helixApiChecks())) check(`api: ${what}`, got, want);
 
   await browser.close();
   if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));

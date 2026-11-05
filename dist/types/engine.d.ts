@@ -1,8 +1,8 @@
-export { helix, helixDocument, helixEditor, helixKeys, helixRun, helixStatus, type GrammarSource, type HelixDocument, type HelixOptions } from "./codemirror";
+export { helixEditor, helixHost } from "./codemirror";
 export { helixExtension, uiRefresher, uiSignature, type ViewEnv } from "./view/view";
 export { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 export { loadSyntax } from "./view/syntax";
-export { onHelixStatus, statusOf, infoOf, type HelixInfo, type HelixInfoRow, type HelixPromptStatus, type HelixStatus } from "./view/status";
+export { statusOf, infoOf, type HelixInfo, type HelixInfoRow, type HelixPromptStatus, type HelixStatus } from "./view/status";
 export { makeViewOps } from "./view/viewops";
 export { SystemClipboard } from "./view/clipboard";
 export { HelixEditor, Context, type HandleKeyOptions, type JumpLabel, type OnKeyCallback, type OnKeyKind, type PromptRequest, type Status, type UiHooks, type ViewOps, } from "./core/editor";
@@ -36,4 +36,3 @@ export type { Syntax } from "./syntax/syntax";
 export { setDiagnostics, diagnosticsField, type Diagnostic, type Severity } from "./diagnostics";
 export { setChanges, changesField, changesOf, type Changes, type Hunk } from "./changes";
 export { helixEnv } from "./view/view";
-export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixSnippet, helixTabstops, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";

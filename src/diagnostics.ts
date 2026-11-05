@@ -5,7 +5,7 @@ export type Severity = "hint" | "info" | "warning" | "error";
 export interface Diagnostic {
   from: number;
   to: number;
-  severity: Severity | null;
+  severity?: Severity | null;
   message: string;
   source?: string;
   code?: string;
@@ -34,8 +34,8 @@ export const diagnosticsField = StateField.define<readonly Diagnostic[]>({
 
 const ORDER: Record<Severity, number> = { hint: 0, info: 1, warning: 2, error: 3 };
 
-export function severityRank(severity: Severity | null): number {
-  return severity === null ? -1 : ORDER[severity];
+export function severityRank(severity: Severity | null | undefined): number {
+  return severity == null ? -1 : ORDER[severity];
 }
 
 export function diagnosticsOf(state: { field<T>(field: StateField<T>, require: false): T | undefined }): readonly Diagnostic[] {

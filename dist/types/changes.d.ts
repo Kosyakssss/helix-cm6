@@ -6,7 +6,7 @@ export interface Hunk {
     afterEnd: number;
 }
 export interface Changes {
-    base: string | null;
+    base?: string | null;
     hunks: readonly Hunk[];
 }
 export declare const setChanges: import("@codemirror/state").StateEffectType<Changes>;

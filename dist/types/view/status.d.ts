@@ -1,9 +1,11 @@
-import { Facet } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
-import type { HelixEditor, Status } from "../core/editor";
+import type { HelixEditor } from "../core/editor";
 import type { Host } from "../core/host";
 import { type Mode } from "../state";
 import { type Severity } from "../diagnostics";
+export interface HelixMessage {
+    text: string;
+    severity: "info" | "error";
+}
 export interface HelixStatus {
     mode: Mode;
     pending: string;
@@ -11,10 +13,10 @@ export interface HelixStatus {
     register: string | null;
     recording: string | null;
     selections: number;
-    primary: number;
+    primaryIndex: number;
     line: number;
     column: number;
-    message: Status | null;
+    message: HelixMessage | null;
     language: string;
     modified: boolean;
     diagnostics: Record<Severity, number>;
@@ -38,5 +40,4 @@ export interface HelixInfo {
     rows: readonly HelixInfoRow[];
 }
 export declare function infoOf(editor: HelixEditor): HelixInfo | null;
-export declare const onHelixStatus: Facet<(status: HelixStatus, view: EditorView) => void, readonly ((status: HelixStatus, view: EditorView) => void)[]>;
 export declare function statusOf(editor: HelixEditor, host: Host, focused: boolean): HelixStatus | null;

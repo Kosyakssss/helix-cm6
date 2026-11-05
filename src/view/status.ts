@@ -1,11 +1,14 @@
-import { Facet } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
-import type { HelixEditor, Status } from "../core/editor";
+import type { HelixEditor } from "../core/editor";
 import type { Host } from "../core/host";
 import { nextGraphemeBoundary } from "../graphemes";
 import { helixField, type Mode } from "../state";
 import { diagnosticsOf, type Severity } from "../diagnostics";
 import type { MappableCommand } from "../keymap/trie";
+
+export interface HelixMessage {
+  text: string;
+  severity: "info" | "error";
+}
 
 export interface HelixStatus {
   mode: Mode;
@@ -14,10 +17,10 @@ export interface HelixStatus {
   register: string | null;
   recording: string | null;
   selections: number;
-  primary: number;
+  primaryIndex: number;
   line: number;
   column: number;
-  message: Status | null;
+  message: HelixMessage | null;
   language: string;
   modified: boolean;
   diagnostics: Record<Severity, number>;
@@ -66,8 +69,6 @@ export function infoOf(editor: HelixEditor): HelixInfo | null {
   return { title: auto.name, rows: [...grouped].map(([doc, row]) => ({ keys: row.keys.join(", "), doc, available: row.available })) };
 }
 
-export const onHelixStatus = Facet.define<(status: HelixStatus, view: EditorView) => void>();
-
 export function statusOf(editor: HelixEditor, host: Host, focused: boolean): HelixStatus | null {
   const state = host.state.field(helixField, false);
   if (!state) return null;
@@ -96,10 +97,10 @@ export function statusOf(editor: HelixEditor, host: Host, focused: boolean): Hel
     register: focused ? editor.selectedRegister : null,
     recording: editor.macroRecording?.register ?? null,
     selections: state.selection.ranges.length,
-    primary: state.selection.primaryIndex,
+    primaryIndex: state.selection.primaryIndex,
     line: line.number,
     column,
-    message: editor.status,
+    message: editor.status && { text: editor.status.message, severity: editor.status.severity },
     language: editor.languageName(host) ?? "text",
   };
 }

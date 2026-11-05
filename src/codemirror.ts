@@ -1,43 +1,65 @@
 import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
-import { Context, HelixEditor } from "./core/editor";
-import { commandContext, type AppCommand, type HelixApp, type HelixCommand, type HelixCommandSpec } from "./commands/app";
-import type { HelixCommandName } from "./commands/names";
+import { HelixEditor } from "./core/editor";
+import { commandContext, type AppCommand, type HelixCommand, type HelixCommandSpec } from "./commands/app";
+import type { Jump } from "./commands/jumps";
+import type { Variable } from "./commands/expansion";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
+import { defaultConfig } from "./config";
 import { loadConfig, loadKeys, type HelixKeys } from "./config-loader";
-import { executeCommand, runTypable } from "./commands";
 import { buildKeymaps } from "./keymap";
 import { Registers } from "./registers";
+import type { HelixCommandName } from "./commands/names";
 import type { SyntaxSessions } from "./syntax/languages";
 import type { LanguageId } from "./syntax/injections";
 import type { LanguageLoader, LanguageSource, QueryFile } from "./syntax/loader";
 import { SystemClipboard } from "./view/clipboard";
 import { loadSyntax } from "./view/syntax";
-import { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
+import { statusOf, type HelixStatus } from "./view/status";
 import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
 import { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 
-export interface GrammarSource {
+export interface HelixGrammars {
   grammar(name: string): WasmBytes | null | Promise<WasmBytes | null>;
   query(language: string, file: QueryFile): string | null | Promise<string | null>;
 }
 
 export type HelixCommands = { [name in HelixCommandName]?: HelixCommand | HelixCommandSpec } & { [name: string]: HelixCommand | HelixCommandSpec | undefined };
 
+export interface HelixRange {
+  anchor: number;
+  head: number;
+  from: number;
+  to: number;
+  cursor: number;
+}
+
+export interface HelixSelection {
+  ranges: readonly HelixRange[];
+  primary: HelixRange;
+  primaryIndex: number;
+}
+
+export interface HelixJump extends HelixSelection {
+  path: string;
+}
+
 export interface HelixOptions {
   config?: string | Record<string, unknown> | null;
+  commands?: HelixCommands;
+  keys?: HelixKeys | readonly HelixKeys[];
   languages?: string | readonly string[];
-  grammars?: GrammarSource;
+  grammars?: HelixGrammars;
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
-  commands?: HelixCommands;
-  keys?: HelixKeys | readonly HelixKeys[];
-  openJump?: HelixApp["openJump"];
-  variable?: HelixApp["variable"];
+  completePath?: (prefix: string) => readonly string[];
+  openJump?: (jump: HelixJump, view: EditorView) => unknown;
+  variable?: (name: Variable, view: EditorView) => string | null;
+  onStatus?: (status: HelixStatus, view: EditorView) => void;
   panel?: boolean;
 }
 
@@ -45,33 +67,6 @@ export interface HelixDocument {
   path?: string | null;
   name?: string | null;
   language?: string | null;
-}
-
-export function helixStatus(view: EditorView): HelixStatus | null {
-  const editor = view.state.facet(helixEditor);
-  const host = editor ? hostOf.get(view) : undefined;
-  return editor && host ? statusOf(editor, host, view.hasFocus) : null;
-}
-
-export function helixRun(view: EditorView, command: string): boolean {
-  const editor = view.state.facet(helixEditor);
-  const host = editor ? hostOf.get(view) : undefined;
-  if (!editor || !host) return false;
-  const cx = new Context(editor, host, null, null);
-  if (command.startsWith(":")) runTypable(cx, command.slice(1));
-  else if (command.startsWith("@")) executeCommand(cx, { kind: "macro", keys: command.slice(1) });
-  else executeCommand(cx, { kind: "static", name: command });
-  for (const callback of cx.callbacks) callback();
-  editor.ui.render?.(host);
-  return true;
-}
-
-export function helixKeys(view: EditorView, keys: string): boolean {
-  const editor = view.state.facet(helixEditor);
-  const host = editor ? hostOf.get(view) : undefined;
-  if (!editor || !host) return false;
-  editor.feedKeys(host, keys);
-  return true;
 }
 
 const hostOf = new WeakMap<EditorView, Host>();
@@ -86,7 +81,12 @@ export const helixDocument = Facet.define<HelixDocument, HelixDocument>({
   combine: (values) => Object.assign({}, ...values) as HelixDocument,
 });
 
-function languageSource(grammars: GrammarSource | undefined): LanguageSource | null {
+export function selectionInfo(selection: Jump["selection"], doc: EditorView["state"]["doc"]): HelixSelection {
+  const ranges = selection.ranges.map((r) => ({ anchor: r.anchor, head: r.head, from: r.from(), to: r.to(), cursor: r.cursor(doc) }));
+  return { ranges, primary: ranges[selection.primaryIndex]!, primaryIndex: selection.primaryIndex };
+}
+
+function languageSource(grammars: HelixGrammars | undefined): LanguageSource | null {
   if (!grammars) return null;
   return {
     grammar: async (name) => {
@@ -110,23 +110,39 @@ function adapted(command: HelixCommand | HelixCommandSpec): AppCommand | { run: 
 }
 
 export function helix(options: HelixOptions = {}): Extension {
+  const source = options.config ?? null;
   const commands = options.commands ?? {};
+  const keys = options.keys;
   const lookup = (name: string) => {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
   };
   const known = (name: string) => lookup(name) !== null;
-  const loaded = loadConfig(options.config ?? null, undefined, known);
-  const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
+  const editor = new HelixEditor(buildKeymaps(), defaultConfig());
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
   editor.app = {
     command: lookup,
     commandNames: () => Object.keys(commands),
-    openJump: options.openJump,
-    variable: options.variable,
+    openJump: (cx, jump) => {
+      if (cx.host.view) options.openJump?.({ path: jump.docId, ...selectionInfo(jump.selection, cx.host.state.doc) }, cx.host.view);
+    },
+    variable: (cx, name) => (cx.host.view ? (options.variable?.(name, cx.host.view) ?? null) : null),
   };
-  editor.keymaps = buildKeymaps(loaded.keys, { app: loadKeys(options.keys, known).keys, available: (name) => editor.hasCommand(name) });
+  if (options.completePath) {
+    const complete = options.completePath;
+    editor.pathCompleter = (prefix) => [...complete(prefix)];
+  }
+  const load = () => {
+    const loaded = loadConfig(source, undefined, known);
+    const app = loadKeys(keys, known);
+    editor.config = loaded.config;
+    editor.keymaps = buildKeymaps(loaded.keys, { app: app.keys, available: (name) => editor.hasCommand(name) });
+    editor.autoinfo = null;
+    const warnings = [...loaded.warnings, ...app.warnings];
+    if (warnings.length > 0) editor.setError(`config: ${warnings[0]}${warnings.length > 1 ? ` (and ${warnings.length - 1} more)` : ""}`);
+  };
+  load();
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);
@@ -136,14 +152,16 @@ export function helix(options: HelixOptions = {}): Extension {
   const hostFor = (view: EditorView): Host => {
     let host = hosts.get(view);
     if (!host) {
-      const id = `editor-${++count}`;
+      const pane = `editor-${++count}`;
       host = {
         get state() {
           return view.state;
         },
         dispatch: (...specs: TransactionSpec[]) => view.dispatch(...specs),
         view,
-        id,
+        get id() {
+          return view.state.facet(helixDocument).path ?? pane;
+        },
         get name() {
           const document = view.state.facet(helixDocument);
           return document.name ?? document.path ?? "[scratch]";
@@ -151,7 +169,7 @@ export function helix(options: HelixOptions = {}): Extension {
         get path() {
           return view.state.facet(helixDocument).path ?? null;
         },
-        paneId: id,
+        paneId: pane,
       };
       hosts.set(view, host);
       hostOf.set(view, host);
@@ -250,13 +268,12 @@ export function helix(options: HelixOptions = {}): Extension {
     },
     onRender: (view) => {
       if (view.hasFocus) active = view;
-      const listeners = view.state.facet(onHelixStatus);
-      if (listeners.length === 0) return;
+      if (!options.onStatus) return;
       const status = statusOf(editor, hostFor(view), view === active);
       const key = JSON.stringify(status);
       if (!status || lastStatus.get(view) === key) return;
       lastStatus.set(view, key);
-      for (const listener of listeners) listener(status, view);
+      options.onStatus(status, view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -270,6 +287,7 @@ export function helix(options: HelixOptions = {}): Extension {
       views.delete(view);
       sessions?.close(view);
       editor.indentStyles.delete(hostFor(view).id);
+      editor.forgetSaved(hostFor(view));
       if (active === view) active = null;
     },
   });

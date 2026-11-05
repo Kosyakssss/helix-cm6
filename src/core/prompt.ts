@@ -208,7 +208,7 @@ export class Prompt {
           }
           input = this.line;
         }
-        this.request.onAccept(input);
+        this.request.onAccept?.(input);
         return "closed";
       }
       case "C-p":

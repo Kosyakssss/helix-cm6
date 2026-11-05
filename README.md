@@ -41,38 +41,23 @@ This is an editing core: the text, the keys and the command line. An editor is a
 
 [docs/api.md](docs/api.md) has the whole API.
 
-Languages other than markdown come as wasm modules:
+Languages other than markdown come as wasm modules. Build them and pass the URL where you serve them:
 
 ```ts
-import { helix, helixDocument } from "helix-cm6";
-import { languagesToml } from "helix-cm6/languages";
-
-const extension = helix({
-  languages: languagesToml,
-  grammars: {
-    grammar: async (name) => {
-      const response = await fetch(`/grammars/${name}.wasm`);
-      return response.ok ? response : null;
-    },
-    query: async (language, file) => {
-      const response = await fetch(`/queries/${language}/${file}`);
-      return response.ok ? response.text() : null;
-    },
-  },
-});
+const extension = helix({ grammars: "/languages" });
 new EditorView({ extensions: [extension, helixDocument.of({ path: "src/main.rs" })] });
 ```
 
 `bun run grammars --out <dir> rust python` builds those grammars as wasm modules into `<dir>/grammars` and copies their Helix queries, with the queries they inherit, into `<dir>/queries`. It takes each grammar from the repository and revision in Helix's `languages.toml`, and needs Git and network access. `--all` builds every grammar. `--themes` copies Helix's themes into `<dir>/themes`. A grammar module shares memory with the tree-sitter module, so it holds only the grammar's tables: JSON is 7 KB, Rust 1.1 MB.
 
-The two wasm modules load on first use, from JS modules with the module inlined, or from where you say with the `regex` and `syntax` options. A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm`, `helix-cm6/tree-sitter.wasm` and `helix-cm6/matcher.wasm`.
+The two wasm modules load on first use, from JS modules with the module inlined, or from where you say with the `regex` and `syntax` options. A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm` and `helix-cm6/tree-sitter.wasm`.
 
 ## Layout
 
 - `src/core/`: the `Host` interface (`HeadlessHost` runs the engine with no view), the prompt, regex and text helpers.
 - `src/commands/`, `src/keymap/`, `src/syntax/`: Helix's commands, keymap and syntax tree, with its highlighter, injections and queries.
 - `src/view/`, `src/codemirror.ts`: the view layer for a CodeMirror 6 editor (keys, IME, cursors, panels).
-- `src/api.ts`: the data and helpers for apps.
+- `src/api.ts`: the functions and hooks for apps.
 - `src/index.ts`: the stable API. `src/engine.ts`: the internals. `dist/` is their build (`bun run build`).
 - `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
 - `test/oracle/`: the comparison with real Helix.
