@@ -36,8 +36,8 @@ import {
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-hrjbpv57.js";
-__chunks(import.meta.url,["m9e6ww4h","hrjbpv57","28qqb8e8"],[["./index.js",1],["./chunk-hrjbpv57.js"],["./languages.js"]],0);
+} from "./chunk-97zy70fm.js";
+__chunks(import.meta.url,["erjzw7hp","97zy70fm","28qqb8e8"],[["./index.js",1],["./chunk-97zy70fm.js"],["./languages.js"]],0);
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {
@@ -188,7 +188,7 @@ function collectKeys(node, prefix, out) {
       continue;
     const command = trie.command;
     const name = command.kind === "static" ? command.name : command.kind === "typable" && command.args === "" ? `:${TYPABLE_MAP.get(command.name)?.name ?? command.name}` : null;
-    if (name === null)
+    if (name === null || name === "no_op")
       continue;
     const list = out.get(name);
     if (list)

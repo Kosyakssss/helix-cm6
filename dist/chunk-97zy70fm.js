@@ -14616,9 +14616,9 @@ function infoOf2(editor) {
     return { title: auto.title, rows: auto.body.map(([keys, doc]) => ({ keys, doc, available: true })) };
   const grouped = new Map;
   for (const [key, trie] of auto.map) {
-    const doc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(editor, trie.command);
-    if (doc === "no_op")
+    if (trie.kind === "command" && trie.command.kind === "static" && trie.command.name === "no_op")
       continue;
+    const doc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(editor, trie.command);
     const available = trie.kind !== "command" || trie.command.kind !== "static" || editor.hasCommand(trie.command.name);
     const row = grouped.get(doc) ?? { keys: [], available };
     row.keys.push(key);

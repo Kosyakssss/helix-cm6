@@ -61,8 +61,8 @@ export function infoOf(editor: HelixEditor): HelixInfo | null {
   if (!("kind" in auto)) return { title: auto.title, rows: auto.body.map(([keys, doc]) => ({ keys, doc, available: true })) };
   const grouped = new Map<string, { keys: string[]; available: boolean }>();
   for (const [key, trie] of auto.map) {
+    if (trie.kind === "command" && trie.command.kind === "static" && trie.command.name === "no_op") continue;
     const doc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(editor, trie.command);
-    if (doc === "no_op") continue;
     const available = trie.kind !== "command" || trie.command.kind !== "static" || editor.hasCommand(trie.command.name);
     const row = grouped.get(doc) ?? { keys: [], available };
     row.keys.push(key);

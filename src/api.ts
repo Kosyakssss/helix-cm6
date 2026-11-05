@@ -218,7 +218,7 @@ function collectKeys(node: TrieNode, prefix: string, out: Map<string, string[]>)
     if (trie.kind !== "command") continue;
     const command = trie.command;
     const name = command.kind === "static" ? command.name : command.kind === "typable" && command.args === "" ? `:${TYPABLE_MAP.get(command.name)?.name ?? command.name}` : null;
-    if (name === null) continue;
+    if (name === null || name === "no_op") continue;
     const list = out.get(name);
     if (list) list.push(keys);
     else out.set(name, [keys]);

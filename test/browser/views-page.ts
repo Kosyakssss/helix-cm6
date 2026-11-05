@@ -196,6 +196,13 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("the list has typed commands", [entry(":write")?.doc, entry(":write")?.keys, entry(":write")?.aliases], ["Save it", ["<C-s>"], [":w"]]);
   check("the list has the app's own commands", [entry("tabs:close")?.doc, entry("tabs:close")?.keys], ["Close a tab", ["<space>tc"]]);
 
+  helixConfigure(view, { config: '[keys.normal.space]\nf = "no_op"\n' });
+  check("a key set to no_op is not in the list", helixCommands(view).find((c) => c.name === "no_op")?.keys, []);
+  helixType(view, "<space>");
+  check("a key set to no_op is not in the key help", helixStatus(view).info?.rows.some((r) => r.doc === "Do nothing"), false);
+  helixType(view, "<esc>");
+  helixConfigure(view, { config: null });
+
   helixType(view, "gd");
   check("a jump selects a position", [helixSelection(view).primary.cursor, helixStatus(view).line], [10, 1]);
   helixType(view, "<C-o>");
