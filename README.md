@@ -1,84 +1,100 @@
 # helix-cm6
 
-Not on npm or any other registry yet. If you want it published, [open an issue](https://github.com/Kosyakssss/helix-cm6/issues) and I'll get on it.
-
-[Helix](https://helix-editor.com) for [CodeMirror 6](https://codemirror.net): a port of Helix's editing, made from Helix's source and checked against real Helix.
-
-- **Helix's editing commands.** The keymap, selections and multiple cursors, registers, macros, the undo tree, text objects, surround, jump labels and typed commands.
-- **Helix's config.** It reads the format of Helix's `config.toml`: `[keys.*]` and `[editor]`.
-- **Helix's own engines.** Search runs Helix's regex crates, compiled to WebAssembly. Syntax-aware commands use tree-sitter with the same grammars as Helix. Grapheme clusters follow the same Unicode rules.
-- **Tested against Helix.** About 34,000 key sequences run in real Helix and in this engine. The text, the selections and the mode after each one must match exactly.
-
-The port follows Helix master at commit `ba40e54742`.
+helix-cm6 adds [Helix](https://helix-editor.com) editing to [CodeMirror 6](https://codemirror.net). It is ported from Helix's source and tested against real Helix.
 
 ![Eight cursors from one regex select in a plain CodeMirror editor](docs/screenshots/1-multiple-cursors.png)
 
-More in [docs/screenshots](docs/screenshots), each in dark, light and both: the key help, a selection grown by the syntax tree, the command line, jump labels and a code editor. These show `bun run play`, a bare editor. An app adds its own colours, gutters and status line, as `examples/code` does in the last one: a code editor with a real language server.
-
-## Status
-
-This is the engine from [helix-motions](https://github.com/Kosyakssss/helix-motions), the Obsidian plugin, split out so that other CodeMirror 6 apps can use it. The plugin is built on it. There is no npm release yet, and the API can change.
+Not on npm or any other registry yet. If you want it published, [open an issue](https://github.com/Kosyakssss/helix-cm6/issues) and I'll get on it.
 
 ## Install
-
-From a git commit:
 
 ```sh
 bun add github:Kosyakssss/helix-cm6#<commit>
 ```
 
-`dist/` is committed, so no build step runs on install. `@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies.
+`dist/` is committed, so nothing builds on install. `@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies.
 
 ## Use
 
+Add `helix()` to your editor:
+
 ```ts
 import { EditorView } from "@codemirror/view";
-import { helix, helixDocument } from "helix-cm6";
+import { helix } from "helix-cm6";
 
-new EditorView({
-  parent: document.body,
-  extensions: [helix({ config: helixToml }), helixDocument.of({ path: "notes.md" })],
+new EditorView({ parent: document.body, extensions: [helix()] });
+```
+
+This gives you Helix's editing: the keymap, selections, multiple cursors, registers, macros, the undo tree, text objects, surround, jump labels and typed commands.
+
+To connect your app, give Helix its commands. `helixAppKeys` adds Helix's keys for the commands you supply, so `Space f` opens your file picker:
+
+```ts
+import { helix, helixAppKeys, helixMarkSaved } from "helix-cm6";
+
+const extension = helix({
+  config: helixToml,
+  keys: helixAppKeys,
+  commands: {
+    file_picker: () => openFilePicker(),
+    write: async ({ view }) => {
+      await saveNote(view.state.doc.toString());
+      helixMarkSaved(view);
+    },
+  },
 });
 ```
 
-This is an editing core: the text, the keys and the command line. An editor is an application, and the application brings the rest. It supplies commands such as `file_picker` and their keys, and draws pickers, gutters, colours and a status bar from the data the core gives. Helix's own key layout for those commands is available as plain data, `helixAppKeys`.
+[Build an app](docs/build-an-app.md) goes through this step by step.
 
-[docs/api.md](docs/api.md) has the whole API, and [examples](examples) has three apps, from one line to a code editor with a language server.
+## Your app
 
-Languages other than markdown come as wasm modules. Build them and pass the URL where you serve them:
+helix-cm6 is an editing core. It holds what Helix does to text, and draws cursors, selections, jump labels, the key help and a small command line.
 
-```ts
-const extension = helix({ grammars: "/languages" });
-new EditorView({ extensions: [extension, helixDocument.of({ path: "src/main.rs" })] });
+Your app brings the rest: files, tabs, pickers, a status bar, gutters, colors and language servers. helix-cm6 gives you the data for these and runs your commands.
+
+![A code editor with a language server, built on helix-cm6](docs/screenshots/6-code-editor.png)
+
+More in [docs/screenshots](docs/screenshots), each in dark, light and both: the key help, a selection grown by the syntax tree, the command line, jump labels and a code editor.
+
+## Documentation
+
+- [Build an app](docs/build-an-app.md)
+- [Commands](docs/commands.md)
+- [Keys](docs/keys.md)
+- [Config](docs/config.md)
+- [Draw your UI](docs/ui.md)
+- [Languages](docs/languages.md)
+- [Language servers](docs/language-servers.md)
+- [Colors](docs/colors.md)
+- [Hooks](docs/hooks.md)
+- [API reference](docs/api.md)
+- [How it works](docs/how-it-works.md)
+
+[`examples`](examples) has three apps, from one line to a code editor with a language server. For an Obsidian plugin, see [helix-motions](https://github.com/Kosyakssss/helix-motions/tree/on-helix-cm6).
+
+## Compatibility
+
+helix-cm6 follows Helix master at commit `ba40e54742`. About 44,000 key sequences run in real Helix and in this engine, and the text, the selections and the mode after each one must match exactly. [docs/parity.md](docs/parity.md) lists every Helix command and option.
+
+Screen readers and right-to-left text are not tested yet.
+
+The API can change until the first release.
+
+## Develop
+
+```sh
+bun install
+bun run check
+bun test
+bun run browser
+bun run views
+bun run play
 ```
 
-`bun run grammars --out <dir> rust python` builds those grammars as wasm modules into `<dir>/grammars` and copies their Helix queries, with the queries they inherit, into `<dir>/queries`. It takes each grammar from the repository and revision in Helix's `languages.toml`, and needs Git and network access. `--all` builds every grammar. `--themes` copies Helix's themes into `<dir>/themes`. A grammar module shares memory with the tree-sitter module, so it holds only the grammar's tables: JSON is 7 KB, Rust 1.1 MB.
+`bun run play` serves a bare editor to try changes by hand. See [Contributing](CONTRIBUTING.md) and [Testing](docs/testing.md).
 
-The two wasm modules load on first use, from JS modules with the module inlined, or from where you say with the `regex` and `syntax` options. A wasm source is bytes (`Uint8Array`, `ArrayBuffer`), a `Response`, or a function that returns one of these. The engine makes no network requests itself. The raw modules are exported as `helix-cm6/regex.wasm` and `helix-cm6/tree-sitter.wasm`.
-
-## Layout
-
-- `src/core/`: the `Host` interface (`HeadlessHost` runs the engine with no view), the prompt, regex and text helpers.
-- `src/commands/`, `src/keymap/`, `src/syntax/`: Helix's commands, keymap and syntax tree, with its highlighter, injections and queries.
-- `src/view/`, `src/codemirror.ts`: the view layer for a CodeMirror 6 editor (keys, IME, cursors, panels).
-- `src/api.ts`: the functions and hooks for apps.
-- `src/index.ts`: the stable API. `src/engine.ts`: the internals. `dist/` is their build (`bun run build`).
-- `tree-sitter/`, `regex/`: build scripts for the two wasm modules.
-- `test/oracle/`: the comparison with real Helix.
-- `test/browser/`: the same comparison through `helix()` in a CodeMirror 6 editor in headless Chromium, Firefox and WebKit, and a test with two editors.
-- `play/`: the bare editor, to try the engine by hand.
-
-## Try it
-
-`bun run play` serves the bare editor on http://127.0.0.1:4173 (set `PORT` to change it). It is `helix()` in one CodeMirror editor and nothing else, to check that the editing works by itself. `?file=server.go` opens a sample from `play/samples`, and any other name an empty document. A file `play/helix.toml` is used as the config. For syntax-aware commands, run `bun run grammars --out play/languages rust python typescript go` once; the page serves `play/languages`, which Git ignores.
-
-## Tests
-
-`bun test` compares the headless engine and its highlighter with Helix. `bun run browser` runs the hand suite through real key events in headless Chromium, Firefox and WebKit. `bun run views` checks two editors that share one `helix()`, the hooks and every UI component in those browsers. See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/testing.md](docs/testing.md) for setup.
-
-## Helix forks
-
-The engine follows Helix master and nothing else. To port a Helix fork, fork this repo, port the fork's changes, and point `test/oracle/setup.sh` at the fork's commit. The oracle then checks the port against the fork.
+To port a Helix fork, fork this repo, port the fork's changes and point `test/oracle/setup.sh` at the fork's commit. The tests then check the port against the fork.
 
 ## License
 

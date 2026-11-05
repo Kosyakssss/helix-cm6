@@ -1,139 +1,115 @@
-# API
+# API reference
 
-`helix-cm6` is an editing core. It holds what Helix does to text: keys, modes, selections, registers, macros, text objects, search, indentation, the syntax tree and the command line. It draws cursors, selections, jump labels and a small command line, and nothing else.
+Everything `helix-cm6` exports. Each function takes the `view` first. A view without `helix()` is an error, and `helixEnabled(view)` checks for one.
 
-Everything else belongs to the app: pickers, menus, popups, file trees, tabs, a status bar, gutters, colours, language servers, a shell. The core gives the data for these and takes the app's commands.
+`helix-cm6/engine` holds the internals that a custom host needs. It can change between versions. See [How it works](how-it-works.md).
 
-`helix-cm6` is the stable API. `helix-cm6/engine` holds the internals that a custom host needs (helix-motions uses it). It can change between versions.
+## helix
 
-## The editor
+`helix(options)` returns a CodeMirror extension. One extension can serve many editors. They share registers, the prompt, the config and the commands.
 
-```ts
-import { EditorView } from "@codemirror/view";
-import { helix, helixDocument } from "helix-cm6";
+| Option | Type | Description |
+| --- | --- | --- |
+| `config` | `string \| object \| null` | A Helix `config.toml`. See [Config](config.md). |
+| `commands` | `object` | Your app's commands. See [Commands](commands.md). |
+| `keys` | `object \| object[]` | Your app's keys. See [Keys](keys.md). |
+| `onStatus` | `(status, view) => void` | Runs when the status changes. See [Draw your UI](ui.md). |
+| `grammars` | `string \| object` | Where to load grammars. See [Languages](languages.md). |
+| `languages` | `string \| string[]` | The text of `languages.toml` files. |
+| `regex` | Wasm source | Where to load the regex module. |
+| `syntax` | Wasm source `\| false` | Where to load the syntax module. `false` turns it off. |
+| `shell` | `(command, input, shell) => output` | Runs shell commands. |
+| `completePath` | `(prefix) => paths` | Completes paths in the command line. |
+| `openJump` | `(jump, view) => unknown` | `C-o` or `C-i` reached another document. |
+| `variable` | `(name, view) => string \| null` | The value of a `%{name}` expansion. |
+| `panel` | `boolean` | `false` leaves out the key help and the command line. |
 
-new EditorView({ parent, extensions: [helix({ config: helixToml }), helixDocument.of({ path: "notes.md" })] });
-```
+## helixDocument
 
-One `helix()` extension can serve many editors. They share registers, the prompt and the jumplists.
+`helixDocument.of({ path, name, language })` says what an editor holds. All fields are optional.
 
-`helix(options)`:
-
-| Option | What it is |
+| Field | Description |
 | --- | --- |
-| `config` | The text of a Helix `config.toml`. |
-| `commands` | The app's commands: an object, or a function from a name to a command. See below. |
-| `keys` | The app's default keys. `helixAppKeys` is Helix's own layout for app commands. |
-| `languages` | The text of one or more `languages.toml` files. `helix-cm6/languages` exports Helix's. |
-| `grammars` | `grammar(name)` and `query(language, file)`, which load a language when the editor first meets it. |
-| `shell` | Runs shell commands for `\|`, `!`, `$` and the rest. Without it they say "No shell set". |
-| `openJump`, `variable` | Open a jump in another document, and give `%{…}` expansions their values. |
-| `regex`, `syntax` | Where to get each wasm module. The default is an inlined JS module, loaded on first use. `syntax: false` turns the syntax tree off. |
-| `panel` | `false` leaves out the built-in command line. `helixStatus` has all of its content, so an app can draw its own. |
+| `path` | Picks the language, and tells documents apart in the jumplist. |
+| `name` | The name in the status. The default is the path. |
+| `language` | Sets the language. `text` means none. |
 
-`helixDocument` is a facet with each editor's `path`, `name` and `language`.
+Pass a new state to `view.setState` to change the document in an editor.
 
-## Commands and keys
+## helixAppKeys
 
-Helix has about 300 commands. The core runs the ones that edit text. The rest need something only an app has, such as files or windows: `docs/parity.md` marks them `app`, and `helixCommandList()` and `helixTypedCommandList()` list them all, with their docs.
+Helix's own key layout for app commands, as plain data. See [Keys](keys.md).
 
-An app supplies what it has:
+## Run
 
-```ts
-helix({
-  keys: helixAppKeys,
-  commands: {
-    file_picker: (cx) => myPicker.open(),
-    write: async (cx, args) => save(cx.host.state.doc.toString(), args[0]),
-    "tabs:close-others": { doc: "Close the other tabs", run: () => tabs.closeOthers() },
-  },
-});
-```
-
-- A command gets a `Context` and the arguments of a typed command. It can return a promise. It returns `false` to let the core's own version run.
-- An app command with the name of a core command replaces it, for example `goto_next_diag`.
-- A name of the app's own can go in `[keys.*]`, and runs on the command line as `:tabs:close-others`. A name with a colon in the middle is always taken for an app command.
-- Keys come in three layers: the editing keys, then the app's `keys`, then the user's config. Keys for a command nobody provides are left out, so the key help lists only what works. A user's key for such a command says it is not available.
-- Typed commands work the same way: `:write` runs the app's `write`. Commands the app does not provide are not offered on the command line.
-
-To let the user keep their Helix keys, pass `keys: helixAppKeys`. To choose your own, pass your own table, or nothing. `helixAppKeys` is plain data in the same form as the keymap.
-
-From a command, or from anywhere else:
-
-| Function | What it does |
+| Function | Description |
 | --- | --- |
-| `helixEdit(view, edits)` | Applies text edits as one undo step. |
-| `helixSelect(view, ranges, primary?)` | Sets the selections. |
-| `helixPrompt(view, request)` | Opens the command line with a label, and calls back on each change and on accept. |
-| `helixSnippet(view, text, { removeBefore?, variables? })` | Inserts an LSP-style snippet at each cursor and selects its first tabstop. `removeBefore` removes that many characters before each cursor first, such as the prefix a completion replaces. `Tab` in insert mode, `goto_next_tabstop` and `goto_prev_tabstop` move between tabstops. |
-| `helixMessage(view, text, severity?)` | Shows a message. |
-| `helixKeys(view, "ggdd")` | Types keys. |
-| `helixRun(view, name)` | Runs a command, `":sort"` a typed command, `"@ggdd"` a macro. |
+| `helixRun(view, command)` | Runs a command, a typed command (`":sort"`) or a macro (`"@ggdd"`). Returns `false` if nobody provides it. |
+| `helixType(view, keys)` | Types keys. `<space>` and `<C-x>` name special keys. |
+| `helixCommands(view)` | Lists every command. See [Commands](commands.md#list-commands). |
 
-## Data for the app's UI
+## Edit
 
-| Data | How to get it |
+| Function | Description |
 | --- | --- |
-| Status line | `helixStatus(view)`: mode, pending keys, count, register, recording, selections, cursor position, message, language, modified, diagnostic counts. `onHelixStatus.of((status, view) => …)` calls back on a change. |
-| Key help | `status.info`: a title and rows of keys, doc and availability. |
-| Command line | `status.prompt`: label, input, cursor, completions, selected completion. |
-| Gutters | `helixGutter(view, fromLine, toLine)`: per line, the number to show (relative if set), whether a cursor is on it, the worst diagnostic, and the change. |
-| Syntax colours | `helixHighlights(view, from, to, scopes?)`: spans with their Helix scopes. `helixRainbow(view, from, to, levels?)`: bracket levels. Checked against real Helix. |
-| Tabstops | `helixTabstops(view)`: the ranges of the active snippet, with the choices of a choice tabstop. |
-| Options | `view.state.facet(helixEditor).config`: every `[editor]` option from the config, including those only an app draws, such as `rulers` and `statusline`. |
+| `helixEdit(view, edits)` | Applies `{ from, to?, insert? }`, or a list, as one undo step. |
+| `helixSelect(view, target, options?)` | Sets the selections. A target is a position, `{ anchor, head }` or a list. Options are `jump` and `primaryIndex`. |
+| `helixSnippet(view, text, options?)` | Inserts a snippet at each cursor. Options are `removeBefore` and `variables`. |
+| `helixSetRegister(view, name, values)` | Writes a register. |
 
-## Data from the app
+## Talk to the user
 
-| Effect | What it feeds |
+| Function | Description |
 | --- | --- |
-| `setDiagnostics.of(list)` | `]d`, `[d`, `:yank-diagnostic`, the counts in the status and the gutter data. |
-| `setChanges.of({ base, hunks })` | `]g`, `[g`, `:reset-diff-change` and the gutter data. `hunks` have line ranges before and after. |
+| `helixPrompt(view, request)` | Opens the command line. Returns a promise of the input, or `null`. The request has `label`, `initial?`, `history?`, `complete?` and `onChange?`. |
+| `helixMessage(view, text, severity?)` | Shows a message. `null` clears it. Severity is `info` or `error`. |
 
-## Language servers
+## Read
 
-The core does not talk to a language server. It has no client and no UI for one. An app that has a client connects it through the parts above:
-
-| Helix feature | How |
+| Function | Returns |
 | --- | --- |
-| Diagnostics | `setDiagnostics` |
-| `goto_definition` and the rest | An app command. One result: `helixSelect` in this document. More: the app's picker. |
-| `hover`, `signature_help`, `code_action`, `completion` | App commands that draw the result. `helixEdit` applies edits, and `helixSnippet` inserts a snippet from a completion. |
-| `rename_symbol` | An app command: `helixPrompt`, then `helixEdit`. |
-| `format_selections`, `:format` | App commands: `helixEdit`. |
-| `select_references_to_symbol_under_cursor` | An app command: `helixSelect`. |
+| `helixEnabled(view)` | Whether the view has `helix()`. |
+| `helixStatus(view)` | The status. See [Draw your UI](ui.md#status-bar). |
+| `helixSelection(view)` | `ranges`, `primary` and `primaryIndex`. |
+| `helixRegister(view, name)` | The values, or an empty list. |
+| `helixTabstops(view)` | The ranges of the active snippet, with `from`, `to` and `choices`. |
+| `helixGutter(view, fromLine, toLine)` | One object per line. See [Draw your UI](ui.md#gutters). |
+| `helixHighlights(view, from, to, scopes?)` | Spans with `from`, `to` and `scopes`. |
+| `helixRainbow(view, from, to, levels?)` | Spans with `from`, `to` and `level`. |
 
-## Grammars
+## Save
 
-`bun run grammars --out <dir> rust python` builds grammars as wasm modules from the repositories and revisions in Helix's `languages.toml`, and copies their Helix queries. The app serves them through `grammars`. Each loads when a document first needs it. Markdown is built in.
-
-## Hooks
-
-`helixHooks` is a facet for each editor, for apps where a document is more than plain text.
-
-```ts
-helixHooks.of({
-  edge(edge, host) { return false; },
-  motionRanges(host) { return []; },
-  enter(range, edge, host) { return false; },
-  key(key, cx) { return false; },
-  intercept(key, host) { return false; },
-  textObject(kind, ch, cx) { return false; },
-  command(name, cx) { return false; },
-  focused(host) { return null; },
-  stopBeforeEnd: false,
-});
-```
-
-| Hook | What it does |
+| Function | Description |
 | --- | --- |
-| `edge` | `h`, `j`, `k` or `l` cannot move further. It gets the direction, whether it extends, the steps left in the count and the goal column. Return `true` if the app took the key. |
-| `stopBeforeEnd` | `l` stops on the last character instead of the cell after it, and calls `edge` there. For small editors such as table cells. |
-| `motionRanges` | Ranges that `h`, `j`, `k` and `l` treat specially: `skip` jumps over the range, `row` is one row, and `enter` calls `enter`. |
-| `enter` | A motion reached an `enter` range. Return `true` if the app handled it. |
-| `key` | Runs in normal and select mode before the keymap, when no keys are pending. Return `true` if the app took the key. |
-| `intercept` | Runs before anything else in any mode, including an open prompt. Return `true` if the app took the key. |
-| `textObject` | Runs when `mi` or `ma` gets its character. Return `true` if the app selected it. |
-| `command` | Runs before a static command. Return `true` to replace it. |
-| `focused` | The editor that macros and `.` should replay in now, if focus moved. |
+| `helixMarkSaved(view)` | The document is saved, so `status.modified` is `false` until the next edit. |
 
-`HelixEditor.finalLineIsLine` (engine API) treats a last line with no newline as a whole line: `x` then `y` and `P` pastes above, as in a file with a final newline.
+## Configure
+
+| Function | Description |
+| --- | --- |
+| `helixConfigure(view, { config, commands, keys })` | Replaces what you pass, reloads, and returns the warnings. |
+| `helixConfig(view)` | Every option. It follows `:set`. |
+| `helixConfigWarnings(view)` | What was wrong with the config, your keys and their commands. |
+
+## Feed data
+
+| Function | Description |
+| --- | --- |
+| `helixSetDiagnostics(view, list)` | Feeds `]d`, `[d`, `:yank-diagnostic`, the status and the gutter. Each has `from`, `to`, `message`, and can have `severity`, `source`, `code` and `tags`. |
+| `helixDiagnostics(view)` | The list, mapped through edits since you set it. |
+| `helixSetChanges(view, { base, hunks })` | Feeds `]g`, `[g`, `:reset-diff-change` and the gutter. Each hunk has `beforeStart`, `beforeEnd`, `afterStart` and `afterEnd`, in lines. |
+| `helixChanges(view)` | What you set. |
+
+## Watch
+
+| Function | Description |
+| --- | --- |
+| `helixSyntaxChanged(update)` | From a CodeMirror `ViewUpdate`: a language loaded, so redraw colors. |
+
+## helixHooks
+
+A facet for apps where a document is more than plain text. See [Hooks](hooks.md).
+
+## Types
+
+Every type is exported with a `Helix` prefix, such as `HelixStatus`, `HelixCommand` and `HelixKeys`. `HelixCommandName` and `HelixRunnable` are the types of command names, so an editor completes them.

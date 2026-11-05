@@ -16,7 +16,7 @@ Helix for CodeMirror 6, ported from Helix's source. Read `CONTRIBUTING.md` and `
 - Plain CodeMirror 6 and DOM. No imports from an app (`obsidian` or other).
 - `@codemirror/*` are peer dependencies. The only runtime dependency is `smol-toml`. Ask before you add one.
 - Tree-sitter and regex are our own wasm builds (`tree-sitter/build.sh`, `regex/build.sh`). CI checks that they rebuild byte for byte.
-- `src/index.ts` is the public API. Apps and helix-motions import only from it. Add an export there instead of a deep import.
+- `src/index.ts` is the public API. Apps import only from it. Add an export there instead of a deep import. helix-motions also uses `src/engine.ts`, the internals.
 - `dist/` is committed so a git install needs no build. Run `bun run build` and commit `dist/` with each source change. CI checks that it matches.
 - No module-level state. State lives on `HelixEditor`, in editor state, or in the extension that `helix()` returns, so one page can have many editors.
 - No app workarounds in the engine. Use a hook, such as the `dropSelectionChange` facet, and let the app supply it.
@@ -46,7 +46,7 @@ Only the maintainer tags and releases.
 
 - No code comments.
 - A commit message is one sentence that says what changed for the user of the engine. See `git log`.
-- Docs: plain, short sentences. Do not sell Helix; readers know it.
+- Docs: write like the Obsidian docs and kepano's projects (pele, knap, defuddle). Start with one plain sentence that says what the thing does. Then show the smallest code that works. Keep sections short, and link to a focused page instead of adding detail. Use imperative, sentence-case headings, common words, American English and realistic examples. Do not sell Helix; readers know it.
 
 ## Repository
 
