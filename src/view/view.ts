@@ -24,7 +24,9 @@ import { changeByAndWithSelection } from "../commands/util";
 import { pasteImpl } from "../commands/edit";
 import { exitSelectMode } from "../commands/util";
 import { Context } from "../core/editor";
+import { changesField } from "../changes";
 import { diagnosticsField } from "../diagnostics";
+import { infoOf } from "./status";
 
 export interface ViewEnv {
   editor: HelixEditor;
@@ -42,6 +44,7 @@ export interface ViewEnv {
   joinStatus?(view: EditorView, joined: boolean): void;
   panelOwner?(view: EditorView): EditorView | null;
   panelGuest?(view: EditorView): EditorView | null;
+  noPanel?: boolean;
 }
 
 export const helixEnv = Facet.define<ViewEnv, ViewEnv | null>({ combine: (values) => values[0] ?? null });
@@ -367,6 +370,7 @@ export function helixExtension(env: ViewEnv): Extension {
     EditorState.allowMultipleSelections.of(true),
     helixField,
     diagnosticsField,
+    changesField,
     historyField,
     syncNativeSelection,
     keyHandler,
@@ -380,7 +384,7 @@ export function helixExtension(env: ViewEnv): Extension {
     cursorLine,
     attributes,
     scrollMargins,
-    panel,
+    env.noPanel ? [] : panel,
   ];
 }
 
@@ -434,36 +438,14 @@ function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTM
   }
   if (focused) env.joinStatus?.(view, !!covered && (!!active || !!status));
   info.replaceChildren();
-  const auto = editor.config.autoInfo && focused ? editor.autoinfo : null;
+  const auto = editor.config.autoInfo && focused ? infoOf(editor) : null;
   info.classList.toggle("hx-hidden", !auto);
   if (!auto) return;
-  const title = add(info, "div", "hx-autoinfo-title");
-  const rows: [string, string][] = [];
-  let unavailable = new Set<string>();
-  if ("kind" in auto) {
-    title.textContent = auto.name;
-    const grouped = new Map<string, string[]>();
-    for (const [key, trie] of auto.map) {
-      const desc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(trie.command);
-      if (desc === "no_op") continue;
-      const list = grouped.get(desc) ?? [];
-      list.push(key);
-      grouped.set(desc, list);
-    }
-    for (const [desc, keys] of grouped) rows.push([keys.join(", "), desc]);
-    unavailable = new Set(
-      [...auto.map]
-        .filter(([, t]) => t.kind === "command" && t.command.kind === "static" && !editor.hasCommand(t.command.name))
-        .map(([, t]) => describe((t as { command: import("../keymap/trie").MappableCommand }).command)),
-    );
-  } else {
-    title.textContent = auto.title;
-    rows.push(...auto.body);
-  }
-  for (const [k, d] of rows) {
-    const row = add(info, "div", unavailable.has(d) ? "hx-autoinfo-row hx-autoinfo-unavailable" : "hx-autoinfo-row");
-    add(row, "span", "hx-autoinfo-key", k);
-    add(row, "span", undefined, d);
+  add(info, "div", "hx-autoinfo-title").textContent = auto.title;
+  for (const entry of auto.rows) {
+    const row = add(info, "div", entry.available ? "hx-autoinfo-row" : "hx-autoinfo-row hx-autoinfo-unavailable");
+    add(row, "span", "hx-autoinfo-key", entry.keys);
+    add(row, "span", undefined, entry.doc);
   }
   const panelRect = dom.getBoundingClientRect();
   const lift = statusRect && statusRect.height > 0 && statusRect.left < panelRect.right ? Math.max(0, panelRect.bottom - statusRect.top) : 0;
@@ -497,8 +479,3 @@ export function uiSignature(editor: HelixEditor, host: Host): string {
   ]);
 }
 
-function describe(command: import("../keymap/trie").MappableCommand): string {
-  if (command.kind === "static") return command.name.replace(/_/g, " ");
-  if (command.kind === "typable") return `:${command.raw}`;
-  return `@${command.keys}`;
-}

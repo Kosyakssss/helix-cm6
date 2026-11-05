@@ -3,6 +3,7 @@ import { newlineIndent } from "./insert";
 import { textobjectTreesitter } from "../syntax/textobject";
 import type { Text } from "@codemirror/state";
 import type { Context } from "../core/editor";
+import { hooksOf } from "../hooks";
 import { nextGraphemeBoundary, prevGraphemeBoundary, segmentGraphemes } from "../graphemes";
 import { Range, Selection } from "../selection";
 import { charAt, charIsLineEnding, isLowercase, isUppercase, lineIndex } from "../core/text";
@@ -620,6 +621,7 @@ function selectTextobject(cx: Context, objtype: TextObject): void {
     cx.editor.autoinfo = null;
     const ch = cx.editor.keyChar(key);
     if (ch === null) return;
+    if (hooksOf(cx.host).textObject?.(objtype, ch, cx)) return;
     applyMotion(cx, (cx) => {
       const doc = docOf(cx);
       if (ch === "g") {

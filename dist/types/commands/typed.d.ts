@@ -8,6 +8,7 @@ export interface TypableCommand {
     doc: string;
     signature: Signature;
     fun: (cx: Context, args: Args, event: PromptEvent) => void;
+    app?: string;
 }
 export declare const TYPABLE: TypableCommand[];
 export declare const TYPABLE_MAP: Map<string, TypableCommand>;
@@ -17,5 +18,7 @@ export declare function executeCommandLine(cx: Context, input: string, event: Pr
 export interface CommandLineCompleters {
     path: ((prefix: string) => string[]) | null;
     languages: () => string[];
+    available: (name: string) => boolean;
+    appNames: () => Iterable<string>;
 }
 export declare function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[];

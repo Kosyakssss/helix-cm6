@@ -5,4 +5,6 @@ export interface LoadedConfig {
     keys: Partial<Record<"normal" | "select" | "insert", KeyNode>>;
     warnings: string[];
 }
-export declare function loadConfig(source: string | null, base?: Config): LoadedConfig;
+type Known = (name: string) => boolean;
+export declare function loadConfig(source: string | null, base?: Config, known?: Known): LoadedConfig;
+export {};

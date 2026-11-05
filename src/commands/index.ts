@@ -7,6 +7,8 @@ import { insertCommands } from "./insert";
 import { miscCommands, UNSUPPORTED } from "./misc";
 import { shellCommands } from "./shell";
 import { syntaxCommands } from "./syntax";
+import { gotoCommands } from "./goto";
+import { isAppCommandName } from "./app";
 import { executeCommandLine } from "./typed";
 import { hooksOf } from "../hooks";
 
@@ -18,19 +20,21 @@ export const STATIC_COMMANDS: Record<string, CommandFn> = {
   ...miscCommands,
   ...syntaxCommands,
   ...shellCommands,
+  ...gotoCommands,
 };
 
 export function isKnownCommand(name: string): boolean {
-  return name in STATIC_COMMANDS || UNSUPPORTED.includes(name);
+  return name in STATIC_COMMANDS || UNSUPPORTED.includes(name) || isAppCommandName(name);
 }
 
 export function executeCommand(cx: Context, command: MappableCommand, arg?: string): void {
   switch (command.kind) {
     case "static": {
       if (hooksOf(cx.host).command?.(command.name, cx)) return;
+      if (cx.editor.runApp(cx, command.name)) return;
       const fn = STATIC_COMMANDS[command.name];
       if (fn) fn(cx, arg);
-      else if (UNSUPPORTED.includes(command.name)) cx.editor.setStatus(`${command.name} is not available`);
+      else if (UNSUPPORTED.includes(command.name) || isAppCommandName(command.name)) cx.editor.setStatus(`${command.name} is not available in this editor`);
       else cx.editor.setError(`no such command: '${command.name}'`);
       return;
     }

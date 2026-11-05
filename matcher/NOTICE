@@ -1,6 +1,0 @@
-matcher.wasm is compiled from helix-cm6's matcher/ crate, which uses:
-
-nucleo-matcher, Mozilla Public License 2.0, https://github.com/helix-editor/nucleo
-imara-diff, Apache License 2.0, https://github.com/pascalkuthe/imara-diff
-unicode-segmentation, MIT or Apache License 2.0, https://github.com/unicode-rs/unicode-segmentation
-hashbrown, MIT or Apache License 2.0, https://github.com/rust-lang/hashbrown

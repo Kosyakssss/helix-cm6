@@ -8,7 +8,6 @@ import { executeCommand, runTypable, STATIC_COMMANDS } from "../commands";
 import { Prompt, type Completion } from "./prompt";
 import { commitHistoryNow, JumpList, type Jump } from "../commands/jumps";
 import type { ShellRunner } from "../commands/shell";
-import type { Variable } from "../commands/expansion";
 import { completeCommandLine, executeCommandLine } from "../commands/typed";
 import { setSel } from "../commands/util";
 import { getOption, setOption, toggleOption } from "./options";
@@ -20,11 +19,8 @@ import type { LanguageLoader } from "../syntax/loader";
 import { autoDetectIndentStyle, indentStyleFromStr, type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
-import type { Theme } from "../ui/theme";
-import type { UiLayer } from "./layers";
-import { WORKSPACE_BUILTINS, type WorkspaceProviders } from "../commands/workspace";
-import type { Matcher } from "./matcher";
-import { diagnosticsOf, type Diagnostic } from "../diagnostics";
+import { COMMAND_DOCS } from "../commands/docs";
+import { APP_COMMANDS, appFallback, type AppCommand, type HelixApp } from "../commands/app";
 import { helixField, historyField } from "../state";
 
 export type OnKeyCallback = (cx: Context, key: string) => void;
@@ -82,15 +78,6 @@ export interface UiHooks {
   jumpLabels?(host: Host, labels: JumpLabel[]): void;
 }
 
-export interface Workspace extends WorkspaceProviders {
-  diagnostics?(host: Host): readonly Diagnostic[];
-  cwd?(host: Host): string;
-  versionControlHead?(host: Host): string;
-  run(cx: Context, name: string, args: string[]): void | false;
-  openJump?(cx: Context, jump: Jump): void;
-  variable?(cx: Context, name: Variable): string | null;
-}
-
 export interface ViewOps {
   scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", syncCursor: boolean): void;
   alignView(cx: Context, align: "top" | "center" | "bottom"): void;
@@ -116,7 +103,7 @@ export class HelixEditor {
   status: Status | null = null;
   autoinfo: TrieNode | { title: string; body: [string, string][] } | null = null;
   ui: UiHooks = {};
-  workspace: Workspace | null = null;
+  app: HelixApp | null = null;
   viewOps: ViewOps | null = null;
   activePrompt: Prompt | null = null;
   visualLines = false;
@@ -217,62 +204,27 @@ export class HelixEditor {
       setSel(cx, jump.selection);
       return;
     }
-    if (this.workspace?.openJump) this.workspace.openJump(cx, jump);
+    this.app?.openJump?.(cx, jump);
   }
 
   runStatic(cx: Context, name: string): void {
     executeCommand(cx, { kind: "static", name });
   }
 
-  workspaceCommand(cx: Context, name: string, args: string[] = []): void {
-    const builtin = WORKSPACE_BUILTINS[name];
-    if (builtin?.available(cx) && (!this.workspace || this.hasProvider(name))) {
-      void builtin.run(cx, args);
-      return;
-    }
-    if (this.workspace && this.workspace.run(cx, name, args) !== false) return;
-    if (builtin?.available(cx)) void builtin.run(cx, args);
-    else this.setStatus(`${name} is not available in this editor`);
+  appCommand(name: string): AppCommand | null {
+    if (!this.app) return null;
+    const fallback = appFallback(name);
+    const found = this.app.command(name) ?? (fallback ? this.app.command(fallback) : null);
+    return typeof found === "function" ? found : (found?.run ?? null);
   }
 
-  private hasProvider(name: string): boolean {
-    const workspace = this.workspace!;
-    const language = workspace.language;
-    switch (name) {
-      case "buffer_picker":
-        return workspace.buffers !== undefined;
-      case "file_picker":
-      case "file_picker_in_current_buffer_directory":
-        return workspace.files !== undefined;
-      case "global_search":
-        return workspace.search !== undefined;
-      case "changed_file_picker":
-        return workspace.changedFiles !== undefined;
-      case "goto_definition":
-      case "goto_declaration":
-      case "goto_type_definition":
-      case "goto_implementation":
-      case "goto_reference":
-        return language?.locations !== undefined;
-      case "hover":
-        return language?.hover !== undefined;
-      case "signature_help":
-        return language?.signatureHelp !== undefined;
-      case "code_action":
-        return language?.codeActions !== undefined;
-      case "rename_symbol":
-        return language?.rename !== undefined;
-      case "format_selections":
-        return language?.format !== undefined;
-      case "select_references_to_symbol_under_cursor":
-        return language?.highlights !== undefined;
-      case "symbol_picker":
-        return language?.symbols !== undefined;
-      case "workspace_symbol_picker":
-        return language?.workspaceSymbols !== undefined;
-      default:
-        return false;
-    }
+  runApp(cx: Context, name: string, args: readonly string[] = []): boolean {
+    const command = this.appCommand(name);
+    if (!command) return false;
+    const result = command(cx, args);
+    if (result === false) return false;
+    if (result instanceof Promise) result.catch((err: unknown) => this.setError(err instanceof Error ? err.message : String(err)));
+    return true;
   }
 
   scroll(cx: Context, amount: number | "page" | "half", dir: "forward" | "backward", sync: boolean): void {
@@ -331,6 +283,8 @@ export class HelixEditor {
         completeCommandLine(input, {
           path: this.pathCompleter,
           languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? [],
+          available: (name) => this.appCommand(name) !== null,
+          appNames: () => [...(this.app?.commandNames?.() ?? [])].filter((name) => !(name in APP_COMMANDS)),
         }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
@@ -361,10 +315,6 @@ export class HelixEditor {
   }
 
   private savedRevisions = new Map<string, number>();
-  theme: Theme | null = null;
-  themes: { names(): string[]; load(name: string): Theme | null } | null = null;
-  onThemeChanged: (() => void) | null = null;
-  busyLabel: string | null = null;
 
   isModified(host: Host): boolean {
     const history = host.state.field(historyField, false);
@@ -375,87 +325,6 @@ export class HelixEditor {
   markSaved(host: Host): void {
     const history = host.state.field(historyField, false);
     if (history) this.savedRevisions.set(host.id, history.current);
-  }
-
-  busyFrame(): string | null {
-    return this.busyLabel;
-  }
-
-  workspaceDiagnostics(host: Host): readonly Diagnostic[] {
-    return this.workspace?.diagnostics?.(host) ?? diagnosticsOf(host.state);
-  }
-
-  versionControlHead(host: Host): string {
-    return this.workspace?.versionControlHead?.(host) ?? "";
-  }
-
-  workingDirectory(host: Host): string {
-    return this.workspace?.cwd?.(host) ?? "";
-  }
-
-  layers: UiLayer[] = [];
-  lastPicker: UiLayer | null = null;
-  matcher: Matcher | null = null;
-  matcherLoader: (() => Promise<Matcher>) | null = null;
-  private layerListeners = new Set<() => void>();
-
-  onLayersChanged(listener: () => void): () => void {
-    this.layerListeners.add(listener);
-    return () => this.layerListeners.delete(listener);
-  }
-
-  hasOverlays(): boolean {
-    return this.layerListeners.size > 0;
-  }
-
-  renderLayers(host?: Host): void {
-    for (const listener of this.layerListeners) listener();
-    if (host) this.ui.render?.(host);
-  }
-
-  pushLayer(layer: UiLayer, host?: Host): void {
-    this.layers.push(layer);
-    this.renderLayers(host);
-  }
-
-  removeLayer(layer: UiLayer, host?: Host): void {
-    const index = this.layers.indexOf(layer);
-    if (index < 0) return;
-    this.layers.splice(index, 1);
-    layer.closed?.();
-    this.renderLayers(host);
-  }
-
-  async withMatcher(run: (matcher: Matcher) => void): Promise<void> {
-    if (!this.matcher && this.matcherLoader) this.matcher = await this.matcherLoader();
-    if (this.matcher) run(this.matcher);
-    else this.setError("the fuzzy matcher is not available");
-  }
-
-  private themeBeforePreview: Theme | null | undefined = undefined;
-
-  private themeChanged(): void {
-    this.onThemeChanged?.();
-    this.renderLayers();
-  }
-
-  setTheme(theme: Theme): void {
-    this.themeBeforePreview = undefined;
-    this.theme = theme;
-    this.themeChanged();
-  }
-
-  setThemePreview(theme: Theme): void {
-    if (this.themeBeforePreview === undefined) this.themeBeforePreview = this.theme;
-    this.theme = theme;
-    this.themeChanged();
-  }
-
-  unsetThemePreview(): void {
-    if (this.themeBeforePreview === undefined) return;
-    this.theme = this.themeBeforePreview;
-    this.themeBeforePreview = undefined;
-    this.themeChanged();
   }
 
   focusedHost(host: Host): Host {
@@ -495,25 +364,13 @@ export class HelixEditor {
     if (this.macroRecording && this.macroReplaying.length === 0) {
       this.macroRecording.keys.push(key);
     }
+    if (hooksOf(host).intercept?.(key, host)) return true;
     if (this.activePrompt && this.activePrompt.host.id !== host.id) {
       const other = this.activePrompt;
       other.handleKey("esc");
       if (this.activePrompt === other) this.activePrompt = null;
       this.ui.promptChanged?.(other.host, this.activePrompt);
       this.ui.render?.(other.host);
-    }
-    const layer = this.activePrompt ? null : this.layers[this.layers.length - 1];
-    if (layer) {
-      const cx = new Context(this, host, null, null);
-      const result = layer.handleKey(key, cx);
-      if (result === "close" || result === "close-ignored") {
-        if (layer.modal && "options" in layer && layer.className === "hx-picker") this.lastPicker = layer;
-        this.removeLayer(layer);
-      }
-      for (const callback of cx.callbacks) callback();
-      this.renderLayers();
-      this.ui.render?.(host);
-      if (result === "consumed" || result === "close") return true;
     }
     if (this.activePrompt) {
       const prompt = this.activePrompt;
@@ -670,7 +527,13 @@ export class HelixEditor {
     runTypable(cx, input);
   }
 
+  commandDoc(name: string): string {
+    if (COMMAND_DOCS[name]) return COMMAND_DOCS[name];
+    const found = this.app?.command(name);
+    return (typeof found === "object" && found?.doc) || name;
+  }
+
   hasCommand(name: string): boolean {
-    return name in STATIC_COMMANDS;
+    return name in STATIC_COMMANDS || this.appCommand(name) !== null;
   }
 }

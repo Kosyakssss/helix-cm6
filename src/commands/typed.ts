@@ -13,11 +13,9 @@ import { shell, type ShellOutput } from "./shell";
 import { Args, SHELL_SIGNATURE, split, Tokenizer, type Flag, type Signature } from "./command-line";
 import { expand } from "./expansion";
 import { diagnosticsOf } from "../diagnostics";
-import { highlightSpans } from "../syntax/highlight";
+import { DEFAULT_SCOPES, highlightSpans } from "../syntax/highlight";
 import type { Node as SyntaxNode, TreeCursor } from "../syntax/ts";
-import { diffBaseOf, lastDiffHunks } from "../ui/diff";
-import { Popup } from "../ui/menu";
-import { DEFAULT_SCOPES } from "../ui/theme";
+import { changesOf } from "../changes";
 
 export type PromptEvent = "update" | "validate" | "abort";
 
@@ -27,6 +25,7 @@ export interface TypableCommand {
   doc: string;
   signature: Signature;
   fun: (cx: Context, args: Args, event: PromptEvent) => void;
+  app?: string;
 }
 
 const sig = (min: number, max: number | null, extra: Partial<Signature> = {}): Signature => ({ positionals: [min, max], ...extra });
@@ -148,16 +147,22 @@ function gotoLineNumber(cx: Context, args: Args, event: PromptEvent): void {
 }
 
 function ws(name: string, extra: Partial<TypableCommand> = {}): Pick<TypableCommand, "fun"> & Partial<TypableCommand> {
-  return { ...extra, fun: validateOnly((cx, args) => cx.editor.workspaceCommand(cx, name, args.positional)) };
+  return {
+    ...extra,
+    app: name,
+    fun: validateOnly((cx, args) => {
+      if (!cx.editor.runApp(cx, name, args.positional)) cx.editor.setStatus(`:${name} is not available in this editor`);
+    }),
+  };
 }
 
-function hoverPopup(cx: Context, text: string): void {
-  const doc = docOf(cx);
-  if (!cx.editor.hasOverlays()) {
-    cx.editor.setStatus(text.replace(/^```\w*\n|\n```$/g, ""));
+function hoverPopup(cx: Context, title: string, text: string): void {
+  const body = text.replace(/^```\w*\n|\n```$/g, "");
+  if (!cx.editor.config.autoInfo || !body.includes("\n")) {
+    cx.editor.setStatus(body);
     return;
   }
-  cx.editor.pushLayer(new Popup(text, selOf(cx).primary().cursor(doc)), cx.host);
+  cx.editor.autoinfo = { title, body: body.split("\n").map((line): [string, string] => [line, ""]) };
 }
 
 function prettyPrint(cursor: TreeCursor, depth: number): string {
@@ -202,7 +207,7 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
       const show = (result: ShellOutput) => {
         if (result.code !== 0 && !result.stdout) cx.editor.setError(result.stderr.trim() || `Shell command failed with code ${result.code}`);
         else if (!result.stdout.trim()) cx.editor.setStatus("Command run");
-        else hoverPopup(cx, `\`\`\`\n${result.stdout}\n\`\`\``);
+        else hoverPopup(cx, command, result.stdout.trimEnd());
         cx.editor.ui.render?.(cx.host);
       };
       const output = cx.editor.shell(command, null, cx.editor.config.shell);
@@ -221,7 +226,7 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
         const byte = syntax.byteOf(selOf(cx).primary().cursor(doc));
         for (let node: SyntaxNode | null = syntax.root.tree!.rootNode.descendantForByteRange(byte, byte); node; node = node.parent) scopes.push(node.kind);
       }
-      hoverPopup(cx, `\`\`\`json\n${JSON.stringify(scopes.reverse())}\n\`\`\``);
+      hoverPopup(cx, "tree-sitter-scopes", JSON.stringify(scopes.reverse()));
     }),
   },
   {
@@ -231,11 +236,11 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
     fun: validateOnly((cx) => {
       const syntax = cx.editor.syntax?.(cx.host);
       if (!syntax) return;
-      const scopes = cx.editor.theme?.scopes ?? DEFAULT_SCOPES;
+      const scopes = DEFAULT_SCOPES;
       const [from, to] = cx.editor.visibleRange(cx.host);
       const byte = syntax.byteOf(selOf(cx).primary().cursor(docOf(cx)));
       const span = highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to)).find((s) => s.from <= byte && byte < s.to);
-      hoverPopup(cx, span ? span.scopes.map((h) => scopes[h]).join(", ") : "");
+      hoverPopup(cx, "tree-sitter-highlight-name", span ? span.scopes.map((h) => scopes[h]).join(", ") : "");
     }),
   },
   {
@@ -246,7 +251,7 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
       const syntax = cx.editor.syntax?.(cx.host);
       if (!syntax) throw new Error("Syntax information is not available");
       const byte = syntax.byteOf(selOf(cx).primary().cursor(docOf(cx)));
-      hoverPopup(cx, [...syntax.layersForByteRange(byte, byte)].map((layer) => syntax.loader.language(layer.language).config.languageId).join(", "));
+      hoverPopup(cx, "tree-sitter-layers", [...syntax.layersForByteRange(byte, byte)].map((layer) => syntax.loader.language(layer.language).config.languageId).join(", "));
     }),
   },
   {
@@ -258,55 +263,17 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
       if (!syntax) return;
       const primary = selOf(cx).primary();
       const node = syntax.descendantForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
-      if (node) hoverPopup(cx, `\`\`\`tsq\n${prettyPrintTree(node)}\n\`\`\``);
+      if (node) hoverPopup(cx, "tree-sitter-subtree", prettyPrintTree(node));
     }),
   },
-  {
-    name: "theme",
-    aliases: [],
-    doc: "Change the editor theme (show current theme if no name specified).",
-    fun: (cx, args, event) => {
-      const name = args.positional[0];
-      const editor = cx.editor;
-      if (event === "abort") return editor.unsetThemePreview();
-      if (event === "update") {
-        if (!name) return editor.unsetThemePreview();
-        const theme = editor.themes?.load(name);
-        if (theme) editor.setThemePreview(theme);
-        return;
-      }
-      if (!name) {
-        editor.setStatus(editor.theme?.name ?? "default");
-        return;
-      }
-      const theme = editor.themes?.load(name);
-      if (!theme) throw new Error(`Could not load theme: File not found for: ${name}`);
-      editor.setTheme(theme);
-    },
-  },
-  {
-    name: "line-ending",
-    aliases: [],
-    doc: "Set the document's default line ending. Options: crlf, lf.",
-    fun: validateOnly((cx, args) => {
-      const arg = args.positional[0]?.toLowerCase();
-      if (arg === undefined) {
-        cx.editor.setStatus("line feed");
-        return;
-      }
-      if (arg.startsWith("lf")) return;
-      if (arg.startsWith("crlf")) throw new Error("this editor stores only line feeds");
-      throw new Error("invalid line ending");
-    }),
-  },
+  { name: "theme", aliases: [], doc: "Change the editor theme (show current theme if no name specified).", ...ws("theme") },
   {
     name: "reset-diff-change",
     aliases: ["diffget", "diffg"],
     doc: "Reset the diff change at the cursor position.",
     fun: validateOnly((cx) => {
-      const base = cx.host.view ? diffBaseOf(cx.host.view) : null;
-      const hunks = lastDiffHunks(cx.host);
-      if (base === null || !hunks) throw new Error("Diff is not available in the current buffer");
+      const { base, hunks } = changesOf(cx.host.state);
+      if (base === null) throw new Error("Diff is not available in the current buffer");
       const doc = docOf(cx);
       const baseLines = base.split("\n");
       const lineStart = (lines: number) => baseLines.slice(0, lines).reduce((n, l) => n + l.length + 1, 0);
@@ -574,7 +541,7 @@ export function executeCommandLine(cx: Context, input: string, event: PromptEven
   }
   const cmd = TYPABLE_MAP.get(command);
   if (!cmd) {
-    if (event === "validate") cx.editor.setError(`no such command: '${command}'`);
+    if (event === "validate" && !cx.editor.runApp(cx, command, rest.trim() ? rest.trim().split(/\s+/) : [])) cx.editor.setError(`no such command: '${command}'`);
     return;
   }
   executeCommand(cx, cmd, rest, event);
@@ -613,9 +580,12 @@ function quoteCompletion(token: CompletionToken, candidate: string): Completion 
 export interface CommandLineCompleters {
   path: ((prefix: string) => string[]) | null;
   languages: () => string[];
+  available: (name: string) => boolean;
+  appNames: () => Iterable<string>;
 }
 
 export function completeCommandLine(input: string, completers: CommandLineCompleters): Completion[] {
+  const offered = (cmd: TypableCommand) => !cmd.app || completers.available(cmd.app);
   const pathCompleter = completers.path;
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
@@ -646,8 +616,10 @@ export function completeCommandLine(input: string, completers: CommandLineComple
   const start = input.length - input.replace(/^\s+/, "").length;
   const names = new Set<string>();
   for (const cmd of TYPABLE) {
+    if (!offered(cmd)) continue;
     if (cmd.name.startsWith(command)) names.add(cmd.name);
     for (const a of cmd.aliases) if (a.startsWith(command)) names.add(cmd.name);
   }
+  if (command) for (const name of completers.appNames()) if (name.startsWith(command)) names.add(name);
   return [...names].sort().map((n) => ({ start, text: n, label: n }));
 }

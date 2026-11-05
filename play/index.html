@@ -1,54 +1,15 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>helix-cm6 playground</title>
+<meta charset="utf-8" />
+<title>helix-cm6</title>
 <style>
-  :root { color-scheme: light dark; font: 14px/1.4 system-ui, sans-serif; }
-  :root[data-theme="light"] { color-scheme: light; }
-  :root[data-theme="dark"] { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: Canvas; color: CanvasText; }
-  body { display: grid; grid-template-columns: 220px 1fr; grid-template-rows: auto 1fr; height: 100vh; }
-  header { grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 6px 12px; white-space: nowrap; border-bottom: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
-  header h1 { font-size: 14px; margin: 0 12px 0 0; }
-  header label { display: flex; gap: 4px; align-items: center; }
-  header .hint { margin-left: auto; opacity: 0.6; font-size: 12px; }
-  header select { max-width: 14ch; }
-  nav { overflow: auto; padding: 6px 0; border-right: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
-  nav h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; margin: 10px 12px 4px; }
-  nav button { display: block; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; padding: 3px 12px; cursor: pointer; }
-  nav button:hover { background: color-mix(in srgb, CanvasText 8%, transparent); }
-  nav button.open { font-weight: 600; }
-  main { display: flex; min-width: 0; min-height: 0; }
-  main.horizontal { flex-direction: column; }
-  .pane { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .pane + .pane { border-left: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
-  main.horizontal .pane + .pane { border-left: 0; border-top: 1px solid color-mix(in srgb, CanvasText 15%, transparent); }
-  .editor { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .editor .cm-editor { flex: 1; min-height: 0; }
-  .editor .cm-editor.cm-focused { outline: none; }
-  .editor .cm-scroller { font-family: var(--play-font); }
+  :root {
+    color-scheme: light dark;
+  }
+  html,
+  body,
+  .cm-editor {
+    height: 100%;
+    margin: 0;
+  }
 </style>
-</head>
-<body>
-<header>
-  <h1>helix-cm6</h1>
-  <label>Theme <select id="theme"><option value="">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
-  <label>Helix theme <select id="helix-theme"><option value="">None</option></select></label>
-  <label>Font <select id="font"><option value="ui-monospace, Menlo, monospace">Monospace</option><option value="system-ui, sans-serif">Proportional</option><option value="Georgia, serif">Serif</option></select></label>
-  <label>Size <select id="size"><option>13px</option><option selected>15px</option><option>18px</option><option>24px</option></select></label>
-  <label><input type="checkbox" id="wrap" checked> Wrap lines</label>
-  <label><input type="checkbox" id="relative"> Relative</label>
-  <label><input type="checkbox" id="guides" checked> Guides</label>
-  <label><input type="checkbox" id="whitespace"> Whitespace</label>
-  <label><input type="checkbox" id="ruler"> Ruler</label>
-  <label><input type="checkbox" id="rainbow"> Rainbow</label>
-  <label><input type="checkbox" id="split"> Split</label>
-  <span class="hint">space f, space b, space ?, space k, space a, :theme</span>
-</header>
-<nav id="files"></nav>
-<main id="panes"></main>
 <script type="module" src="/play.js"></script>
-</body>
-</html>

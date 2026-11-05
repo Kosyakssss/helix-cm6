@@ -119,7 +119,7 @@ function expandInner(cx: Context, content: string): Expanded {
 function expandVariable(cx: Context, variable: Variable): string {
   const doc = docOf(cx);
   const primary = selOf(cx).primary();
-  const app = cx.editor.workspace?.variable?.(cx, variable);
+  const app = cx.editor.app?.variable?.(cx, variable);
   if (app !== undefined && app !== null) return app;
   switch (variable) {
     case "cursor_line":

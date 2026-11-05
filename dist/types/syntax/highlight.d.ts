@@ -91,4 +91,5 @@ export interface HighlightSpan {
     scopes: Highlight[];
 }
 export declare function highlightSpans(syntax: Syntax, scopes: readonly string[], start: number, end: number): HighlightSpan[];
+export declare const DEFAULT_SCOPES: readonly string[];
 export {};

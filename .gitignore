@@ -3,3 +3,4 @@ node_modules
 test/oracle/cache-*.json
 play/languages
 test/oracle/languages
+play/helix.toml

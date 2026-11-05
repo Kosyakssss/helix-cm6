@@ -1,4 +1,3 @@
-import { Matcher } from "../core/matcher";
 import { RustRegexEngine } from "../core/rx";
 
 export type WasmBytes = Uint8Array | ArrayBuffer | Response;
@@ -23,9 +22,4 @@ export async function wasmBytes(source: WasmSource): Promise<Uint8Array> {
 export async function loadRegex(source?: WasmSource): Promise<RustRegexEngine> {
   const bytes = source === undefined ? await unpack((await import("../../regex/regex.wasm")).default) : await wasmBytes(source);
   return RustRegexEngine.load(bytes);
-}
-
-export async function loadMatcher(source?: WasmSource): Promise<Matcher> {
-  const bytes = source === undefined ? await unpack((await import("../../matcher/matcher.wasm")).default) : await wasmBytes(source);
-  return Matcher.load(bytes);
 }

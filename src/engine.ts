@@ -2,7 +2,7 @@ export { helix, helixDocument, helixEditor, helixKeys, helixRun, helixStatus, ty
 export { helixExtension, uiRefresher, uiSignature, type ViewEnv } from "./view/view";
 export { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 export { loadSyntax } from "./view/syntax";
-export { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
+export { onHelixStatus, statusOf, infoOf, type HelixInfo, type HelixInfoRow, type HelixPromptStatus, type HelixStatus } from "./view/status";
 export { makeViewOps } from "./view/viewops";
 export { SystemClipboard } from "./view/clipboard";
 
@@ -17,9 +17,8 @@ export {
   type Status,
   type UiHooks,
   type ViewOps,
-  type Workspace,
 } from "./core/editor";
-export { HeadlessHost, type Host } from "./core/host";
+export { HeadlessHost, setMode, type Host } from "./core/host";
 export { helixHooks, type EdgeDirection, type HelixEdge, type HelixHooks, type MotionRange } from "./hooks";
 export { compilePattern, escapeRegex, type Pattern } from "./core/regex";
 export { RustRegexEngine } from "./core/rx";
@@ -40,7 +39,9 @@ export {
 } from "./state";
 export { Range, Selection, type Direction } from "./selection";
 export { MemoryClipboard, Registers, type ClipboardProvider, type ClipboardType, type RegisterEnv } from "./registers";
-export { buildKeymaps } from "./keymap";
+export { buildKeymaps, helixAppKeys, type KeyLayer } from "./keymap";
+export { APP_COMMANDS, type AppCommand, type AppCommandInfo, type HelixApp } from "./commands/app";
+export { applyTextEdits, type TextEdit } from "./commands/goto";
 export { formatKey, keyFromDom, parseKey, parseMacro, type KeyEvent } from "./keys";
 export { defaultConfig, type Config } from "./config";
 export { loadConfig, type LoadedConfig } from "./config-loader";
@@ -57,9 +58,7 @@ export { LanguageLoader, type LanguageSource, type QueryFile } from "./syntax/lo
 export { parseLanguagesToml, type LanguageConfiguration } from "./syntax/config";
 export type { LanguageId } from "./syntax/injections";
 export type { Syntax } from "./syntax/syntax";
-export * from "./ui";
 export { setDiagnostics, diagnosticsField, type Diagnostic, type Severity } from "./diagnostics";
-export { Matcher, FuzzyPattern, type Hunk } from "./core/matcher";
-export type { CodeAction, CompletionItem, FileTarget, LanguageFeatures, Location, LocationKind, SearchMatch, SignatureHelp, SymbolInfo, TextEdit, WorkspaceBuffer, WorkspaceProviders } from "./commands/workspace";
-export type { UiLayer, LayerResult } from "./core/layers";
+export { setChanges, changesField, changesOf, type Changes, type Hunk } from "./changes";
 export { helixEnv } from "./view/view";
+export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";

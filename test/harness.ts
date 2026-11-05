@@ -2,7 +2,7 @@ import { Text } from "@codemirror/state";
 import { commitHistoryNow } from "../src/commands/jumps";
 import { HeadlessHost } from "../src/core/host";
 import { HelixEditor } from "../src/core/editor";
-import { buildKeymaps } from "../src/keymap";
+import { buildKeymaps, helixAppKeys } from "../src/keymap";
 import { helixField, historyField, setHelix, syncNativeSelection, toNative, helixOwned } from "../src/state";
 import { defaultConfig, type Config } from "../src/config";
 import { print, plain } from "../src/core/markup";
@@ -95,7 +95,7 @@ export interface RunResult {
 }
 
 export function makeEditor(config?: Partial<Config>) {
-  const editor = new HelixEditor(buildKeymaps(), { ...defaultConfig(), ...config });
+  const editor = new HelixEditor(buildKeymaps({}, { app: helixAppKeys }), { ...defaultConfig(), ...config });
   editor.regex = regexEngine;
   editor.shell = (command, input, shell) => {
     const proc = Bun.spawnSync([...shell, command], { stdin: input === null ? "ignore" : Buffer.from(input), stdout: "pipe", stderr: "pipe" });

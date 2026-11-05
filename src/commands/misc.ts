@@ -8,7 +8,6 @@ import { helixField, historyField, helixOwned, setHelix, toNative } from "../sta
 import { Transaction } from "@codemirror/state";
 import { commitHistoryNow, pushJump } from "./jumps";
 import { docOf, modeOf, selOf, setSel } from "./util";
-import { completionController } from "../ui/completion";
 import type { CommandFn } from "./motion";
 
 function applySteps(cx: Context, steps: Step[], current: number): boolean {
@@ -209,10 +208,6 @@ function plainChar(key: string): string | null {
   return null;
 }
 
-function workspace(name: string): CommandFn {
-  return (cx) => cx.editor.workspaceCommand(cx, name);
-}
-
 export const miscCommands: Record<string, CommandFn> = {
   no_op: () => {},
   undo,
@@ -259,90 +254,6 @@ export const miscCommands: Record<string, CommandFn> = {
   toggle_comments: (cx) => cx.editor.runComments(cx, "toggle"),
   toggle_line_comments: (cx) => cx.editor.runComments(cx, "line"),
   toggle_block_comments: (cx) => cx.editor.runComments(cx, "block"),
-  file_picker: workspace("file_picker"),
-  file_picker_in_current_directory: workspace("file_picker"),
-  file_picker_in_current_buffer_directory: workspace("file_picker_in_current_buffer_directory"),
-  file_explorer: workspace("file_explorer"),
-  file_explorer_in_current_directory: workspace("file_explorer"),
-  file_explorer_in_current_buffer_directory: workspace("file_explorer_in_current_buffer_directory"),
-  buffer_picker: workspace("buffer_picker"),
-  jumplist_picker: workspace("jumplist_picker"),
-  last_picker: workspace("last_picker"),
-  symbol_picker: workspace("symbol_picker"),
-  syntax_symbol_picker: workspace("symbol_picker"),
-  lsp_or_syntax_symbol_picker: workspace("symbol_picker"),
-  workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  syntax_workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  lsp_or_syntax_workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  command_palette: workspace("command_palette"),
-  code_action: workspace("code_action"),
-  diagnostics_picker: workspace("diagnostics_picker"),
-  workspace_diagnostics_picker: workspace("workspace_diagnostics_picker"),
-  goto_next_change: workspace("goto_next_change"),
-  goto_prev_change: workspace("goto_prev_change"),
-  goto_first_change: workspace("goto_first_change"),
-  goto_last_change: workspace("goto_last_change"),
-  goto_first_diag: workspace("goto_first_diag"),
-  goto_last_diag: workspace("goto_last_diag"),
-  goto_next_diag: workspace("goto_next_diag"),
-  goto_prev_diag: workspace("goto_prev_diag"),
-  global_search: workspace("global_search"),
-  goto_file: workspace("goto_file"),
-  goto_file_hsplit: workspace("goto_file_hsplit"),
-  goto_file_vsplit: workspace("goto_file_vsplit"),
-  goto_definition: workspace("goto_definition"),
-  goto_declaration: workspace("goto_declaration"),
-  goto_type_definition: workspace("goto_type_definition"),
-  goto_implementation: workspace("goto_implementation"),
-  changed_file_picker: workspace("changed_file_picker"),
-  select_references_to_symbol_under_cursor: workspace("select_references_to_symbol_under_cursor"),
-  signature_help: workspace("signature_help"),
-  completion: (cx) => void completionController(cx.editor, cx.host).trigger(cx, true),
-  format_selections: workspace("format_selections"),
-  transpose_view: workspace("transpose_view"),
-  goto_reference: workspace("goto_reference"),
-  hover: workspace("hover"),
-  rename_symbol: workspace("rename_symbol"),
-  goto_last_accessed_file: workspace("goto_last_accessed_file"),
-  goto_last_modified_file: workspace("goto_last_modified_file"),
-  goto_next_buffer: workspace("goto_next_buffer"),
-  goto_previous_buffer: workspace("goto_previous_buffer"),
-  jump_view_left: workspace("jump_view_left"),
-  jump_view_right: workspace("jump_view_right"),
-  jump_view_up: workspace("jump_view_up"),
-  jump_view_down: workspace("jump_view_down"),
-  swap_view_left: workspace("swap_view_left"),
-  swap_view_right: workspace("swap_view_right"),
-  swap_view_up: workspace("swap_view_up"),
-  swap_view_down: workspace("swap_view_down"),
-  rotate_view: workspace("rotate_view"),
-  rotate_view_reverse: workspace("rotate_view_reverse"),
-  hsplit: workspace("hsplit"),
-  vsplit: workspace("vsplit"),
-  hsplit_new: workspace("hsplit_new"),
-  vsplit_new: workspace("vsplit_new"),
-  wclose: workspace("wclose"),
-  wonly: workspace("wonly"),
 };
 
-export const UNSUPPORTED = [
-  "goto_next_tabstop",
-  "goto_prev_tabstop",
-  "suspend",
-  "dap_launch",
-  "dap_restart",
-  "dap_toggle_breakpoint",
-  "dap_continue",
-  "dap_pause",
-  "dap_step_in",
-  "dap_step_out",
-  "dap_next",
-  "dap_variables",
-  "dap_terminate",
-  "dap_edit_condition",
-  "dap_edit_log",
-  "dap_switch_thread",
-  "dap_switch_stack_frame",
-  "dap_enable_exceptions",
-  "dap_disable_exceptions",
-];
+export const UNSUPPORTED = ["goto_next_tabstop", "goto_prev_tabstop"];

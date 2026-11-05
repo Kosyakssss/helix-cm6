@@ -311,15 +311,17 @@ function applyEditor(config: Config, editor: Record<string, unknown>, warnings: 
   }
 }
 
-function checkCommand(raw: string, path: string, warnings: string[]): boolean {
+type Known = (name: string) => boolean;
+
+function checkCommand(raw: string, path: string, warnings: string[], known: Known): boolean {
   const cmd = parseCommand(raw);
-  if (cmd.kind === "static" && !isKnownCommand(cmd.name)) {
+  if (cmd.kind === "static" && !isKnownCommand(cmd.name) && !known(cmd.name)) {
     warnings.push(`${path}: unknown command "${cmd.name}"`);
     return false;
   }
   if (cmd.kind === "typable") {
     const [name] = splitCommandLine(cmd.raw);
-    if (!/^\d+$/.test(name) && !TYPABLE_MAP.has(name)) {
+    if (!/^\d+$/.test(name) && !TYPABLE_MAP.has(name) && !known(name) && !name.includes(":")) {
       warnings.push(`${path}: typed command ":${name}" is not supported`);
       return false;
     }
@@ -327,15 +329,15 @@ function checkCommand(raw: string, path: string, warnings: string[]): boolean {
   return true;
 }
 
-function convertTrie(value: unknown, path: string, warnings: string[]): RawTrie | null {
-  if (typeof value === "string") return checkCommand(value, path, warnings) ? value : null;
+function convertTrie(value: unknown, path: string, warnings: string[], known: Known): RawTrie | null {
+  if (typeof value === "string") return checkCommand(value, path, warnings, known) ? value : null;
   if (Array.isArray(value)) {
     const cmds = value.map(String);
     if (cmds.some((c) => c.startsWith("@"))) {
       warnings.push(`${path}: macro keybindings may not be used in command sequences`);
       return null;
     }
-    const ok = cmds.filter((c) => checkCommand(c, path, warnings));
+    const ok = cmds.filter((c) => checkCommand(c, path, warnings, known));
     return ok.length > 0 ? ok : null;
   }
   if (value && typeof value === "object") {
@@ -347,7 +349,7 @@ function convertTrie(value: unknown, path: string, warnings: string[]): RawTrie 
         warnings.push(`${path}.${k}: ${(err as Error).message}`);
         continue;
       }
-      const t = convertTrie(v, `${path}.${k}`, warnings);
+      const t = convertTrie(v, `${path}.${k}`, warnings, known);
       if (t !== null) map[k] = t;
     }
     return { name: "", map };
@@ -356,7 +358,7 @@ function convertTrie(value: unknown, path: string, warnings: string[]): RawTrie 
   return null;
 }
 
-export function loadConfig(source: string | null, base: Config = defaultConfig()): LoadedConfig {
+export function loadConfig(source: string | null, base: Config = defaultConfig(), known: Known = () => false): LoadedConfig {
   const config: Config = structuredClone(base);
   const warnings: string[] = [];
   const keys: LoadedConfig["keys"] = {};
@@ -376,7 +378,7 @@ export function loadConfig(source: string | null, base: Config = defaultConfig()
           warnings.push(`keys.${mode}: unknown mode`);
           continue;
         }
-        const t = convertTrie(table, `keys.${mode}`, warnings);
+        const t = convertTrie(table, `keys.${mode}`, warnings, known);
         if (t && typeof t === "object" && !Array.isArray(t)) keys[mode] = t;
       }
     } else if (section === "theme") {

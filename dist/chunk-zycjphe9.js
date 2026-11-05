@@ -1,6 +1,6 @@
 // src/codemirror.ts
 import { Facet as Facet5 } from "@codemirror/state";
-import { EditorView as EditorView6, drawSelection } from "@codemirror/view";
+import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
 
 // src/hooks.ts
 import { Facet } from "@codemirror/state";
@@ -15,6 +15,8 @@ var helixHooks2 = Facet.define({
     const enter = values.flatMap((v) => v.enter ? [v.enter.bind(v)] : []);
     const command = values.flatMap((v) => v.command ? [v.command.bind(v)] : []);
     const key = values.flatMap((v) => v.key ? [v.key.bind(v)] : []);
+    const intercept = values.flatMap((v) => v.intercept ? [v.intercept.bind(v)] : []);
+    const textObject = values.flatMap((v) => v.textObject ? [v.textObject.bind(v)] : []);
     const ranges = values.flatMap((v) => v.motionRanges ? [v.motionRanges.bind(v)] : []);
     const focused = values.flatMap((v) => v.focused ? [v.focused.bind(v)] : []);
     return {
@@ -22,6 +24,8 @@ var helixHooks2 = Facet.define({
       enter: enter.length > 0 ? first(enter) : undefined,
       command: command.length > 0 ? first(command) : undefined,
       key: key.length > 0 ? first(key) : undefined,
+      intercept: intercept.length > 0 ? first(intercept) : undefined,
+      textObject: textObject.length > 0 ? first(textObject) : undefined,
       motionRanges: ranges.length > 0 ? (host) => ranges.flatMap((r) => r(host)) : undefined,
       focused: focused.length > 0 ? (host) => focused.reduce((found, f) => found ?? f(host), null) : undefined,
       stopBeforeEnd: (host) => values.some((v) => typeof v.stopBeforeEnd === "function" ? v.stopBeforeEnd(host) : v.stopBeforeEnd === true)
@@ -1384,6 +1388,21 @@ function doc(host) {
 }
 function selection(host) {
   return helix(host).selection;
+}
+function setMode2(host, mode, sel, extra = {}) {
+  const value = helix(host);
+  const next = {
+    ...value,
+    ...extra,
+    mode,
+    selection: (sel ?? value.selection).ensureInvariants(host.state.doc)
+  };
+  host.dispatch({
+    selection: toNative2(next, host.state.doc),
+    effects: setHelix2.of(next),
+    annotations: helixOwned2.of(true),
+    scrollIntoView: true
+  });
 }
 
 // src/movement.ts
@@ -6642,6 +6661,8 @@ function selectTextobject(cx, objtype) {
     const ch = cx.editor.keyChar(key);
     if (ch === null)
       return;
+    if (hooksOf(cx.host).textObject?.(objtype, ch, cx))
+      return;
     applyMotion(cx, (cx) => {
       const doc = docOf2(cx);
       if (ch === "g") {
@@ -6943,1644 +6964,6 @@ var editCommands = {
 
 // src/commands/misc.ts
 import { Transaction as Transaction2 } from "@codemirror/state";
-
-// src/ui/completion.ts
-import { ViewPlugin as ViewPlugin3 } from "@codemirror/view";
-
-// src/view/view.ts
-import { EditorState as EditorState3, Facet as Facet3, Prec, RangeSetBuilder } from "@codemirror/state";
-import {
-  Decoration,
-  EditorView as EditorView2,
-  ViewPlugin as ViewPlugin2,
-  WidgetType,
-  showPanel
-} from "@codemirror/view";
-
-// src/keymap/trie.ts
-function parseCommand(input) {
-  if (input.startsWith(":")) {
-    const raw = input.slice(1).trim();
-    const space = raw.search(/\s/);
-    const name = space < 0 ? raw : raw.slice(0, space);
-    const args = space < 0 ? "" : raw.slice(space + 1).trim();
-    return { kind: "typable", name, args, raw };
-  }
-  if (input.startsWith("@"))
-    return { kind: "macro", keys: input.slice(1) };
-  return { kind: "static", name: input };
-}
-function buildTrie(raw) {
-  if (typeof raw === "string")
-    return { kind: "command", command: parseCommand(raw) };
-  if (Array.isArray(raw)) {
-    const commands = raw.map(parseCommand);
-    if (commands.some((c) => c.kind === "macro")) {
-      throw new Error("macro keybindings may not be used in command sequences");
-    }
-    return { kind: "sequence", commands };
-  }
-  const map = new Map;
-  for (const [key, value] of Object.entries(raw.map)) {
-    map.set(normalizeKeyString(key), buildTrie(value));
-  }
-  return { kind: "node", name: raw.name, sticky: raw.sticky ?? false, map };
-}
-function cloneTrie(trie) {
-  if (trie.kind !== "node")
-    return trie;
-  return { ...trie, map: new Map([...trie.map].map(([k, v]) => [k, cloneTrie(v)])) };
-}
-function mergeNodes(dst, other) {
-  for (const [key, trie] of other.map) {
-    const existing = dst.map.get(key);
-    if (existing && existing.kind === "node" && trie.kind === "node") {
-      mergeNodes(existing, trie);
-      continue;
-    }
-    dst.map.delete(key);
-    dst.map.set(key, trie);
-  }
-}
-function search(trie, keys) {
-  let current = trie;
-  for (const key of keys) {
-    if (!current || current.kind !== "node")
-      return;
-    current = current.map.get(key);
-  }
-  return current;
-}
-
-class Keymaps {
-  map;
-  state = [];
-  sticky = null;
-  constructor(map) {
-    this.map = map;
-  }
-  pending() {
-    return this.state;
-  }
-  reset() {
-    this.state = [];
-    this.sticky = null;
-  }
-  containsKey(mode, key) {
-    const node = search(this.map[mode], this.state);
-    return !!node && node.kind === "node" && node.map.has(key);
-  }
-  get(mode, key) {
-    const keymap = this.map[mode];
-    if (key === "esc") {
-      if (this.state.length > 0) {
-        const keys = this.state;
-        this.state = [];
-        return { kind: "cancelled", keys };
-      }
-      this.sticky = null;
-    }
-    const first = this.state[0] ?? key;
-    const root = this.sticky ?? keymap;
-    const trie = search(root, [first]);
-    if (!trie)
-      return { kind: "notFound" };
-    if (trie.kind === "command")
-      return { kind: "matched", command: trie.command };
-    if (trie.kind === "sequence")
-      return { kind: "matchedSequence", commands: trie.commands };
-    this.state.push(key);
-    const found = search(trie, this.state.slice(1));
-    if (!found) {
-      const keys = this.state;
-      this.state = [];
-      return { kind: "cancelled", keys };
-    }
-    if (found.kind === "node") {
-      if (found.sticky) {
-        this.state = [];
-        this.sticky = found;
-      }
-      return { kind: "pending", node: found };
-    }
-    this.state = [];
-    if (found.kind === "command")
-      return { kind: "matched", command: found.command };
-    return { kind: "matchedSequence", commands: found.commands };
-  }
-}
-
-// src/view/cursor.ts
-import { StateEffect as StateEffect3 } from "@codemirror/state";
-import { ViewPlugin, layer } from "@codemirror/view";
-
-// src/view/dom.ts
-function make(doc, tag, cls, text) {
-  const node = doc.createElement(tag);
-  if (cls)
-    node.className = cls;
-  if (text !== undefined)
-    node.textContent = text;
-  return node;
-}
-function add(parent, tag, cls, text) {
-  return parent.appendChild(make(parent.ownerDocument, tag, cls, text));
-}
-function setProps(node, props) {
-  for (const [name, value] of Object.entries(props))
-    node.style.setProperty(name, value);
-}
-function windowOf(view) {
-  return view.dom.ownerDocument.defaultView;
-}
-function styleOf(el) {
-  return el.ownerDocument.defaultView.getComputedStyle(el);
-}
-
-// src/view/cursor.ts
-class CellMarker {
-  doc;
-  cls;
-  box;
-  glyph;
-  backdrop;
-  constructor(doc, cls, box, glyph, backdrop) {
-    this.doc = doc;
-    this.cls = cls;
-    this.box = box;
-    this.glyph = glyph;
-    this.backdrop = backdrop;
-  }
-  eq(other) {
-    if (!(other instanceof CellMarker) || other.cls !== this.cls)
-      return false;
-    if (this.backdrop?.color !== other.backdrop?.color || this.backdrop?.image !== other.backdrop?.image)
-      return false;
-    const a = this.box;
-    const b = other.box;
-    if (a.left !== b.left || a.top !== b.top || a.right !== b.right || a.bottom !== b.bottom)
-      return false;
-    const g = this.glyph;
-    const h = other.glyph;
-    if (!g || !h)
-      return g === h;
-    return g.text === h.text && g.top === h.top && g.height === h.height && g.font === h.font && g.spacing === h.spacing && g.features === h.features && g.variations === h.variations;
-  }
-  draw() {
-    const node = make(this.doc, "div");
-    this.apply(node);
-    return node;
-  }
-  update(dom, prev) {
-    if (!(prev instanceof CellMarker))
-      return false;
-    this.apply(dom);
-    return true;
-  }
-  apply(node) {
-    node.className = this.cls;
-    setProps(node, {
-      "--hx-cell-left": `${this.box.left}px`,
-      "--hx-cell-top": `${this.box.top}px`,
-      "--hx-cell-width": `${this.box.right - this.box.left}px`,
-      "--hx-cell-height": `${this.box.bottom - this.box.top}px`,
-      "--hx-cell-backdrop": this.backdrop?.color ?? "transparent",
-      "--hx-cell-backdrop-image": this.backdrop?.image ?? "none"
-    });
-    node.replaceChildren();
-    const g = this.glyph;
-    if (!g)
-      return;
-    const span = add(node, "span", "hx-cell-glyph", g.text);
-    setProps(span, {
-      "--hx-glyph-top": `${g.top}px`,
-      "--hx-glyph-height": `${g.height}px`,
-      "--hx-glyph-font": g.font,
-      "--hx-glyph-spacing": g.spacing,
-      "--hx-glyph-features": g.features,
-      "--hx-glyph-variations": g.variations
-    });
-  }
-}
-
-class Measure {
-  view;
-  model;
-  rows = new Map;
-  opaque = new Map;
-  lineBoxes = new Map;
-  backdrops = new Map;
-  constructor(view, model) {
-    this.view = view;
-    this.model = model;
-  }
-  lineElement(pos) {
-    const { node, offset } = this.view.domAtPos(pos);
-    const target = node.nodeType === 1 && offset < node.childNodes.length ? node.childNodes[offset] : node;
-    const el = target.nodeType === 1 ? target : target.parentElement;
-    return el?.closest(".cm-line") ?? null;
-  }
-  row(line, y) {
-    if (!line)
-      return null;
-    let metrics = this.rows.get(line);
-    if (!metrics) {
-      const rect = line.getBoundingClientRect();
-      const style = styleOf(line);
-      const top = rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
-      const height = parseFloat(style.lineHeight);
-      if (!(height > 0))
-        return null;
-      metrics = { top, height };
-      this.rows.set(line, metrics);
-    }
-    const k = Math.max(0, Math.floor((y - metrics.top) / metrics.height));
-    return [metrics.top + k * metrics.height, metrics.top + (k + 1) * metrics.height];
-  }
-  backdrop(pos) {
-    const { node } = this.view.domAtPos(pos, 1);
-    const start = node.nodeType === 1 ? node : node.parentElement;
-    if (!start)
-      return null;
-    const known = this.backdrops.get(start);
-    if (known)
-      return known;
-    const layers = [];
-    let color = "transparent";
-    for (let e = start;e; e = e.parentElement) {
-      const bg = styleOf(e).backgroundColor;
-      if (isOpaque(bg)) {
-        color = bg;
-        break;
-      }
-      if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg))
-        layers.push(`linear-gradient(${bg}, ${bg})`);
-    }
-    const result = { color, image: layers.length > 0 ? layers.join(", ") : "none" };
-    this.backdrops.set(start, result);
-    return result;
-  }
-  onOpaque(el) {
-    const chain = [];
-    let result = false;
-    for (let e = el;e && !e.classList.contains("cm-content"); e = e.parentElement) {
-      const known = this.opaque.get(e);
-      if (known !== undefined) {
-        result = known;
-        break;
-      }
-      chain.push(e);
-      if (isOpaque(styleOf(e).backgroundColor)) {
-        result = true;
-        break;
-      }
-      if (e.classList.contains("cm-line"))
-        break;
-    }
-    for (const e of chain)
-      this.opaque.set(e, result);
-    return result;
-  }
-  boxes(n) {
-    let boxes = this.lineBoxes.get(n);
-    if (boxes)
-      return boxes;
-    boxes = [];
-    this.lineBoxes.set(n, boxes);
-    const doc = this.view.state.doc;
-    if (n < 1 || n > doc.lines)
-      return boxes;
-    const line = doc.line(n);
-    const el = this.lineElement(line.from);
-    for (const seg of this.model.byLine.get(n) ?? []) {
-      if (seg.to > seg.from) {
-        const r = domRange(this.view, seg.from, seg.to);
-        for (const rect of r ? Array.from(r.getClientRects()) : []) {
-          const row = this.row(el, (rect.top + rect.bottom) / 2);
-          if (row && rect.width > 0)
-            boxes.push({ left: rect.left, right: rect.right, top: row[0], bottom: row[1] });
-        }
-      }
-    }
-    if (this.model.newlines.has(n) && !this.model.eol.has(line.to) && el) {
-      const c = this.view.coordsAtPos(line.to, -1) ?? this.view.coordsAtPos(line.to, 1);
-      const row = c && this.row(el, (c.top + c.bottom) / 2);
-      if (c && row)
-        boxes.push({ left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] });
-    }
-    return boxes;
-  }
-}
-function cellWidth(el) {
-  return 0.6 * parseFloat(styleOf(el).fontSize);
-}
-var spaces = new Map;
-function spaceWidth(el) {
-  const font = styleOf(el).font;
-  let width = spaces.get(font);
-  if (width === undefined) {
-    const canvas = make(el.ownerDocument, "canvas").getContext("2d");
-    if (!canvas)
-      return cellWidth(el);
-    canvas.font = font;
-    width = canvas.measureText(" ").width;
-    spaces.set(font, width);
-  }
-  return width;
-}
-function isOpaque(color) {
-  if (color === "transparent")
-    return false;
-  const alpha = /rgba\([^)]*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color);
-  if (!alpha)
-    return true;
-  const a = alpha[1];
-  return a.endsWith("%") ? parseFloat(a) >= 100 : parseFloat(a) >= 1;
-}
-function covered(boxes, x, y) {
-  return boxes.some((b) => x >= b.left && x < b.right && y >= b.top && y < b.bottom);
-}
-function model(view, editor) {
-  const value = view.state.field(helixField2, false);
-  if (!value)
-    return null;
-  const doc = view.state.doc;
-  const shape = editor.config.cursorShape[value.mode];
-  const insert = value.mode === "insert";
-  const { from: vFrom, to: vTo } = view.viewport;
-  const byLine = new Map;
-  const newlines = new Map;
-  const cells = [];
-  value.selection.ranges.forEach((range, i) => {
-    const primary = i === value.selection.primaryIndex;
-    const native = primary && !insert;
-    const drawsCell = shape !== "hidden" && !(insert && primary && shape === "bar") && !view.composing;
-    let from = range.from();
-    let to = range.to();
-    if (insert) {
-      const r = range.minWidth1(doc);
-      if (r.head > r.anchor) {
-        from = r.anchor;
-        to = prevGraphemeBoundary2(doc, r.head);
-      } else {
-        const cursorEnd = nextGraphemeBoundary2(doc, r.head);
-        from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
-        to = r.anchor;
-      }
-    }
-    const start = Math.max(from, vFrom);
-    const end = Math.min(to, vTo);
-    for (let pos = start;pos < end; ) {
-      const line = doc.lineAt(pos);
-      const segEnd = Math.min(end, line.to);
-      const list = byLine.get(line.number) ?? [];
-      list.push({ from: pos, to: segEnd, native });
-      byLine.set(line.number, list);
-      if (to > line.to && line.to < doc.length)
-        newlines.set(line.number, native && newlines.get(line.number) !== false);
-      pos = line.to + 1;
-    }
-    const pos = range.cursor(doc);
-    if (drawsCell && pos >= vFrom && pos <= vTo) {
-      const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
-      cells.push({ pos, end: eol ? pos : nextGraphemeBoundary2(doc, pos), primary, eol });
-    }
-  });
-  const eol = new Set(cells.filter((c) => c.eol).map((c) => c.pos));
-  return { value, shape, byLine, newlines, eol, cells };
-}
-var highlights = new WeakMap;
-function setHighlight(view, ranges) {
-  const win = view.dom.ownerDocument.defaultView;
-  if (!win?.Highlight || !win.CSS.highlights)
-    return;
-  let entry = highlights.get(win);
-  if (!entry) {
-    entry = { highlight: new win.Highlight, views: new Map };
-    highlights.set(win, entry);
-    win.CSS.highlights.set("hx-sel", entry.highlight);
-  }
-  for (const r of entry.views.get(view) ?? [])
-    entry.highlight.delete(r);
-  if (ranges.length === 0)
-    entry.views.delete(view);
-  else
-    entry.views.set(view, ranges);
-  for (const r of ranges)
-    entry.highlight.add(r);
-}
-function domRange(view, from, to) {
-  try {
-    const a = view.domAtPos(from, 1);
-    const b = view.domAtPos(to, -1);
-    const r = view.dom.ownerDocument.createRange();
-    r.setStart(a.node, a.offset);
-    r.setEnd(b.node, b.offset);
-    return r.collapsed ? null : r;
-  } catch {
-    return null;
-  }
-}
-function opaqueParts(measure, range) {
-  const out = [];
-  const doc = range.startContainer.ownerDocument;
-  if (!doc)
-    return out;
-  const root = range.commonAncestorContainer;
-  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes = root.nodeType === 3 ? [root] : [];
-  for (let n = walker.nextNode();n; n = walker.nextNode())
-    nodes.push(n);
-  for (const node of nodes) {
-    if (!range.intersectsNode(node) || !measure.onOpaque(node.parentElement))
-      continue;
-    const r = doc.createRange();
-    r.setStart(node, node === range.startContainer ? range.startOffset : 0);
-    r.setEnd(node, node === range.endContainer ? range.endOffset : (node.nodeValue ?? "").length);
-    if (!r.collapsed)
-      out.push(r);
-  }
-  return out;
-}
-function glyphAt(view, cell, top, coords) {
-  const text = view.state.doc.sliceString(cell.pos, cell.end);
-  if (/^\s*$/.test(text))
-    return null;
-  const { node } = view.domAtPos(cell.pos, 1);
-  const el = node.nodeType === 1 ? node : node.parentElement;
-  if (!el)
-    return null;
-  const style = styleOf(el);
-  return {
-    text,
-    top: coords.top - top,
-    height: coords.bottom - coords.top,
-    font: style.font,
-    spacing: style.letterSpacing,
-    features: style.fontFeatureSettings,
-    variations: style.fontVariationSettings
-  };
-}
-function base(view, box) {
-  const rect = view.scrollDOM.getBoundingClientRect();
-  const left = rect.left - view.scrollDOM.scrollLeft * view.scaleX;
-  const top = rect.top - view.scrollDOM.scrollTop * view.scaleY;
-  return { left: box.left - left, right: box.right - left, top: box.top - top, bottom: box.bottom - top };
-}
-function selectionMarkers(view, editor) {
-  const m = model(view, editor);
-  if (!m) {
-    setHighlight(view, []);
-    return [];
-  }
-  const measure = new Measure(view, m);
-  const doc = view.state.doc;
-  const out = [];
-  const ranges = [];
-  for (const [n, segs] of m.byLine) {
-    const drawn = segs.filter((s) => !s.native);
-    const ownNewline = m.newlines.get(n) === false;
-    if (drawn.length === 0 && !ownNewline)
-      continue;
-    const line = doc.line(n);
-    const el = measure.lineElement(line.from);
-    for (const seg of drawn) {
-      if (seg.to <= seg.from)
-        continue;
-      const r = domRange(view, seg.from, seg.to);
-      if (!r)
-        continue;
-      ranges.push(...opaqueParts(measure, r));
-      for (const rect of Array.from(r.getClientRects())) {
-        const row = measure.row(el, (rect.top + rect.bottom) / 2);
-        if (row && rect.width > 0) {
-          out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: rect.left, right: rect.right, top: row[0], bottom: row[1] }), null, null));
-        }
-      }
-    }
-    if (ownNewline && !m.eol.has(line.to) && el) {
-      const c = view.coordsAtPos(line.to, -1) ?? view.coordsAtPos(line.to, 1);
-      const row = c && measure.row(el, (c.top + c.bottom) / 2);
-      if (c && row) {
-        out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] }), null, null));
-      }
-    }
-  }
-  setHighlight(view, ranges);
-  return out;
-}
-function cellMarkers(view, editor) {
-  const m = model(view, editor);
-  if (!m || m.cells.length === 0)
-    return [];
-  const measure = new Measure(view, m);
-  const doc = view.state.doc;
-  const out = [];
-  for (const cell of m.cells) {
-    const line = doc.lineAt(cell.pos);
-    const el = measure.lineElement(line.from);
-    let left;
-    let right;
-    let coords;
-    if (cell.eol) {
-      const c = view.coordsAtPos(cell.pos, -1) ?? view.coordsAtPos(cell.pos, 1);
-      if (!c || !el)
-        continue;
-      left = c.right;
-      right = c.right + cellWidth(el);
-      coords = c;
-    } else {
-      const a = view.coordsAtPos(cell.pos, 1);
-      const b = view.coordsAtPos(cell.end, -1);
-      if (!a || !b)
-        continue;
-      left = Math.min(a.left, b.right);
-      right = Math.max(a.left, b.right);
-      coords = a;
-    }
-    const row = measure.row(el, (coords.top + coords.bottom) / 2);
-    if (!row)
-      continue;
-    const box = { left, right, top: row[0], bottom: row[1] };
-    const near = [...measure.boxes(line.number - 1), ...measure.boxes(line.number), ...measure.boxes(line.number + 1)];
-    const square = (x1, y1, x2, y2) => covered(near, x1, y1) || covered(near, x2, y2);
-    const corners = [
-      square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
-      square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
-      square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
-      square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : ""
-    ];
-    const insertPrimary = m.value.mode === "insert" && cell.primary;
-    const shape = insertPrimary ? m.shape : "block";
-    const cls = ["hx-cell", `hx-cell-${shape}`, cell.primary ? "hx-cell-primary" : "", ...corners].filter(Boolean).join(" ");
-    const glyph = shape === "block" && !cell.eol ? glyphAt(view, cell, row[0], coords) : null;
-    const backdrop = shape === "block" ? measure.backdrop(cell.pos) : null;
-    out.push(new CellMarker(view.dom.ownerDocument, cls, base(view, box), glyph, backdrop));
-  }
-  return out;
-}
-var remeasure = StateEffect3.define();
-var layoutWatcher = ViewPlugin.fromClass(class {
-  view;
-  frame = null;
-  observer;
-  constructor(view) {
-    this.view = view;
-    this.observer = new MutationObserver((records) => {
-      if (records.some((r) => r.target.classList.contains("cm-line") && r.oldValue !== r.target.getAttribute("style")))
-        this.schedule();
-    });
-    this.observer.observe(view.contentDOM, { subtree: true, attributes: true, attributeFilter: ["style"], attributeOldValue: true });
-  }
-  schedule() {
-    const win = this.view.dom.ownerDocument.defaultView;
-    if (!win || this.frame !== null)
-      return;
-    this.frame = win.requestAnimationFrame(() => {
-      this.frame = null;
-      if (this.view.dom.isConnected)
-        this.view.dispatch({ effects: remeasure.of(null) });
-    });
-  }
-  destroy() {
-    this.observer.disconnect();
-    if (this.frame !== null)
-      this.view.dom.ownerDocument.defaultView?.cancelAnimationFrame(this.frame);
-  }
-});
-function cursorLayers(editor) {
-  return [
-    layoutWatcher,
-    layer({
-      above: false,
-      class: "hx-selections",
-      update: () => true,
-      markers: (view) => selectionMarkers(view, editor),
-      destroy: (_layer, view) => setHighlight(view, [])
-    }),
-    layer({
-      above: true,
-      class: "hx-cursors",
-      update: () => true,
-      markers: (view) => cellMarkers(view, editor)
-    })
-  ];
-}
-
-// src/view/theme.ts
-import { EditorView } from "@codemirror/view";
-var fg = "var(--hx-fg, CanvasText)";
-var bg = "var(--hx-bg, Canvas)";
-var selection2 = "var(--hx-selection, Highlight)";
-var error = "var(--hx-error, #d32f2f)";
-var muted = "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))";
-var panel = "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))";
-var border = "var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))";
-var hover = "var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent))";
-var radius = "var(--hx-cursor-radius, 2px)";
-var nativeSelectionTheme = EditorView.baseTheme({
-  "&.hx .cm-line::selection, &.hx .cm-line ::selection, &.hx .cm-content::selection": { backgroundColor: `${selection2} !important` }
-});
-var helixTheme = EditorView.baseTheme({
-  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
-  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer": { display: "none" },
-  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
-  "&.hx .cm-selectionLayer": { display: "none" },
-  "& ::highlight(hx-sel)": { backgroundColor: selection2 },
-  ".cm-layer .hx-cell": {
-    position: "absolute",
-    left: "var(--hx-cell-left)",
-    top: "var(--hx-cell-top)",
-    width: "var(--hx-cell-width)",
-    height: "var(--hx-cell-height)",
-    borderRadius: radius,
-    pointerEvents: "none"
-  },
-  ".cm-layer .hx-cell-block": {
-    borderRadius: "0",
-    backgroundColor: "var(--hx-cell-backdrop)",
-    backgroundImage: "var(--hx-cell-backdrop-image)"
-  },
-  ".cm-layer .hx-cell-block::before": {
-    content: '""',
-    position: "absolute",
-    inset: "0",
-    borderRadius: radius,
-    backgroundColor: `var(--hx-cursor-bg, color-mix(in srgb, ${fg} 45%, ${bg}))`
-  },
-  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: "var(--hx-cursor-primary-bg, var(--hx-fg, CanvasText))" },
-  ".cm-layer .hx-cell-sq-tl, .cm-layer .hx-cell-sq-tl::before": { borderTopLeftRadius: "0" },
-  ".cm-layer .hx-cell-sq-tr, .cm-layer .hx-cell-sq-tr::before": { borderTopRightRadius: "0" },
-  ".cm-layer .hx-cell-sq-bl, .cm-layer .hx-cell-sq-bl::before": { borderBottomLeftRadius: "0" },
-  ".cm-layer .hx-cell-sq-br, .cm-layer .hx-cell-sq-br::before": { borderBottomRightRadius: "0" },
-  ".cm-layer .hx-cell-underline": { boxShadow: `inset 0 -2px 0 ${fg}` },
-  ".cm-layer .hx-cell-bar": { boxShadow: `inset 2px 0 0 ${fg}` },
-  ".cm-layer .hx-cell-sel": { backgroundColor: selection2, borderRadius: "0" },
-  ".cm-layer .hx-cell-glyph": {
-    position: "absolute",
-    left: "0",
-    top: "var(--hx-glyph-top)",
-    height: "var(--hx-glyph-height)",
-    font: "var(--hx-glyph-font)",
-    lineHeight: "var(--hx-glyph-height)",
-    letterSpacing: "var(--hx-glyph-spacing)",
-    fontFeatureSettings: "var(--hx-glyph-features)",
-    fontVariationSettings: "var(--hx-glyph-variations)",
-    whiteSpace: "pre",
-    color: `var(--hx-cursor-primary-fg, ${bg})`
-  },
-  "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
-  "&.hx .hx-cursorline": { backgroundColor: "var(--hx-cursorline, var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent)))" },
-  ".hx-panel": {
-    position: "relative",
-    color: fg,
-    fontFamily: "var(--hx-panel-font, monospace)",
-    fontSize: "var(--hx-panel-font-size, 0.85em)",
-    background: panel,
-    borderTop: `1px solid ${border}`
-  },
-  ".hx-panel.hx-panel-empty": { borderTop: "none" },
-  ".hx-panel > .hx-hidden": { display: "none" },
-  ".hx-autoinfo": {
-    position: "absolute",
-    right: "12px",
-    bottom: "calc(100% + 8px + var(--hx-autoinfo-lift, 0px))",
-    padding: "6px 12px",
-    maxHeight: "min(60vh, var(--hx-autoinfo-room, 60vh))",
-    maxWidth: "calc(100% - 24px)",
-    overflow: "auto",
-    background: panel,
-    border: `1px solid ${border}`,
-    borderRadius: "var(--hx-radius, 4px)",
-    boxShadow: "var(--hx-shadow, 0 2px 8px rgb(0 0 0 / 0.15))",
-    whiteSpace: "nowrap"
-  },
-  ".hx-autoinfo-title": { fontWeight: "600", textAlign: "center", marginBottom: "4px" },
-  ".hx-autoinfo-row": { display: "flex", gap: "1.5em" },
-  ".hx-autoinfo-key": { minWidth: "3em", color: "var(--hx-accent, LinkText)" },
-  ".hx-autoinfo-unavailable": { opacity: "0.45" },
-  ".hx-prompt, .hx-message": {
-    padding: "3px calc(10px + var(--hx-bar-overlap, 0px)) 3px 10px",
-    whiteSpace: "pre"
-  },
-  ".hx-message": { overflow: "hidden", textOverflow: "ellipsis" },
-  ".hx-message-error": { color: error },
-  ".hx-prompt-label": { color: muted, marginRight: "0.25em" },
-  ".hx-prompt-cursor": { background: fg, color: bg },
-  ".hx-completions": { display: "flex", flexWrap: "wrap", gap: "0 1.5em", paddingBottom: "3px", color: muted },
-  ".hx-completion-selected": { color: fg, background: hover }
-});
-
-// src/diagnostics.ts
-import { StateEffect as StateEffect4, StateField as StateField3 } from "@codemirror/state";
-var setDiagnostics2 = StateEffect4.define();
-function clamp(list, doc) {
-  return list.map((d) => ({ ...d, from: Math.min(d.from, doc.length), to: Math.min(Math.max(d.from, d.to), doc.length) })).sort((a, b) => a.from - b.from || a.to - b.to);
-}
-var diagnosticsField2 = StateField3.define({
-  create: () => [],
-  update(value, tr) {
-    let next = value;
-    if (tr.docChanged && next.length > 0) {
-      next = next.map((d) => ({ ...d, from: tr.changes.mapPos(d.from, 1), to: Math.max(tr.changes.mapPos(d.from, 1), tr.changes.mapPos(d.to, -1)) }));
-    }
-    for (const effect of tr.effects)
-      if (effect.is(setDiagnostics2))
-        next = clamp(effect.value, tr.newDoc);
-    return next;
-  }
-});
-var ORDER = { hint: 0, info: 1, warning: 2, error: 3 };
-function severityRank(severity) {
-  return severity === null ? -1 : ORDER[severity];
-}
-function diagnosticsOf(state) {
-  return state.field(diagnosticsField2, false) ?? [];
-}
-
-// src/view/view.ts
-var helixEnv2 = Facet3.define({ combine: (values) => values[0] ?? null });
-
-class LabelWidget extends WidgetType {
-  text;
-  constructor(text) {
-    super();
-    this.text = text;
-  }
-  eq(other) {
-    return other.text === this.text;
-  }
-  toDOM(view) {
-    return make(view.dom.ownerDocument, "span", "hx-jump-label", this.text);
-  }
-}
-function endComposition(view) {
-  const scroller = view.scrollDOM;
-  const parent = scroller.parentElement;
-  if (!parent)
-    return;
-  const sibling = scroller.nextSibling;
-  const selection = view.dom.ownerDocument.getSelection();
-  const saved = selection && {
-    anchorNode: selection.anchorNode,
-    anchorOffset: selection.anchorOffset,
-    focusNode: selection.focusNode,
-    focusOffset: selection.focusOffset
-  };
-  scroller.remove();
-  parent.insertBefore(scroller, sibling);
-  try {
-    if (saved && selection && saved.anchorNode) {
-      selection.setPosition(saved.anchorNode, saved.anchorOffset);
-      if (saved.focusNode)
-        selection.extend(saved.focusNode, saved.focusOffset);
-    }
-  } catch {
-    selection?.removeAllRanges();
-  }
-  view.focus();
-  view.contentDOM.dispatchEvent(new CustomEvent("compositionend"));
-}
-function buildDecorations(view, env) {
-  const state = view.state;
-  const value = state.field(helixField2, false);
-  if (!value)
-    return Decoration.none;
-  const doc = state.doc;
-  const builder = [];
-  const labels = [...env.editor.jumpLabels.get(env.hostFor(view).id) ?? []].sort((x, y) => x.pos - y.pos);
-  const groups = [];
-  for (const label of labels) {
-    if (label.pos >= doc.length || doc.lineAt(label.pos).to === label.pos)
-      continue;
-    const end = nextGraphemeBoundary2(doc, label.pos);
-    const last = groups[groups.length - 1];
-    if (last && last.end === label.pos) {
-      last.end = end;
-      last.text += label.text;
-    } else {
-      groups.push({ pos: label.pos, end, text: label.text });
-    }
-  }
-  for (const group of groups) {
-    builder.push({ from: group.pos, to: group.end, deco: Decoration.replace({ widget: new LabelWidget(group.text) }) });
-  }
-  builder.sort((a, b) => a.from - b.from || a.deco.startSide - b.deco.startSide || a.to - b.to);
-  const set = new RangeSetBuilder;
-  let lastReplaceEnd = -1;
-  for (const d of builder) {
-    if (d.from < lastReplaceEnd)
-      continue;
-    set.add(d.from, d.to, d.deco);
-    if (d.deco.spec.widget && d.to > d.from)
-      lastReplaceEnd = d.to;
-  }
-  return set.finish();
-}
-function cursorLineDecorations(view, env) {
-  if (!env.editor.config.cursorline)
-    return Decoration.none;
-  const value = view.state.field(helixField2, false);
-  if (!value)
-    return Decoration.none;
-  const doc = view.state.doc;
-  const lines = new Set;
-  const { from: vFrom, to: vTo } = view.viewport;
-  for (const r of value.selection.ranges) {
-    const cursor = r.cursor(doc);
-    if (cursor >= vFrom && cursor <= vTo)
-      lines.add(doc.lineAt(cursor).from);
-  }
-  const builder = new RangeSetBuilder;
-  for (const from of [...lines].sort((a, b) => a - b))
-    builder.add(from, from, Decoration.line({ class: "hx-cursorline" }));
-  return builder.finish();
-}
-function literalWanted(editor, mode) {
-  return editor.activePrompt !== null || editor.onNextKeyState !== null || mode === "insert";
-}
-function pendingNode(editor, mode) {
-  const root = editor.keymaps.sticky ?? editor.keymaps.map[mode];
-  const node = search(root, editor.keymaps.pending());
-  return node && node.kind === "node" ? node : editor.keymaps.map[mode];
-}
-var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace"]);
-var OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
-function helixExtension2(env) {
-  const { editor } = env;
-  let lastKeydown = null;
-  const onKey = (event, view) => {
-    const host = env.hostFor(view);
-    const value = view.state.field(helixField2, false);
-    if (!value)
-      return false;
-    const mode = value.mode;
-    if (mode === "insert" && env.suggestTakes(event) && !editor.activePrompt)
-      return false;
-    const dead = event.key === "Dead";
-    if (dead && mode === "insert" && !editor.activePrompt)
-      return false;
-    const literal = literalWanted(editor, mode);
-    let key = keyFromDom2(event, literal, env.physicalKeys());
-    if (key === null) {
-      if (!dead || event.metaKey)
-        return false;
-      event.preventDefault();
-      event.stopPropagation();
-      return true;
-    }
-    if (mode === "insert" && !editor.activePrompt && editor.onNextKeyState === null && (event.altKey || event.ctrlKey)) {
-      const physical = keyFromDom2(event, false);
-      if (physical && physical !== key && pendingNode(editor, "insert").map.has(physical))
-        key = physical;
-    }
-    if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key)))
-      return false;
-    if (OS_NAVIGATION.has(event.key) && event.ctrlKey && !event.altKey && !event.metaKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
-      return false;
-    lastKeydown = { view, key: event.key };
-    const consumed = editor.handleKey(host, key, {
-      nativeInsert: true,
-      passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k)
-    });
-    if (!consumed && !dead) {
-      lastKeydown = null;
-      return false;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    return true;
-  };
-  const keyHandler = Prec.highest(EditorView2.domEventHandlers({
-    compositionstart(_event, view) {
-      const value = view.state.field(helixField2, false);
-      if (!value || value.mode === "insert" && !editor.activePrompt)
-        return false;
-      windowOf(view)?.setTimeout(() => {
-        if (view.compositionStarted)
-          endComposition(view);
-      }, 0);
-      return false;
-    },
-    keyup() {
-      lastKeydown = null;
-      return false;
-    },
-    keydown(event, view) {
-      lastKeydown = null;
-      if (event.isComposing || event.key === "Process") {
-        const value = view.state.field(helixField2, false);
-        if (!value || value.mode === "insert" && !editor.activePrompt)
-          return false;
-        endComposition(view);
-      }
-      return onKey(event, view);
-    }
-  }));
-  const stuckComposition = ViewPlugin2.fromClass(class {
-    view;
-    constructor(view) {
-      this.view = view;
-      view.contentDOM.addEventListener("keydown", this.listener, true);
-    }
-    listener = (event) => {
-      const view = this.view;
-      if (!view.composing)
-        return;
-      const value = view.state.field(helixField2, false);
-      if (!value || value.mode === "insert" && !editor.activePrompt)
-        return;
-      endComposition(view);
-      onKey(event, view);
-    };
-    destroy() {
-      this.view.contentDOM.removeEventListener("keydown", this.listener, true);
-    }
-  });
-  const swallowInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
-    if (lastKeydown && lastKeydown.view !== view && lastKeydown.key === text) {
-      lastKeydown = null;
-      return true;
-    }
-    const value = view.state.field(helixField2, false);
-    if (!value || value.mode === "insert" && !editor.activePrompt)
-      return false;
-    if (view.compositionStarted) {
-      windowOf(view)?.setTimeout(() => endComposition(view), 0);
-      return true;
-    }
-    const host = env.hostFor(view);
-    for (const ch of text) {
-      const key = keyFromDom2({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
-      if (key !== null)
-        editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
-    }
-    return true;
-  }));
-  const autoPairsInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
-    const value = view.state.field(helixField2, false);
-    if (!value || value.mode !== "insert" || !editor.helixAutoPairs)
-      return false;
-    if ([...text].length !== 1 || !mayAutoPair(editor, text))
-      return false;
-    const host = env.hostFor(view);
-    const map = autoPairsFor(editor, host, insertDiffers(view.state.doc, value.selection.ranges, text));
-    if (!map || !map.has(text) && !/^\p{White_Space}$/u.test(text))
-      return false;
-    const doc = view.state.doc;
-    const touched = value.selection.ranges.some((r) => hookInsert(doc, r, text, map) !== null);
-    if (!touched)
-      return false;
-    const cx = new Context2(editor, host, null, null);
-    changeByAndWithSelection(cx, (range) => {
-      const hooked = hookInsert(doc, range, text, map);
-      if (hooked)
-        return hooked;
-      const cursor = range.cursor(doc);
-      return [[cursor, cursor, text], null];
-    });
-    return true;
-  }));
-  const decorations = ViewPlugin2.fromClass(class {
-    view;
-    decorations;
-    constructor(view) {
-      this.view = view;
-      env.onViewOpen(view);
-      this.decorations = buildDecorations(view, env);
-      queueMicrotask(() => {
-        const value = view.state.field(helixField2, false);
-        if (!value)
-          return;
-        const native = toNative2(value, view.state.doc);
-        if (!native.eq(view.state.selection)) {
-          view.dispatch({ selection: native, effects: setHelix2.of({}), annotations: helixOwned2.of(true) });
-        }
-      });
-    }
-    update(update) {
-      for (const tr of update.transactions)
-        if (tr.docChanged)
-          env.onDocTransaction(update.view, tr);
-      if (update.docChanged)
-        env.onChanges(update.view, update.changes);
-      if (update.docChanged || update.selectionSet || update.viewportChanged || update.transactions.length > 0) {
-        this.decorations = buildDecorations(update.view, env);
-      }
-      if (update.focusChanged && update.view.hasFocus)
-        env.onFocusChange(update.view);
-      if (update.transactions.length > 0 || update.focusChanged)
-        env.onRender(update.view);
-    }
-    destroy() {
-      env.onViewClose(this.view);
-    }
-  }, { decorations: (v) => v.decorations });
-  const cursorLine = ViewPlugin2.fromClass(class {
-    lines;
-    constructor(view) {
-      this.lines = cursorLineDecorations(view, env);
-    }
-    update(update) {
-      this.lines = cursorLineDecorations(update.view, env);
-    }
-  }, { decorations: (v) => v.lines });
-  const pasteHandler = Prec.highest(EditorView2.domEventHandlers({
-    paste(event, view) {
-      const value = view.state.field(helixField2, false);
-      if (!value || value.mode === "insert")
-        return false;
-      const text = event.clipboardData?.getData("text/plain");
-      if (!text)
-        return false;
-      event.preventDefault();
-      const cx = new Context2(editor, env.hostFor(view), editor.count, null);
-      editor.count = null;
-      pasteImpl2(cx, [text], value.mode === "normal" ? "before" : "cursor", cx.count());
-      exitSelectMode(cx);
-      return true;
-    }
-  }));
-  const attributes = EditorView2.editorAttributes.compute([helixField2], (state) => {
-    const value = state.field(helixField2, false);
-    const mode = value?.mode ?? "normal";
-    return { class: `hx hx-${mode} hx-shape-${editor.config.cursorShape[mode]}` };
-  });
-  const scrollMargins = EditorView2.scrollMargins.of((view) => {
-    const m = editor.config.scrolloff * view.defaultLineHeight;
-    return { top: m, bottom: m };
-  });
-  const panel = showPanel.of((view) => {
-    const dom = make(view.dom.ownerDocument, "div", "hx-panel");
-    const info = add(dom, "div", "hx-autoinfo hx-hidden");
-    const prompt = add(dom, "div", "hx-prompt hx-hidden");
-    const message = add(dom, "div", "hx-message hx-hidden");
-    const render = () => renderPanel(view, env, dom, info, prompt, message);
-    render();
-    return {
-      dom,
-      top: false,
-      update: render
-    };
-  });
-  return [
-    helixEnv2.of(env),
-    EditorState3.allowMultipleSelections.of(true),
-    helixField2,
-    diagnosticsField2,
-    historyField2,
-    syncNativeSelection2,
-    keyHandler,
-    stuckComposition,
-    swallowInput,
-    pasteHandler,
-    autoPairsInput,
-    decorations,
-    cursorLayers(editor),
-    helixTheme,
-    cursorLine,
-    attributes,
-    scrollMargins,
-    panel
-  ];
-}
-function renderPanel(view, env, dom, info, prompt, message) {
-  const { editor } = env;
-  const owner = env.panelOwner?.(view) ?? null;
-  if (owner && owner !== view) {
-    prompt.replaceChildren();
-    info.replaceChildren();
-    message.textContent = "";
-    for (const part of [prompt, info, message])
-      part.classList.add("hx-hidden");
-    dom.classList.add("hx-panel-empty");
-    return;
-  }
-  const guest = env.panelGuest?.(view) ?? null;
-  const source = guest?.hasFocus ? guest : view;
-  const focused = source.hasFocus;
-  const host = env.hostFor(source);
-  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
-  prompt.replaceChildren();
-  prompt.classList.toggle("hx-hidden", !active);
-  if (active) {
-    if (active.completions.length > 0) {
-      const list = add(prompt, "div", "hx-completions");
-      active.completions.slice(0, 40).forEach((c, i) => {
-        add(list, "span", i === active.selection ? "hx-completion hx-completion-selected" : "hx-completion", c.label);
-      });
-    }
-    add(prompt, "span", "hx-prompt-label", active.label);
-    add(prompt, "span", undefined, active.line.slice(0, active.cursor));
-    add(prompt, "span", "hx-prompt-cursor", active.line.slice(active.cursor, active.cursor + 1) || " ");
-    add(prompt, "span", undefined, active.line.slice(active.cursor + 1));
-  }
-  const status = !active && focused ? editor.status : null;
-  message.textContent = status?.message ?? "";
-  message.classList.toggle("hx-hidden", !status);
-  message.classList.toggle("hx-message-error", status?.severity === "error");
-  const statusBar = env.statusBar?.(view) ?? null;
-  const editorRect = statusBar ? view.dom.getBoundingClientRect() : null;
-  const statusRect = statusBar?.getBoundingClientRect();
-  const strip = statusBar?.querySelector(".hx-status-strip:not(.hx-hidden)")?.getBoundingClientRect();
-  const covered = editorRect && statusRect && statusRect.height > 0 && statusRect.top < editorRect.bottom && statusRect.left < editorRect.right;
-  const overlap = covered ? Math.max(0, editorRect.right - Math.min(statusRect.left, strip?.left ?? Infinity)) : 0;
-  setProps(dom, { "--hx-bar-overlap": `${overlap}px` });
-  const opened = dom.classList.contains("hx-panel-empty") && (!!active || !!status);
-  dom.classList.toggle("hx-panel-empty", !active && !status);
-  if (opened) {
-    windowOf(view)?.requestAnimationFrame(() => {
-      if (view.dom.isConnected)
-        view.dispatch({ effects: EditorView2.scrollIntoView(view.state.selection.main.head, { y: "nearest" }) });
-    });
-  }
-  if (focused)
-    env.joinStatus?.(view, !!covered && (!!active || !!status));
-  info.replaceChildren();
-  const auto = editor.config.autoInfo && focused ? editor.autoinfo : null;
-  info.classList.toggle("hx-hidden", !auto);
-  if (!auto)
-    return;
-  const title = add(info, "div", "hx-autoinfo-title");
-  const rows = [];
-  let unavailable = new Set;
-  if ("kind" in auto) {
-    title.textContent = auto.name;
-    const grouped = new Map;
-    for (const [key, trie] of auto.map) {
-      const desc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(trie.command);
-      if (desc === "no_op")
-        continue;
-      const list = grouped.get(desc) ?? [];
-      list.push(key);
-      grouped.set(desc, list);
-    }
-    for (const [desc, keys] of grouped)
-      rows.push([keys.join(", "), desc]);
-    unavailable = new Set([...auto.map].filter(([, t]) => t.kind === "command" && t.command.kind === "static" && !editor.hasCommand(t.command.name)).map(([, t]) => describe(t.command)));
-  } else {
-    title.textContent = auto.title;
-    rows.push(...auto.body);
-  }
-  for (const [k, d] of rows) {
-    const row = add(info, "div", unavailable.has(d) ? "hx-autoinfo-row hx-autoinfo-unavailable" : "hx-autoinfo-row");
-    add(row, "span", "hx-autoinfo-key", k);
-    add(row, "span", undefined, d);
-  }
-  const panelRect = dom.getBoundingClientRect();
-  const lift = statusRect && statusRect.height > 0 && statusRect.left < panelRect.right ? Math.max(0, panelRect.bottom - statusRect.top) : 0;
-  setProps(dom, { "--hx-autoinfo-lift": `${lift}px`, "--hx-autoinfo-room": `${Math.max(0, panelRect.top - lift - (editorRect ?? view.dom.getBoundingClientRect()).top - 16)}px` });
-}
-function uiRefresher2(editor) {
-  const last = new WeakMap;
-  return (host) => {
-    const view = host.view;
-    if (!view)
-      return;
-    const next = uiSignature2(editor, host);
-    if (last.get(view) === next)
-      return;
-    last.set(view, next);
-    view.dispatch({});
-  };
-}
-function uiSignature2(editor, host) {
-  const p = editor.activePrompt;
-  const auto = editor.autoinfo;
-  return JSON.stringify([
-    p ? [p.label, p.line, p.cursor, p.selection, p.completions.length] : null,
-    auto ? "kind" in auto ? auto.name : auto.title : null,
-    editor.status,
-    editor.jumpLabels.get(host.id)?.length ?? 0,
-    editor.pendingDisplay(),
-    editor.count,
-    editor.selectedRegister,
-    editor.macroRecording?.register ?? null
-  ]);
-}
-function describe(command) {
-  if (command.kind === "static")
-    return command.name.replace(/_/g, " ");
-  if (command.kind === "typable")
-    return `:${command.raw}`;
-  return `@${command.keys}`;
-}
-
-// src/ui/markdown.ts
-function inline(parent, text) {
-  const pattern = /(`+)(.+?)\1|\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*|_(.+?)_|\[([^\]]+)\]\(([^)]+)\)/g;
-  let last = 0;
-  for (const m of text.matchAll(pattern)) {
-    if (m.index > last)
-      parent.append(text.slice(last, m.index));
-    if (m[2] !== undefined)
-      add(parent, "code", "hx-s-markup-raw-inline", m[2]);
-    else if (m[3] !== undefined || m[4] !== undefined)
-      add(parent, "strong", "hx-s-markup-bold", m[3] ?? m[4]);
-    else if (m[5] !== undefined || m[6] !== undefined)
-      add(parent, "em", "hx-s-markup-italic", m[5] ?? m[6]);
-    else
-      add(parent, "span", "hx-s-markup-link-text", m[7]);
-    last = m.index + m[0].length;
-  }
-  if (last < text.length)
-    parent.append(text.slice(last));
-}
-function renderMarkdown(parent, text) {
-  const doc = parent.ownerDocument;
-  const lines = text.replace(/\r\n/g, `
-`).split(`
-`);
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-    const fence = /^\s*(```+|~~~+)(.*)$/.exec(line);
-    if (fence) {
-      const code = [];
-      i++;
-      while (i < lines.length && !lines[i].trimStart().startsWith(fence[1]))
-        code.push(lines[i++]);
-      i++;
-      const pre = make(doc, "pre", "hx-md-code hx-s-markup-raw-block");
-      pre.textContent = code.join(`
-`);
-      parent.appendChild(pre);
-      continue;
-    }
-    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (heading) {
-      const h = make(doc, "div", `hx-md-heading hx-s-markup-heading hx-s-markup-heading-${heading[1].length}`);
-      inline(h, heading[2]);
-      parent.appendChild(h);
-      i++;
-      continue;
-    }
-    const list = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
-    if (list) {
-      const row = make(doc, "div", "hx-md-item");
-      setProps(row, { "padding-inline-start": `${list[1].length + 2}ch`, "text-indent": "-2ch" });
-      add(row, "span", "hx-s-markup-list", `${/\d/.test(list[2]) ? list[2] : "•"} `);
-      inline(row, list[3]);
-      parent.appendChild(row);
-      i++;
-      continue;
-    }
-    if (/^\s*$/.test(line)) {
-      parent.appendChild(make(doc, "div", "hx-md-gap"));
-      i++;
-      continue;
-    }
-    const paragraph = [];
-    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(#{1,6}\s|\s*```|\s*~~~|\s*([-*+]|\d+\.)\s)/.test(lines[i]))
-      paragraph.push(lines[i++]);
-    const p = make(doc, "div", "hx-md-paragraph");
-    inline(p, paragraph.join(" "));
-    parent.appendChild(p);
-  }
-}
-
-// src/ui/menu.ts
-class Popup2 {
-  contents;
-  scope;
-  auto;
-  modal = false;
-  className = "hx-popup";
-  anchored;
-  constructor(contents, anchor, scope = "ui.popup", auto = true) {
-    this.contents = contents;
-    this.scope = scope;
-    this.auto = auto;
-    this.anchored = anchor;
-  }
-  handleKey(key) {
-    if (key === "esc" || key === "C-c")
-      return "close";
-    return this.auto ? "close-ignored" : "ignored";
-  }
-  render(parent) {
-    renderMarkdown(add(parent, "div", "hx-popup-body hx-s-ui-popup-info"), this.contents);
-  }
-}
-
-class Menu2 {
-  options;
-  modal = true;
-  className = "hx-menu";
-  cursor = null;
-  anchored;
-  constructor(options) {
-    this.options = options;
-    this.anchored = options.anchor;
-  }
-  selected() {
-    return this.cursor === null ? null : this.options.items[this.cursor] ?? null;
-  }
-  move(delta, cx) {
-    const n = this.options.items.length;
-    if (n === 0)
-      return;
-    this.cursor = this.cursor === null ? delta > 0 ? 0 : n - 1 : (this.cursor + delta + n) % n;
-    this.options.onPreview?.(this.selected(), cx);
-  }
-  handleKey(key, cx) {
-    switch (key) {
-      case "esc":
-      case "C-c":
-        this.options.onPreview?.(null, cx);
-        this.options.onClose?.(cx);
-        return "close";
-      case "up":
-      case "C-p":
-      case "S-tab":
-        this.move(-1, cx);
-        return "consumed";
-      case "down":
-      case "C-n":
-      case "tab":
-        this.move(1, cx);
-        return "consumed";
-      case "ret": {
-        const item = this.selected();
-        if (item === null)
-          return "ignored";
-        this.options.onSelect(cx, item);
-        return "close";
-      }
-      default:
-        return "ignored";
-    }
-  }
-  render(parent) {
-    const list = add(parent, "div", "hx-menu-list hx-s-ui-menu");
-    const items = this.options.items;
-    const rows = items.map((item) => this.options.row(item));
-    rows.forEach((row, i) => {
-      const dom = add(list, "div", i === this.cursor ? "hx-menu-row hx-menu-selected hx-s-ui-menu-selected" : "hx-menu-row");
-      add(dom, "span", "hx-menu-label", row.label);
-      if (row.detail)
-        add(dom, "span", "hx-menu-detail hx-s-ui-text-inactive", row.detail);
-    });
-    list.querySelector(".hx-menu-selected")?.scrollIntoView({ block: "nearest" });
-    const documentation = this.cursor === null ? null : rows[this.cursor]?.documentation;
-    if (documentation)
-      renderMarkdown(add(parent, "div", "hx-menu-doc hx-s-ui-popup"), documentation);
-  }
-}
-
-// src/ui/completion.ts
-var WORD = /[\p{Alphabetic}\p{N}_-]/u;
-function wordStart(doc, pos) {
-  const line = doc.lineAt(pos);
-  let at = pos - line.from;
-  while (at > 0 && WORD.test(line.text[at - 1]))
-    at--;
-  return line.from + at;
-}
-function buffersWords(doc, minLength, skipFrom, skipTo) {
-  const seen = new Set;
-  const text = doc.toString();
-  for (const m of text.matchAll(/[\p{Alphabetic}\p{N}_][\p{Alphabetic}\p{N}_-]*/gu)) {
-    if (m[0].length < minLength)
-      continue;
-    if (m.index >= skipFrom && m.index < skipTo)
-      continue;
-    seen.add(m[0]);
-    if (seen.size >= 512)
-      break;
-  }
-  return [...seen].map((label) => ({ label, detail: "word" }));
-}
-
-class CompletionController {
-  editor;
-  host;
-  menu = null;
-  start = 0;
-  items = [];
-  cx = null;
-  applying = false;
-  previewed = null;
-  timer = null;
-  request = 0;
-  constructor(editor, host) {
-    this.editor = editor;
-    this.host = host;
-  }
-  close() {
-    this.request++;
-    if (this.timer !== null)
-      this.window()?.clearTimeout(this.timer);
-    this.timer = null;
-    if (this.menu)
-      this.editor.removeLayer(this.menu, this.host);
-    this.menu = null;
-    this.previewed = null;
-  }
-  cursor() {
-    return selOf2({ host: this.host }).primary().cursor(docOf2({ host: this.host }));
-  }
-  filtered(prefix) {
-    const matcher = this.editor.matcher;
-    if (!matcher)
-      return this.items.filter((i) => (i.filterText ?? i.label).startsWith(prefix));
-    if (prefix === "")
-      return [...this.items];
-    const pattern = matcher.pattern(prefix);
-    try {
-      const scored = [];
-      this.items.forEach((item, index) => {
-        const score = pattern.score(item.filterText ?? item.label);
-        if (score !== null)
-          scored.push({ item, score, index });
-      });
-      scored.sort((a, b) => b.score - a.score || a.index - b.index);
-      return scored.map((s) => s.item);
-    } finally {
-      pattern.free();
-    }
-  }
-  show(prefix) {
-    const items = this.filtered(prefix);
-    if (this.menu)
-      this.editor.removeLayer(this.menu, this.host);
-    this.menu = null;
-    if (items.length === 0)
-      return;
-    this.menu = new Menu2({
-      items,
-      anchor: this.start,
-      row: (item) => ({ label: item.label, detail: item.detail, documentation: item.documentation }),
-      onSelect: (cx, item) => this.accept(cx, item),
-      onPreview: (item, cx) => this.preview(item, cx),
-      onClose: () => {
-        this.menu = null;
-      }
-    });
-    this.editor.pushLayer(this.menu, this.host);
-  }
-  replaceWord(cx, text, from, to) {
-    const doc = docOf2(cx);
-    const sel = selOf2(cx);
-    const primary = sel.primary();
-    const cursor = primary.cursor(doc);
-    const before = cursor - from;
-    const after = to - cursor;
-    const changes = sel.ranges.map((range) => {
-      const at = range.cursor(doc);
-      return [Math.max(0, at - before), Math.min(doc.length, at + after), text];
-    });
-    this.applying = true;
-    try {
-      apply(cx, changeSetOf(doc, changes));
-    } finally {
-      this.applying = false;
-    }
-  }
-  preview(item, cx) {
-    if (!this.editor.config.previewCompletionInsert)
-      return;
-    const cursor = this.cursor();
-    const current = this.previewed;
-    const from = current?.from ?? item?.from ?? this.start;
-    const to = current?.to ?? item?.to ?? cursor;
-    const original = current?.original ?? docOf2(cx).sliceString(from, to);
-    const text = item === null ? original : item.insertText ?? item.label;
-    this.replaceWord(cx, text, from, to);
-    this.previewed = item === null ? null : { from, to: from + text.length, original };
-  }
-  accept(cx, item) {
-    const cursor = this.cursor();
-    const span = this.previewed ?? { from: item.from ?? this.start, to: item.to ?? cursor };
-    this.replaceWord(cx, item.insertText ?? item.label, span.from, span.to);
-    this.previewed = null;
-    this.menu = null;
-    if (item.edits && item.edits.length > 0) {
-      const doc = docOf2(cx);
-      this.applying = true;
-      try {
-        apply(cx, changeSetOf(doc, [...item.edits].sort((a, b) => a.from - b.from).map((e) => [e.from, e.to, e.insert])));
-      } finally {
-        this.applying = false;
-      }
-    }
-    if (this.host.state.field(helixField2).mode !== "insert")
-      commitHistoryNow2(cx.host);
-  }
-  async trigger(cx, manual) {
-    const request = ++this.request;
-    await this.editor.withMatcher(() => {});
-    if (request !== this.request)
-      return;
-    this.cx = cx;
-    const doc = docOf2(cx);
-    const pos = selOf2(cx).primary().cursor(doc);
-    const start = wordStart(doc, pos);
-    const prefix = doc.sliceString(start, pos);
-    const config = this.editor.config;
-    const items = [];
-    const language = this.editor.workspace?.language;
-    if (language?.completions) {
-      try {
-        items.push(...await language.completions(cx, pos));
-      } catch {
-        this.editor.setError("completion failed");
-      }
-      if (request !== this.request)
-        return;
-    }
-    const wordLength = this.editor.languageConfig(cx.host)?.wordCompletion?.triggerLength ?? config.wordCompletion.triggerLength;
-    const enabled = this.editor.languageConfig(cx.host)?.wordCompletion?.enable ?? config.wordCompletion.enable;
-    if (enabled && (manual || [...prefix].length >= wordLength))
-      items.push(...buffersWords(doc, Math.max(prefix.length, 2), start, pos));
-    this.start = start;
-    this.items = items;
-    this.previewed = null;
-    this.show(prefix);
-    if (!this.menu && manual)
-      this.editor.setStatus("No completion available");
-    this.editor.ui.render?.(cx.host);
-  }
-  documentChanged() {
-    if (this.applying)
-      return;
-    const state = this.host.state.field(helixField2);
-    if (state.mode !== "insert") {
-      this.close();
-      return;
-    }
-    const doc = this.host.state.doc;
-    const pos = state.selection.primary().cursor(doc);
-    if (this.menu || this.items.length > 0) {
-      const start = wordStart(doc, pos);
-      if (this.menu && start === this.start && pos >= start) {
-        this.previewed = null;
-        this.show(doc.sliceString(start, pos));
-        return;
-      }
-      this.close();
-      this.items = [];
-    }
-    this.schedule(pos);
-  }
-  window() {
-    return this.host.view?.dom.ownerDocument.defaultView ?? null;
-  }
-  schedule(pos) {
-    const win = this.window();
-    if (!win)
-      return;
-    if (this.timer !== null)
-      win.clearTimeout(this.timer);
-    const config = this.editor.config;
-    if (!config.autoCompletion)
-      return;
-    const doc = this.host.state.doc;
-    const start = wordStart(doc, pos);
-    if (pos < nextGraphemeBoundary2(doc, start) || pos - start < config.completionTriggerLen)
-      return;
-    this.timer = win.setTimeout(() => {
-      this.timer = null;
-      if (this.host.state.field(helixField2).mode !== "insert")
-        return;
-      this.trigger(new Context2(this.editor, this.host, null, null), false);
-    }, config.completionTimeout);
-  }
-}
-var controllers = new WeakMap;
-function completionController(editor, host) {
-  let controller = controllers.get(host);
-  if (!controller) {
-    controller = new CompletionController(editor, host);
-    controllers.set(host, controller);
-  }
-  return controller;
-}
-var completionPlugin = ViewPlugin3.fromClass(class {
-  view;
-  constructor(view) {
-    this.view = view;
-  }
-  update(update) {
-    const env = update.view.state.facet(helixEnv2);
-    if (!env)
-      return;
-    const before = update.startState.field(helixField2, false)?.mode;
-    const after = update.state.field(helixField2, false)?.mode;
-    const controller = completionController(env.editor, env.hostFor(update.view));
-    if (after !== "insert" && before === "insert")
-      controller.close();
-    else if (update.docChanged && after === "insert")
-      controller.documentChanged();
-    else if (update.selectionSet && after === "insert" && controller.menu)
-      controller.documentChanged();
-  }
-});
-function helixCompletion2() {
-  return [completionPlugin];
-}
-
-// src/commands/misc.ts
 function applySteps(cx, steps, current) {
   const host = cx.host;
   let success = false;
@@ -8794,9 +7177,6 @@ function plainChar(key) {
     return ">";
   return null;
 }
-function workspace(name) {
-  return (cx) => cx.editor.workspaceCommand(cx, name);
-}
 var miscCommands = {
   no_op: () => {},
   undo,
@@ -8842,93 +7222,9 @@ var miscCommands = {
   goto_window_bottom: (cx) => cx.editor.gotoWindow(cx, "bottom"),
   toggle_comments: (cx) => cx.editor.runComments(cx, "toggle"),
   toggle_line_comments: (cx) => cx.editor.runComments(cx, "line"),
-  toggle_block_comments: (cx) => cx.editor.runComments(cx, "block"),
-  file_picker: workspace("file_picker"),
-  file_picker_in_current_directory: workspace("file_picker"),
-  file_picker_in_current_buffer_directory: workspace("file_picker_in_current_buffer_directory"),
-  file_explorer: workspace("file_explorer"),
-  file_explorer_in_current_directory: workspace("file_explorer"),
-  file_explorer_in_current_buffer_directory: workspace("file_explorer_in_current_buffer_directory"),
-  buffer_picker: workspace("buffer_picker"),
-  jumplist_picker: workspace("jumplist_picker"),
-  last_picker: workspace("last_picker"),
-  symbol_picker: workspace("symbol_picker"),
-  syntax_symbol_picker: workspace("symbol_picker"),
-  lsp_or_syntax_symbol_picker: workspace("symbol_picker"),
-  workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  syntax_workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  lsp_or_syntax_workspace_symbol_picker: workspace("workspace_symbol_picker"),
-  command_palette: workspace("command_palette"),
-  code_action: workspace("code_action"),
-  diagnostics_picker: workspace("diagnostics_picker"),
-  workspace_diagnostics_picker: workspace("workspace_diagnostics_picker"),
-  goto_next_change: workspace("goto_next_change"),
-  goto_prev_change: workspace("goto_prev_change"),
-  goto_first_change: workspace("goto_first_change"),
-  goto_last_change: workspace("goto_last_change"),
-  goto_first_diag: workspace("goto_first_diag"),
-  goto_last_diag: workspace("goto_last_diag"),
-  goto_next_diag: workspace("goto_next_diag"),
-  goto_prev_diag: workspace("goto_prev_diag"),
-  global_search: workspace("global_search"),
-  goto_file: workspace("goto_file"),
-  goto_file_hsplit: workspace("goto_file_hsplit"),
-  goto_file_vsplit: workspace("goto_file_vsplit"),
-  goto_definition: workspace("goto_definition"),
-  goto_declaration: workspace("goto_declaration"),
-  goto_type_definition: workspace("goto_type_definition"),
-  goto_implementation: workspace("goto_implementation"),
-  changed_file_picker: workspace("changed_file_picker"),
-  select_references_to_symbol_under_cursor: workspace("select_references_to_symbol_under_cursor"),
-  signature_help: workspace("signature_help"),
-  completion: (cx) => void completionController(cx.editor, cx.host).trigger(cx, true),
-  format_selections: workspace("format_selections"),
-  transpose_view: workspace("transpose_view"),
-  goto_reference: workspace("goto_reference"),
-  hover: workspace("hover"),
-  rename_symbol: workspace("rename_symbol"),
-  goto_last_accessed_file: workspace("goto_last_accessed_file"),
-  goto_last_modified_file: workspace("goto_last_modified_file"),
-  goto_next_buffer: workspace("goto_next_buffer"),
-  goto_previous_buffer: workspace("goto_previous_buffer"),
-  jump_view_left: workspace("jump_view_left"),
-  jump_view_right: workspace("jump_view_right"),
-  jump_view_up: workspace("jump_view_up"),
-  jump_view_down: workspace("jump_view_down"),
-  swap_view_left: workspace("swap_view_left"),
-  swap_view_right: workspace("swap_view_right"),
-  swap_view_up: workspace("swap_view_up"),
-  swap_view_down: workspace("swap_view_down"),
-  rotate_view: workspace("rotate_view"),
-  rotate_view_reverse: workspace("rotate_view_reverse"),
-  hsplit: workspace("hsplit"),
-  vsplit: workspace("vsplit"),
-  hsplit_new: workspace("hsplit_new"),
-  vsplit_new: workspace("vsplit_new"),
-  wclose: workspace("wclose"),
-  wonly: workspace("wonly")
+  toggle_block_comments: (cx) => cx.editor.runComments(cx, "block")
 };
-var UNSUPPORTED = [
-  "goto_next_tabstop",
-  "goto_prev_tabstop",
-  "suspend",
-  "dap_launch",
-  "dap_restart",
-  "dap_toggle_breakpoint",
-  "dap_continue",
-  "dap_pause",
-  "dap_step_in",
-  "dap_step_out",
-  "dap_next",
-  "dap_variables",
-  "dap_terminate",
-  "dap_edit_condition",
-  "dap_edit_log",
-  "dap_switch_thread",
-  "dap_switch_stack_frame",
-  "dap_enable_exceptions",
-  "dap_disable_exceptions"
-];
+var UNSUPPORTED = ["goto_next_tabstop", "goto_prev_tabstop"];
 
 // src/commands/command-line.ts
 function split(line) {
@@ -9308,7 +7604,7 @@ function expandInner(cx, content) {
 function expandVariable(cx, variable) {
   const doc = docOf2(cx);
   const primary = selOf2(cx).primary();
-  const app = cx.editor.workspace?.variable?.(cx, variable);
+  const app = cx.editor.app?.variable?.(cx, variable);
   if (app !== undefined && app !== null)
     return app;
   switch (variable) {
@@ -9614,6 +7910,202 @@ var syntaxCommands = {
   goto_next_entry: gotoTsObject("entry", "forward"),
   goto_prev_entry: gotoTsObject("entry", "backward")
 };
+
+// src/changes.ts
+import { StateEffect as StateEffect3, StateField as StateField3 } from "@codemirror/state";
+var setChanges2 = StateEffect3.define();
+var changesField2 = StateField3.define({
+  create: () => ({ base: null, hunks: [] }),
+  update(value, tr) {
+    for (const effect of tr.effects)
+      if (effect.is(setChanges2))
+        return effect.value;
+    return value;
+  }
+});
+function changesOf2(state) {
+  return state.field(changesField2, false) ?? { base: null, hunks: [] };
+}
+
+// src/diagnostics.ts
+import { StateEffect as StateEffect4, StateField as StateField4 } from "@codemirror/state";
+var setDiagnostics2 = StateEffect4.define();
+function clamp(list, doc) {
+  return list.map((d) => ({ ...d, from: Math.min(d.from, doc.length), to: Math.min(Math.max(d.from, d.to), doc.length) })).sort((a, b) => a.from - b.from || a.to - b.to);
+}
+var diagnosticsField2 = StateField4.define({
+  create: () => [],
+  update(value, tr) {
+    let next = value;
+    if (tr.docChanged && next.length > 0) {
+      next = next.map((d) => ({ ...d, from: tr.changes.mapPos(d.from, 1), to: Math.max(tr.changes.mapPos(d.from, 1), tr.changes.mapPos(d.to, -1)) }));
+    }
+    for (const effect of tr.effects)
+      if (effect.is(setDiagnostics2))
+        next = clamp(effect.value, tr.newDoc);
+    return next;
+  }
+});
+var ORDER = { hint: 0, info: 1, warning: 2, error: 3 };
+function severityRank(severity) {
+  return severity === null ? -1 : ORDER[severity];
+}
+function diagnosticsOf(state) {
+  return state.field(diagnosticsField2, false) ?? [];
+}
+
+// src/commands/goto.ts
+function gotoDiagnostic(cx, find, reversed = false) {
+  const list = diagnosticsOf(cx.host.state);
+  const doc = docOf2(cx);
+  const diag = find(list, selOf2(cx).primary().cursor(doc));
+  if (!diag)
+    return;
+  pushJump2(cx);
+  setSel2(cx, reversed ? Selection2.single(diag.to, diag.from) : Selection2.single(diag.from, diag.to));
+}
+function gotoChange(cx, which) {
+  const hunks = changesOf2(cx.host.state).hunks;
+  if (!hunks || hunks.length === 0)
+    return;
+  const doc = docOf2(cx);
+  const count = cx.count();
+  const moved = selOf2(cx).transform((range) => {
+    let line = doc.lineAt(range.cursor(doc)).number - 1;
+    let target = range;
+    for (let i = 0;i < count; i++) {
+      let index;
+      if (which === "first")
+        index = 0;
+      else if (which === "last")
+        index = hunks.length - 1;
+      else if (which === "next") {
+        index = hunks.findIndex((h) => h.afterStart > line);
+      } else {
+        index = -1;
+        for (let k = hunks.length - 1;k >= 0; k--) {
+          if (hunks[k].afterEnd <= line || hunks[k].afterStart === hunks[k].afterEnd && hunks[k].afterEnd <= line) {
+            index = k;
+            break;
+          }
+        }
+      }
+      const hunk = hunks[index];
+      if (!hunk)
+        break;
+      const startLine = Math.min(hunk.afterStart + 1, doc.lines);
+      const start = doc.line(startLine).from;
+      const end = hunk.afterEnd >= doc.lines ? doc.length : doc.line(hunk.afterEnd + 1).from;
+      line = hunk.afterStart;
+      target = hunk.afterStart === hunk.afterEnd ? new Range2(start, start) : new Range2(start, end);
+    }
+    return target;
+  });
+  pushJump2(cx);
+  setSel2(cx, moved);
+}
+function applyTextEdits2(cx, edits) {
+  const doc = docOf2(cx);
+  if (edits.length === 0)
+    return;
+  const sorted = [...edits].sort((a, b) => a.from - b.from);
+  commitHistoryNow2(cx.host);
+  apply(cx, changeSetOf(doc, sorted.map((e) => [e.from, e.to, e.insert])));
+  commitHistoryNow2(cx.host);
+}
+var gotoCommands = {
+  goto_first_diag: (cx) => gotoDiagnostic(cx, (list) => list[0]),
+  goto_last_diag: (cx) => gotoDiagnostic(cx, (list) => list[list.length - 1]),
+  goto_next_diag: (cx) => gotoDiagnostic(cx, (list, cursor) => list.find((d) => d.from > cursor)),
+  goto_prev_diag: (cx) => gotoDiagnostic(cx, (list, cursor) => [...list].reverse().find((d) => d.from < cursor), true),
+  goto_next_change: (cx) => gotoChange(cx, "next"),
+  goto_prev_change: (cx) => gotoChange(cx, "prev"),
+  goto_first_change: (cx) => gotoChange(cx, "first"),
+  goto_last_change: (cx) => gotoChange(cx, "last")
+};
+
+// src/commands/app.ts
+var APP_COMMANDS2 = {
+  file_picker: null,
+  file_picker_in_current_directory: "file_picker",
+  file_picker_in_current_buffer_directory: null,
+  file_explorer: null,
+  file_explorer_in_current_directory: "file_explorer",
+  file_explorer_in_current_buffer_directory: null,
+  buffer_picker: null,
+  jumplist_picker: null,
+  last_picker: null,
+  symbol_picker: null,
+  syntax_symbol_picker: "symbol_picker",
+  lsp_or_syntax_symbol_picker: "symbol_picker",
+  workspace_symbol_picker: null,
+  syntax_workspace_symbol_picker: "workspace_symbol_picker",
+  lsp_or_syntax_workspace_symbol_picker: "workspace_symbol_picker",
+  command_palette: null,
+  code_action: null,
+  diagnostics_picker: null,
+  workspace_diagnostics_picker: null,
+  global_search: null,
+  goto_file: null,
+  goto_file_hsplit: null,
+  goto_file_vsplit: null,
+  goto_definition: null,
+  goto_declaration: null,
+  goto_type_definition: null,
+  goto_implementation: null,
+  changed_file_picker: null,
+  select_references_to_symbol_under_cursor: null,
+  signature_help: null,
+  format_selections: null,
+  transpose_view: null,
+  goto_reference: null,
+  hover: null,
+  rename_symbol: null,
+  goto_last_accessed_file: null,
+  goto_last_modified_file: null,
+  goto_next_buffer: null,
+  goto_previous_buffer: null,
+  jump_view_left: null,
+  jump_view_right: null,
+  jump_view_up: null,
+  jump_view_down: null,
+  swap_view_left: null,
+  swap_view_right: null,
+  swap_view_up: null,
+  swap_view_down: null,
+  rotate_view: null,
+  rotate_view_reverse: null,
+  hsplit: null,
+  vsplit: null,
+  hsplit_new: null,
+  vsplit_new: null,
+  wclose: null,
+  wonly: null,
+  suspend: null,
+  dap_launch: null,
+  dap_restart: null,
+  dap_toggle_breakpoint: null,
+  dap_continue: null,
+  dap_pause: null,
+  dap_step_in: null,
+  dap_step_out: null,
+  dap_next: null,
+  dap_variables: null,
+  dap_terminate: null,
+  dap_edit_condition: null,
+  dap_edit_log: null,
+  dap_switch_thread: null,
+  dap_switch_stack_frame: null,
+  dap_enable_exceptions: null,
+  dap_disable_exceptions: null,
+  completion: null
+};
+function isAppCommandName(name) {
+  return name in APP_COMMANDS2 || name.includes(":");
+}
+function appFallback(name) {
+  return APP_COMMANDS2[name] ?? null;
+}
 
 // src/core/textwrap.ts
 var encoder = new TextEncoder;
@@ -10638,224 +9130,6 @@ function highlightSpans(syntax, scopes, start, end) {
   }
   return spans;
 }
-
-// src/ui/diff.ts
-import { StateEffect as StateEffect6 } from "@codemirror/state";
-import { ViewPlugin as ViewPlugin4 } from "@codemirror/view";
-
-// src/ui/gutters.ts
-import { StateEffect as StateEffect5, StateField as StateField4 } from "@codemirror/state";
-import { EditorView as EditorView4, GutterMarker, gutter } from "@codemirror/view";
-
-// src/ui/theme.ts
-import { parse as parseToml } from "smol-toml";
-var ANSI = {
-  default: "inherit",
-  black: "#000000",
-  red: "#cd3131",
-  green: "#0dbc79",
-  yellow: "#e5e510",
-  blue: "#2472c8",
-  magenta: "#bc3fbc",
-  cyan: "#11a8cd",
-  gray: "#7f7f7f",
-  "light-red": "#f14c4c",
-  "light-green": "#23d18b",
-  "light-yellow": "#f5f543",
-  "light-blue": "#3b8eea",
-  "light-magenta": "#d670d6",
-  "light-cyan": "#29b8db",
-  "light-gray": "#c0c0c0",
-  white: "#e5e5e5"
-};
-function indexedColor(index) {
-  const basic = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "light-gray", "gray", "light-red", "light-green", "light-yellow", "light-blue", "light-magenta", "light-cyan", "white"];
-  if (index < 16)
-    return ANSI[basic[index]];
-  if (index >= 232) {
-    const level = 8 + (index - 232) * 10;
-    return `rgb(${level}, ${level}, ${level})`;
-  }
-  const n = index - 16;
-  const step = (v) => v === 0 ? 0 : 55 + v * 40;
-  return `rgb(${step(Math.floor(n / 36))}, ${step(Math.floor(n / 6) % 6)}, ${step(n % 6)})`;
-}
-function stringToColor(value) {
-  if (value.startsWith("#"))
-    return /^#[0-9a-fA-F]{6}$/.test(value) ? value : null;
-  if (/^\d+$/.test(value) && Number(value) < 256)
-    return indexedColor(Number(value));
-  return null;
-}
-function parseColor(palette, value) {
-  if (typeof value !== "string")
-    throw new Error(`Unrecognized value: ${String(value)}`);
-  const color = palette.get(value) ?? stringToColor(value);
-  if (color === null)
-    throw new Error(value.startsWith("#") ? `Malformed hexcode: ${value}` : `Malformed ANSI: ${value}`);
-  return color;
-}
-var MODIFIERS = new Set(["bold", "dim", "italic", "underlined", "slow_blink", "rapid_blink", "reversed", "hidden", "crossed_out"]);
-var UNDERLINES = new Set(["line", "curl", "dashed", "dotted", "double_line"]);
-function parseStyle(palette, style, value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    style.fg = parseColor(palette, value);
-    return;
-  }
-  for (const [name, entry] of Object.entries(value)) {
-    if (name === "fg")
-      style.fg = parseColor(palette, entry);
-    else if (name === "bg")
-      style.bg = parseColor(palette, entry);
-    else if (name === "underline") {
-      if (typeof entry !== "object" || entry === null)
-        throw new Error("Underline must be table");
-      const table = entry;
-      for (const key of Object.keys(table))
-        if (key !== "color" && key !== "style")
-          throw new Error(`Invalid underline attribute: ${key}`);
-      if ("color" in table)
-        style.underlineColor = parseColor(palette, table.color);
-      if ("style" in table) {
-        if (typeof table.style !== "string" || !UNDERLINES.has(table.style))
-          throw new Error(`Invalid underline style: ${String(table.style)}`);
-        style.underlineStyle = table.style;
-      }
-    } else if (name === "modifiers") {
-      if (!Array.isArray(entry))
-        throw new Error("Modifiers should be an array");
-      for (const modifier of entry) {
-        if (modifier === "underlined")
-          style.underlineStyle = "line";
-        else if (typeof modifier === "string" && MODIFIERS.has(modifier))
-          style.modifiers.push(modifier);
-        else
-          throw new Error(`Invalid modifier: ${String(modifier)}`);
-      }
-    } else
-      throw new Error(`Invalid style attribute: ${name}`);
-  }
-}
-function buildPalette(value, warnings) {
-  const palette = new Map(Object.entries(ANSI));
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return palette;
-  try {
-    const own = new Map;
-    for (const [name, entry] of Object.entries(value)) {
-      if (typeof entry !== "string")
-        throw new Error(`Unrecognized value: ${String(entry)}`);
-      const color = stringToColor(entry);
-      if (color === null)
-        throw new Error(entry.startsWith("#") ? `Malformed hexcode: ${entry}` : `Malformed ANSI: ${entry}`);
-      own.set(name, color);
-    }
-    for (const [name, color] of own)
-      palette.set(name, color);
-  } catch (err) {
-    warnings.push(err.message);
-    return new Map(Object.entries(ANSI));
-  }
-  return palette;
-}
-function loadValues(name, text, load, visited) {
-  const values = parseToml(text);
-  const parentName = values.inherits;
-  if (typeof parentName !== "string")
-    return values;
-  if (visited.has(parentName))
-    throw new Error(`Cycle found in inheriting: ${parentName}`);
-  visited.add(parentName);
-  const parentText = load?.(parentName);
-  if (parentText === null || parentText === undefined)
-    throw new Error(`File not found for: ${parentName}`);
-  const parent = loadValues(parentName, parentText, load, visited);
-  const palette = { ...parent.palette ?? {}, ...values.palette ?? {} };
-  const merged = { ...parent, ...values, palette };
-  return merged;
-}
-var DEFAULT_RAINBOW = ["red", "yellow", "green", "blue", "cyan", "magenta"];
-function parseTheme2(name, text, load = null) {
-  const values = loadValues(name, text, load, new Set([name]));
-  const warnings = [];
-  const palette = buildPalette(values.palette, warnings);
-  const styles = new Map;
-  const scopes = [];
-  let rainbowLength = 0;
-  let rainbow = DEFAULT_RAINBOW.map((color) => ({ fg: ANSI[color], modifiers: [] }));
-  if (Array.isArray(values.rainbow)) {
-    try {
-      rainbow = values.rainbow.map((entry) => {
-        const style = { modifiers: [] };
-        parseStyle(palette, style, entry);
-        return style;
-      });
-    } catch (err) {
-      warnings.push(err.message);
-    }
-  } else if (values.rainbow !== undefined)
-    warnings.push("Could not parse rainbow as an array");
-  rainbow.forEach((style, i) => {
-    styles.set(`rainbow.${i}`, style);
-    scopes.push(`rainbow.${i}`);
-    rainbowLength += 1;
-  });
-  for (const [key, value] of Object.entries(values)) {
-    if (key === "palette" || key === "inherits" || key === "rainbow")
-      continue;
-    const style = { modifiers: [] };
-    try {
-      parseStyle(palette, style, value);
-    } catch (err) {
-      warnings.push(`Failed to parse style for key "${key}". ${err.message}`);
-    }
-    styles.set(key, style);
-    scopes.push(key);
-  }
-  return { name, styles, scopes, rainbowLength, warnings };
-}
-function themeStyle(theme, scope) {
-  for (let s = scope;s !== null; ) {
-    const style = theme.styles.get(s);
-    if (style)
-      return style;
-    const dot = s.lastIndexOf(".");
-    s = dot < 0 ? null : s.slice(0, dot);
-  }
-  return null;
-}
-function scopeClass(scope) {
-  return `hx-s-${scope.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-}
-var UNDERLINE_CSS = { line: "solid", curl: "wavy", dashed: "dashed", dotted: "dotted", double_line: "double" };
-function styleCss(style) {
-  const parts = [];
-  const reversed = style.modifiers.includes("reversed");
-  const fg = reversed ? style.bg : style.fg;
-  const bg = reversed ? style.fg : style.bg;
-  if (fg)
-    parts.push(`color: ${fg}`);
-  if (bg)
-    parts.push(`background-color: ${bg}`);
-  const lines = [];
-  if (style.underlineStyle)
-    lines.push("underline");
-  if (style.modifiers.includes("crossed_out"))
-    lines.push("line-through");
-  if (lines.length > 0)
-    parts.push(`text-decoration-line: ${lines.join(" ")}`);
-  if (style.underlineStyle)
-    parts.push(`text-decoration-style: ${UNDERLINE_CSS[style.underlineStyle] ?? "solid"}`);
-  if (style.underlineColor)
-    parts.push(`text-decoration-color: ${style.underlineColor}`);
-  if (style.modifiers.includes("bold"))
-    parts.push("font-weight: bold");
-  if (style.modifiers.includes("italic"))
-    parts.push("font-style: italic");
-  if (style.modifiers.includes("dim"))
-    parts.push("opacity: 0.6");
-  return parts.join("; ");
-}
 var DEFAULT_SCOPES = [
   "attribute",
   "type",
@@ -10905,237 +9179,6 @@ var DEFAULT_SCOPES = [
   "diff.minus",
   "diff.delta"
 ];
-
-// src/ui/gutters.ts
-class TextMarker extends GutterMarker {
-  text;
-  cls;
-  constructor(text, cls) {
-    super();
-    this.text = text;
-    this.cls = cls;
-  }
-  eq(other) {
-    return other instanceof TextMarker && other.text === this.text && other.cls === this.cls;
-  }
-  toDOM(view) {
-    const span = view.dom.ownerDocument.createElement("span");
-    span.className = this.cls;
-    span.textContent = this.text;
-    return span;
-  }
-}
-function editorOf(view) {
-  return view.state.facet(helixEnv2)?.editor ?? null;
-}
-function selectedLines(view) {
-  const value = view.state.field(helixField2, false);
-  const doc = view.state.doc;
-  const lines = new Set;
-  if (!value)
-    return { primary: 1, lines };
-  for (const range of value.selection.ranges)
-    lines.add(doc.lineAt(range.cursor(doc)).number);
-  return { primary: doc.lineAt(value.selection.primary().cursor(doc)).number, lines };
-}
-function lineNumbersWidth(view, minWidth) {
-  const doc = view.state.doc;
-  const lastLine = doc.line(doc.lines);
-  const lastDrawn = lastLine.length > 0 ? doc.lines : doc.lines - 1;
-  return Math.max(String(Math.max(lastDrawn, 1)).length, minWidth);
-}
-var relevantChange = (update) => update.docChanged || update.selectionSet || update.focusChanged || update.transactions.length > 0;
-var lineNumbersGutter = gutter({
-  class: "hx-gutter-line-numbers",
-  lineMarker(view, line) {
-    const editor = editorOf(view);
-    if (!editor)
-      return null;
-    const doc = view.state.doc;
-    const number = doc.lineAt(line.from).number;
-    const width = lineNumbersWidth(view, editor.config.gutters.lineNumbersMinWidth);
-    if (number === doc.lines && line.from === doc.length && doc.lines > 1)
-      return new TextMarker("~".padStart(width), scopeClass("ui.linenr"));
-    const { primary, lines } = selectedLines(view);
-    const value = view.state.field(helixField2, false);
-    const focused = view.hasFocus;
-    const relative = editor.config.lineNumber === "relative" && value?.mode !== "insert" && focused && number !== primary;
-    const display = relative ? Math.abs(primary - number) : number;
-    const selected = lines.has(number) && focused;
-    return new TextMarker(String(display).padStart(width), scopeClass(selected ? "ui.linenr.selected" : "ui.linenr"));
-  },
-  lineMarkerChange: relevantChange,
-  initialSpacer(view) {
-    const editor = editorOf(view);
-    return new TextMarker("0".repeat(lineNumbersWidth(view, editor?.config.gutters.lineNumbersMinWidth ?? 3)), "");
-  },
-  updateSpacer(_spacer, update) {
-    const editor = editorOf(update.view);
-    return new TextMarker("0".repeat(lineNumbersWidth(update.view, editor?.config.gutters.lineNumbersMinWidth ?? 3)), "");
-  }
-});
-var diagnosticsGutter = gutter({
-  class: "hx-gutter-diagnostics",
-  lineMarker(view, line) {
-    const list = diagnosticsOf(view.state);
-    if (list.length === 0)
-      return null;
-    const doc = view.state.doc;
-    const lineNumber = doc.lineAt(line.from).number;
-    let best = null;
-    for (const d of list) {
-      if (doc.lineAt(d.from).number !== lineNumber)
-        continue;
-      if (!best || severityRank(d.severity) >= severityRank(best.severity))
-        best = d;
-    }
-    if (!best)
-      return null;
-    return new TextMarker("●", scopeClass(best.severity ?? "warning"));
-  },
-  lineMarkerChange: (update) => update.docChanged || update.startState.field(helixField2, false) !== update.state.field(helixField2, false) || diagnosticsOf(update.startState) !== diagnosticsOf(update.state),
-  initialSpacer: () => new TextMarker("●", "")
-});
-var spacerGutter = gutter({
-  class: "hx-gutter-spacer",
-  initialSpacer: () => new TextMarker(" ", "")
-});
-var setDiffHunks = StateEffect5.define();
-var diffHunksField = StateField4.define({
-  create: () => [],
-  update(value, tr) {
-    for (const effect of tr.effects)
-      if (effect.is(setDiffHunks))
-        return effect.value;
-    return value;
-  }
-});
-var diffGutter = gutter({
-  class: "hx-gutter-diff",
-  lineMarker(view, line) {
-    const hunks = view.state.field(diffHunksField, false);
-    if (!hunks || hunks.length === 0)
-      return null;
-    const lineIndex = view.state.doc.lineAt(line.from).number - 1;
-    let lo = 0;
-    let hi = hunks.length;
-    while (lo < hi) {
-      const mid = lo + hi >> 1;
-      const hunk = hunks[mid];
-      if (hunk.afterEnd < lineIndex || hunk.afterStart !== hunk.afterEnd && lineIndex === hunk.afterEnd)
-        lo = mid + 1;
-      else
-        hi = mid;
-    }
-    const hunk = hunks[lo];
-    if (!hunk || hunk.afterStart > lineIndex)
-      return null;
-    if (hunk.beforeStart === hunk.beforeEnd)
-      return new TextMarker("▍", scopeClass("diff.plus.gutter"));
-    if (hunk.afterStart === hunk.afterEnd)
-      return new TextMarker("▔", scopeClass("diff.minus.gutter"));
-    return new TextMarker("▍", scopeClass("diff.delta.gutter"));
-  },
-  lineMarkerChange: (update) => update.docChanged || update.startState.field(diffHunksField, false) !== update.state.field(diffHunksField, false),
-  initialSpacer: () => new TextMarker("▍", "")
-});
-var KINDS = {
-  diagnostics: diagnosticsGutter,
-  "line-numbers": lineNumbersGutter,
-  spacer: spacerGutter,
-  diff: diffGutter
-};
-function gutterExtension(layout) {
-  return layout.map((kind) => KINDS[kind] ?? []);
-}
-var gutterTheme = EditorView4.baseTheme({
-  "&.hx .cm-gutters": { whiteSpace: "pre", background: "var(--hx-bg, Canvas)", color: "var(--hx-fg, CanvasText)", border: "none" },
-  ".hx-gutter-spacer .cm-gutterElement, .hx-gutter-line-numbers .cm-gutterElement, .hx-gutter-diagnostics .cm-gutterElement, .hx-gutter-diff .cm-gutterElement": { padding: "0" },
-  ".hx-s-ui-linenr": { color: "var(--hx-linenr, color-mix(in srgb, CanvasText 45%, transparent))" },
-  ".hx-s-ui-linenr-selected": { color: "var(--hx-linenr-selected, CanvasText)" },
-  ".hx-gutter-diagnostics .hx-s-error": { color: "var(--hx-error, #d32f2f)" },
-  ".hx-gutter-diagnostics .hx-s-warning": { color: "var(--hx-warning, #b58900)" },
-  ".hx-gutter-diagnostics .hx-s-info": { color: "var(--hx-info, #268bd2)" },
-  ".hx-gutter-diagnostics .hx-s-hint": { color: "var(--hx-hint, #2aa198)" },
-  ".hx-s-diff-plus-gutter": { color: "var(--hx-diff-plus, #2e9f55)" },
-  ".hx-s-diff-minus-gutter": { color: "var(--hx-diff-minus, #d0443c)" },
-  ".hx-s-diff-delta-gutter": { color: "var(--hx-diff-delta, #c28a1c)" }
-});
-
-// src/ui/diff.ts
-var setDiffBase = StateEffect6.define();
-function lastDiffHunks(host) {
-  return host.state.field(diffHunksField, false) ?? null;
-}
-var bases = new WeakMap;
-function helixSetDiffBase2(view, base) {
-  view.dispatch({ effects: setDiffBase.of(base) });
-}
-var diffPlugin = ViewPlugin4.fromClass(class {
-  view;
-  timer = null;
-  doc = null;
-  constructor(view) {
-    this.view = view;
-  }
-  update(update) {
-    let changed = update.docChanged;
-    for (const tr of update.transactions) {
-      for (const effect of tr.effects) {
-        if (effect.is(setDiffBase)) {
-          bases.set(this.view, effect.value);
-          changed = true;
-        }
-      }
-    }
-    if (changed)
-      this.schedule();
-  }
-  schedule() {
-    const win = this.view.dom.ownerDocument.defaultView;
-    if (!win)
-      return;
-    if (this.timer !== null)
-      win.clearTimeout(this.timer);
-    this.timer = win.setTimeout(() => {
-      this.timer = null;
-      this.compute();
-    }, 150);
-  }
-  compute() {
-    const view = this.view;
-    if (!view.dom.isConnected)
-      return;
-    const editor = view.state.facet(helixEnv2)?.editor;
-    const base = bases.get(view) ?? null;
-    if (!editor)
-      return;
-    if (base === null) {
-      view.dispatch({ effects: setDiffHunks.of([]) });
-      return;
-    }
-    editor.withMatcher((matcher) => {
-      if (!view.dom.isConnected)
-        return;
-      const doc = view.state.doc;
-      if (this.doc === doc)
-        return;
-      this.doc = doc;
-      view.dispatch({ effects: setDiffHunks.of(matcher.diff(base, doc.toString())) });
-      this.doc = null;
-    });
-  }
-  destroy() {
-    if (this.timer !== null)
-      this.view.dom.ownerDocument.defaultView?.clearTimeout(this.timer);
-  }
-});
-function helixDiff2() {
-  return [diffHunksField, diffPlugin];
-}
-function diffBaseOf(view) {
-  return bases.get(view) ?? null;
-}
 
 // src/commands/typed.ts
 var sig = (min, max, extra = {}) => ({ positionals: [min, max], ...extra });
@@ -11326,15 +9369,24 @@ function gotoLineNumber(cx, args, event) {
   jumplistFor2(cx).push({ docId: cx.host.id, selection: last });
 }
 function ws(name, extra = {}) {
-  return { ...extra, fun: validateOnly((cx, args) => cx.editor.workspaceCommand(cx, name, args.positional)) };
+  return {
+    ...extra,
+    app: name,
+    fun: validateOnly((cx, args) => {
+      if (!cx.editor.runApp(cx, name, args.positional))
+        cx.editor.setStatus(`:${name} is not available in this editor`);
+    })
+  };
 }
-function hoverPopup(cx, text) {
-  const doc = docOf2(cx);
-  if (!cx.editor.hasOverlays()) {
-    cx.editor.setStatus(text.replace(/^```\w*\n|\n```$/g, ""));
+function hoverPopup(cx, title, text) {
+  const body = text.replace(/^```\w*\n|\n```$/g, "");
+  if (!cx.editor.config.autoInfo || !body.includes(`
+`)) {
+    cx.editor.setStatus(body);
     return;
   }
-  cx.editor.pushLayer(new Popup2(text, selOf2(cx).primary().cursor(doc)), cx.host);
+  cx.editor.autoinfo = { title, body: body.split(`
+`).map((line) => [line, ""]) };
 }
 function prettyPrint(cursor, depth) {
   const node = cursor.currentNode;
@@ -11385,9 +9437,7 @@ var DEFS = [
         else if (!result.stdout.trim())
           cx.editor.setStatus("Command run");
         else
-          hoverPopup(cx, `\`\`\`
-${result.stdout}
-\`\`\``);
+          hoverPopup(cx, command, result.stdout.trimEnd());
         cx.editor.ui.render?.(cx.host);
       };
       const output = cx.editor.shell(command, null, cx.editor.config.shell);
@@ -11407,9 +9457,7 @@ ${result.stdout}
         for (let node = syntax.root.tree.rootNode.descendantForByteRange(byte, byte);node; node = node.parent)
           scopes.push(node.kind);
       }
-      hoverPopup(cx, `\`\`\`json
-${JSON.stringify(scopes.reverse())}
-\`\`\``);
+      hoverPopup(cx, "tree-sitter-scopes", JSON.stringify(scopes.reverse()));
     })
   },
   {
@@ -11420,11 +9468,11 @@ ${JSON.stringify(scopes.reverse())}
       const syntax = cx.editor.syntax?.(cx.host);
       if (!syntax)
         return;
-      const scopes = cx.editor.theme?.scopes ?? DEFAULT_SCOPES;
+      const scopes = DEFAULT_SCOPES;
       const [from, to] = cx.editor.visibleRange(cx.host);
       const byte = syntax.byteOf(selOf2(cx).primary().cursor(docOf2(cx)));
       const span = highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to)).find((s) => s.from <= byte && byte < s.to);
-      hoverPopup(cx, span ? span.scopes.map((h) => scopes[h]).join(", ") : "");
+      hoverPopup(cx, "tree-sitter-highlight-name", span ? span.scopes.map((h) => scopes[h]).join(", ") : "");
     })
   },
   {
@@ -11436,7 +9484,7 @@ ${JSON.stringify(scopes.reverse())}
       if (!syntax)
         throw new Error("Syntax information is not available");
       const byte = syntax.byteOf(selOf2(cx).primary().cursor(docOf2(cx)));
-      hoverPopup(cx, [...syntax.layersForByteRange(byte, byte)].map((layer) => syntax.loader.language(layer.language).config.languageId).join(", "));
+      hoverPopup(cx, "tree-sitter-layers", [...syntax.layersForByteRange(byte, byte)].map((layer) => syntax.loader.language(layer.language).config.languageId).join(", "));
     })
   },
   {
@@ -11450,63 +9498,17 @@ ${JSON.stringify(scopes.reverse())}
       const primary = selOf2(cx).primary();
       const node = syntax.descendantForByteRange(syntax.byteOf(primary.from()), syntax.byteOf(primary.to()));
       if (node)
-        hoverPopup(cx, `\`\`\`tsq
-${prettyPrintTree(node)}
-\`\`\``);
+        hoverPopup(cx, "tree-sitter-subtree", prettyPrintTree(node));
     })
   },
-  {
-    name: "theme",
-    aliases: [],
-    doc: "Change the editor theme (show current theme if no name specified).",
-    fun: (cx, args, event) => {
-      const name = args.positional[0];
-      const editor = cx.editor;
-      if (event === "abort")
-        return editor.unsetThemePreview();
-      if (event === "update") {
-        if (!name)
-          return editor.unsetThemePreview();
-        const theme = editor.themes?.load(name);
-        if (theme)
-          editor.setThemePreview(theme);
-        return;
-      }
-      if (!name) {
-        editor.setStatus(editor.theme?.name ?? "default");
-        return;
-      }
-      const theme = editor.themes?.load(name);
-      if (!theme)
-        throw new Error(`Could not load theme: File not found for: ${name}`);
-      editor.setTheme(theme);
-    }
-  },
-  {
-    name: "line-ending",
-    aliases: [],
-    doc: "Set the document's default line ending. Options: crlf, lf.",
-    fun: validateOnly((cx, args) => {
-      const arg = args.positional[0]?.toLowerCase();
-      if (arg === undefined) {
-        cx.editor.setStatus("line feed");
-        return;
-      }
-      if (arg.startsWith("lf"))
-        return;
-      if (arg.startsWith("crlf"))
-        throw new Error("this editor stores only line feeds");
-      throw new Error("invalid line ending");
-    })
-  },
+  { name: "theme", aliases: [], doc: "Change the editor theme (show current theme if no name specified).", ...ws("theme") },
   {
     name: "reset-diff-change",
     aliases: ["diffget", "diffg"],
     doc: "Reset the diff change at the cursor position.",
     fun: validateOnly((cx) => {
-      const base = cx.host.view ? diffBaseOf(cx.host.view) : null;
-      const hunks = lastDiffHunks(cx.host);
-      if (base === null || !hunks)
+      const { base, hunks } = changesOf2(cx.host.state);
+      if (base === null)
         throw new Error("Diff is not available in the current buffer");
       const doc = docOf2(cx);
       const baseLines = base.split(`
@@ -11782,7 +9784,7 @@ function executeCommandLine(cx, input, event) {
   }
   const cmd = TYPABLE_MAP.get(command);
   if (!cmd) {
-    if (event === "validate")
+    if (event === "validate" && !cx.editor.runApp(cx, command, rest.trim() ? rest.trim().split(/\s+/) : []))
       cx.editor.setError(`no such command: '${command}'`);
     return;
   }
@@ -11807,6 +9809,7 @@ function quoteCompletion(token, candidate) {
   return { start: token.contentStart, text: candidate.split(token.quote).join(token.quote + token.quote), label: candidate };
 }
 function completeCommandLine(input, completers) {
+  const offered = (cmd) => !cmd.app || completers.available(cmd.app);
   const pathCompleter = completers.path;
   const [command, rest] = splitCommandLine(input);
   if (rest !== "" || input.endsWith(" ")) {
@@ -11834,11 +9837,18 @@ function completeCommandLine(input, completers) {
   const start = input.length - input.replace(/^\s+/, "").length;
   const names = new Set;
   for (const cmd of TYPABLE) {
+    if (!offered(cmd))
+      continue;
     if (cmd.name.startsWith(command))
       names.add(cmd.name);
     for (const a of cmd.aliases)
       if (a.startsWith(command))
         names.add(cmd.name);
+  }
+  if (command) {
+    for (const name of completers.appNames())
+      if (name.startsWith(command))
+        names.add(name);
   }
   return [...names].sort().map((n) => ({ start, text: n, label: n }));
 }
@@ -11851,21 +9861,24 @@ var STATIC_COMMANDS = {
   ...insertCommands,
   ...miscCommands,
   ...syntaxCommands,
-  ...shellCommands
+  ...shellCommands,
+  ...gotoCommands
 };
 function isKnownCommand(name) {
-  return name in STATIC_COMMANDS || UNSUPPORTED.includes(name);
+  return name in STATIC_COMMANDS || UNSUPPORTED.includes(name) || isAppCommandName(name);
 }
 function executeCommand2(cx, command, arg) {
   switch (command.kind) {
     case "static": {
       if (hooksOf(cx.host).command?.(command.name, cx))
         return;
+      if (cx.editor.runApp(cx, command.name))
+        return;
       const fn = STATIC_COMMANDS[command.name];
       if (fn)
         fn(cx, arg);
-      else if (UNSUPPORTED.includes(command.name))
-        cx.editor.setStatus(`${command.name} is not available`);
+      else if (UNSUPPORTED.includes(command.name) || isAppCommandName(command.name))
+        cx.editor.setStatus(`${command.name} is not available in this editor`);
       else
         cx.editor.setError(`no such command: '${command.name}'`);
       return;
@@ -12132,951 +10145,6 @@ class Prompt {
       this.update();
     }
     return "consumed";
-  }
-}
-
-// src/syntax/syntax.ts
-var MAX3 = 4294967295;
-function freshFlags() {
-  return { reused: false, modified: false, moved: false, touched: false };
-}
-
-class Layer {
-  language;
-  parent;
-  tree = null;
-  injections = [];
-  ranges = [];
-  flags = freshFlags();
-  locals = null;
-  constructor(language, parent) {
-    this.language = language;
-    this.parent = parent;
-  }
-}
-
-class Source {
-  rt;
-  text;
-  utf8;
-  decoder = new TextDecoder;
-  ptr;
-  maps = null;
-  constructor(rt, text) {
-    this.rt = rt;
-    this.text = text;
-    this.utf8 = new TextEncoder().encode(text);
-    this.ptr = rt.alloc(this.utf8);
-  }
-  build() {
-    if (this.maps)
-      return this.maps;
-    const text = this.text;
-    const byteAt = new Uint32Array(text.length + 1);
-    const posAt = new Uint32Array(this.utf8.length + 1);
-    let byte = 0;
-    for (let pos = 0;pos < text.length; ) {
-      const code = text.codePointAt(pos);
-      const units = code > 65535 ? 2 : 1;
-      const bytes = code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
-      for (let u = 0;u < units; u++)
-        byteAt[pos + u] = byte;
-      for (let b = 0;b < bytes; b++)
-        posAt[byte + b] = pos;
-      pos += units;
-      byte += bytes;
-    }
-    byteAt[text.length] = byte;
-    posAt[byte] = text.length;
-    this.maps = { byteAt, posAt };
-    return this.maps;
-  }
-  byteOf(pos) {
-    const { byteAt } = this.build();
-    return byteAt[Math.min(Math.max(pos, 0), byteAt.length - 1)];
-  }
-  posOf(byte) {
-    const { posAt } = this.build();
-    return posAt[Math.min(byte, posAt.length - 1)];
-  }
-  slice(start, end) {
-    return this.decoder.decode(this.utf8.subarray(start, end));
-  }
-  free() {
-    this.rt.x.hm_free(this.ptr);
-  }
-}
-function utf8Length(s) {
-  let n = 0;
-  for (let i = 0;i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    if (c < 128)
-      n += 1;
-    else if (c < 2048)
-      n += 2;
-    else if (c >= 55296 && c <= 56319) {
-      n += 4;
-      i++;
-    } else
-      n += 3;
-  }
-  return n;
-}
-
-class Syntax {
-  loader;
-  root;
-  layers = new Set;
-  cursors = new Set;
-  source;
-  constructor(loader, text, language) {
-    this.loader = loader;
-    this.root = new Layer(language, null);
-    this.root.ranges = [[0, MAX3]];
-    this.layers.add(this.root);
-    this.source = new Source(loader.rt, text);
-    this.update([]);
-    if (!this.root.tree) {
-      this.delete();
-      throw new Error("`LanguageLoader::get_config` for the root layer language returned `None`");
-    }
-  }
-  get input() {
-    return this.source;
-  }
-  byteOf(pos) {
-    return this.source.byteOf(pos);
-  }
-  posOf(byte) {
-    return this.source.posOf(byte);
-  }
-  slice(start, end) {
-    return this.source.slice(start, end);
-  }
-  get byteLength() {
-    return this.source.utf8.length;
-  }
-  applyChanges(changes, newDoc) {
-    const old = this.source;
-    const edits = [];
-    changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
-      const start = old.byteOf(fromA);
-      edits.push({ start, oldEnd: old.byteOf(toA), newEnd: start + utf8Length(inserted.toString()) });
-    });
-    this.source = new Source(this.loader.rt, newDoc.toString());
-    old.free();
-    this.update(edits);
-  }
-  update(edits) {
-    const queue = [this.root];
-    this.root.flags.touched = true;
-    this.root.flags.modified = true;
-    while (queue.length > 0) {
-      const layer = queue.pop();
-      if (layer.ranges.length === 0)
-        continue;
-      if (layer.tree) {
-        if (layer.flags.moved || layer.flags.modified) {
-          for (let i = edits.length - 1;i >= 0; i--)
-            layer.tree.edit(edits[i].start, edits[i].oldEnd, edits[i].newEnd);
-        }
-        if (layer.flags.modified)
-          this.parse(layer);
-      } else {
-        this.parse(layer);
-      }
-      this.runInjectionQuery(layer, edits, (child) => queue.push(child));
-    }
-    for (const layer of this.layers) {
-      if (!layer.flags.touched) {
-        layer.tree?.delete();
-        layer.tree = null;
-        this.layers.delete(layer);
-      }
-      layer.flags = freshFlags();
-      layer.locals = null;
-    }
-  }
-  parse(layer) {
-    const config = this.loader.getConfig(layer.language);
-    if (!config)
-      return;
-    const ranges = layer.ranges.length === 1 && layer.ranges[0][0] === 0 && layer.ranges[0][1] === MAX3 ? null : layer.ranges.map(([start, end]) => ({ start, end }));
-    let old = layer.tree;
-    if (old && ranges) {
-      const first = layer.ranges[0]?.[0] ?? 0;
-      const last = layer.ranges[layer.ranges.length - 1]?.[1] ?? MAX3;
-      const root = old.rootNode;
-      if (!(root.startByte <= first && root.endByte >= last))
-        old = null;
-    }
-    const tree = this.loader.parser.parse(config.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
-    if (!tree)
-      throw new Error("tree-sitter parse failed");
-    layer.tree?.delete();
-    layer.tree = tree;
-  }
-  allLayers() {
-    return this.layers;
-  }
-  localsOf(layer) {
-    layer.locals ??= runLocalQuery(this, layer);
-    return layer.locals;
-  }
-  treeOf(layer) {
-    return layer.tree;
-  }
-  layerAndTreeForByteRange(start, end) {
-    let layer = this.layerForByteRange(start, end);
-    for (;; ) {
-      if (layer.tree)
-        return [layer, layer.tree];
-      if (layer.parent)
-        layer = layer.parent;
-    }
-  }
-  injectionAtByteIdx(layer, idx) {
-    const injections = layer.injections;
-    let lo = 0;
-    let hi = injections.length;
-    while (lo < hi) {
-      const mid = lo + hi >> 1;
-      if (injections[mid].range[1] <= idx)
-        lo = mid + 1;
-      else
-        hi = mid;
-    }
-    const first = injections[lo];
-    return first && first.range[0] <= idx ? first : null;
-  }
-  *layersForByteRange(start, end) {
-    let parent = this.root;
-    yield parent;
-    for (;; ) {
-      const atStart = this.injectionAtByteIdx(parent, start);
-      if (!atStart)
-        return;
-      const atEnd = this.injectionAtByteIdx(parent, end);
-      if (!atEnd || atStart.layer !== atEnd.layer)
-        return;
-      parent = atStart.layer;
-      yield parent;
-    }
-  }
-  layerForByteRange(start, end) {
-    let last = this.root;
-    for (const layer of this.layersForByteRange(start, end))
-      last = layer;
-    return last;
-  }
-  treeForByteRange(start, end) {
-    return this.layerAndTreeForByteRange(start, end)[1];
-  }
-  namedDescendantForByteRange(start, end) {
-    return this.treeForByteRange(start, end).rootNode.namedDescendantForByteRange(start, end);
-  }
-  descendantForByteRange(start, end) {
-    return this.treeForByteRange(start, end).rootNode.descendantForByteRange(start, end);
-  }
-  walk() {
-    return new SyntaxCursor(this);
-  }
-  newCursor(tree) {
-    const cursor = tree.walk();
-    this.cursors.add(cursor);
-    return cursor;
-  }
-  dropCursor(cursor) {
-    if (this.cursors.delete(cursor))
-      cursor.delete();
-  }
-  delete() {
-    for (const cursor of this.cursors)
-      cursor.delete();
-    this.cursors.clear();
-    for (const layer of this.layers) {
-      layer.tree?.delete();
-      layer.tree = null;
-    }
-    this.layers.clear();
-    this.source.free();
-  }
-  mapInjections(layer, edits) {
-    if (edits.length === 0)
-      return;
-    const injections = layer.injections;
-    let first = 0;
-    while (first < injections.length && injections[first].range[1] < edits[0].start)
-      first++;
-    if (first === injections.length)
-      return;
-    let offset = 0;
-    let e = 0;
-    const shift = (edit) => edit.newEnd - edit.oldEnd;
-    for (let i = first;i < injections.length; i++) {
-      const injection = injections[i];
-      const range = injection.range;
-      const node = injection.matchedNodeRange;
-      const flags = injection.layer.flags;
-      while (e < edits.length && edits[e].oldEnd < node[0])
-        offset += shift(edits[e++]);
-      let mappedNodeStart = node[0] + offset;
-      if (e < edits.length && edits[e].start <= node[0])
-        mappedNodeStart = edits[e].newEnd + offset;
-      while (e < edits.length && edits[e].oldEnd < range[0])
-        offset += shift(edits[e++]);
-      flags.moved = offset !== 0;
-      let mappedStart = range[0] + offset;
-      if (e < edits.length && edits[e].oldEnd <= range[1]) {
-        const edit = edits[e++];
-        if (edit.start < range[0]) {
-          flags.moved = true;
-          mappedStart = edit.newEnd + offset;
-        } else {
-          flags.modified = true;
-        }
-        offset += shift(edit);
-        while (e < edits.length && edits[e].oldEnd <= range[1])
-          offset += shift(edits[e++]);
-      }
-      let mappedEnd = range[1] + offset;
-      if (e < edits.length && edits[e].start <= range[1]) {
-        flags.modified = true;
-        if (edits[e].start < range[0]) {
-          mappedStart = edits[e].newEnd + offset;
-          mappedEnd = mappedStart;
-        }
-      }
-      let mappedNodeEnd = node[1] + offset;
-      if (e < edits.length && edits[e].start <= node[1] && edits[e].start < node[0]) {
-        mappedNodeStart = edits[e].newEnd + offset;
-        mappedNodeEnd = mappedNodeStart;
-      }
-      injection.range = [mappedStart, mappedEnd];
-      injection.matchedNodeRange = [mappedNodeStart, mappedNodeEnd];
-    }
-  }
-  runInjectionQuery(layer, edits, parseLayer) {
-    this.mapInjections(layer, edits);
-    const config = this.loader.getConfig(layer.language);
-    if (!config || config.injectionQuery.contentCapture === null || !layer.tree)
-      return;
-    const parentRanges = layer.ranges;
-    layer.ranges = [];
-    const injections = [];
-    const old = layer.injections;
-    layer.injections = [];
-    let oi = 0;
-    const combined = new Map;
-    for (const mat of config.injectionQuery.execute(layer.tree.rootNode, this.source, this.loader)) {
-      const matched = [mat.range[0], mat.range[1]];
-      let insertPosition = injections.length;
-      const last = injections[injections.length - 1];
-      if (last && rangesIntersect(last.range, matched)) {
-        if (last.range[0] <= matched[0])
-          continue;
-        insertPosition = injections.findIndex((injection) => injection.range[1] > matched[0]);
-        if (insertPosition < 0)
-          insertPosition = injections.length;
-        if (injections[insertPosition].range[0] < matched[1])
-          continue;
-      }
-      while (oi < old.length && old[oi].range[1] <= matched[0])
-        old[oi++].layer.flags.modified = true;
-      let reused = null;
-      const candidate = old[oi];
-      if (candidate && candidate.range[0] < matched[1] && candidate.layer.language === mat.language && !candidate.layer.flags.reused) {
-        reused = candidate;
-        oi++;
-      }
-      let child;
-      if (mat.scope !== null && mat.scope.startsWith("match:") && mat.lastMatch) {
-        child = combined.get(mat.scope) ?? this.initInjection(layer, mat.language, reused);
-        combined.delete(mat.scope);
-      } else if (mat.scope !== null) {
-        let existing = combined.get(mat.scope);
-        if (!existing) {
-          existing = this.initInjection(layer, mat.language, reused);
-          combined.set(mat.scope, existing);
-        }
-        child = existing;
-      } else {
-        child = this.initInjection(layer, mat.language, reused);
-      }
-      if (!child.flags.touched) {
-        child.flags.touched = true;
-        parseLayer(child);
-      }
-      if (child.flags.reused) {
-        child.flags.modified ||= !reused || reused.matchedNodeRange[0] !== matched[0] || reused.matchedNodeRange[1] !== matched[1] || reused.layer !== child;
-      } else if (reused) {
-        child.flags.reused = true;
-        child.flags.modified = true;
-        const tree = reused.layer.tree?.copy() ?? null;
-        child.tree?.delete();
-        child.tree = tree;
-      }
-      const oldLen = injections.length;
-      for (const range of intersectRanges(mat.includeChildren, mat.node, parentRanges)) {
-        child.ranges.push(range);
-        injections.push({ range, layer: child, matchedNodeRange: matched });
-      }
-      if (oldLen !== insertPosition) {
-        const inserted = injections.length - oldLen;
-        rotateRight(injections, insertPosition, inserted);
-        if (insertPosition <= child.ranges.length && inserted <= child.ranges.length - insertPosition)
-          rotateRight(child.ranges, insertPosition, inserted);
-      }
-    }
-    for (;oi < old.length; oi++)
-      old[oi].layer.flags.modified = true;
-    layer.ranges = parentRanges;
-    layer.injections = injections;
-  }
-  initInjection(parent, language, reuse) {
-    if (reuse) {
-      reuse.layer.flags.reused = true;
-      reuse.layer.ranges = [];
-      return reuse.layer;
-    }
-    const layer = new Layer(language, parent);
-    this.layers.add(layer);
-    return layer;
-  }
-}
-function rotateRight(items, from, count) {
-  if (count === 0)
-    return;
-  const moved = items.splice(items.length - count, count);
-  items.splice(from, 0, ...moved);
-}
-function rangesIntersect(a, b) {
-  return a[0] === b[0] || a[1] > b[0] && b[1] > a[0];
-}
-function intersectRanges(includeChildren, node, parentRanges) {
-  const range = [node.startByte, node.endByte];
-  const excluded = [];
-  if (includeChildren !== "all") {
-    for (const child of node.children) {
-      if (includeChildren === "unnamed" && !child.isNamed)
-        continue;
-      excluded.push([child.startByte, child.endByte]);
-    }
-  }
-  const i = parentRanges.findIndex((r) => r[1] > range[0]);
-  const parents = excludeRanges(i < 0 ? [] : parentRanges.slice(i), excluded);
-  const merged = [];
-  for (const r of parents) {
-    const prev = merged[merged.length - 1];
-    if (prev && prev[1] === r[0])
-      prev[1] = r[1];
-    else
-      merged.push([r[0], r[1]]);
-  }
-  const out = [];
-  let start = range[0];
-  for (const parent of merged) {
-    if (start >= range[1])
-      break;
-    if (parent[1] <= start)
-      continue;
-    if (parent[0] > start)
-      start = parent[0];
-    const end = Math.min(range[1], parent[1]);
-    if (end > start)
-      out.push([start, end]);
-    start = Math.max(start, end);
-  }
-  return out;
-}
-function excludeRanges(ranges, excluded) {
-  const exclusions = excluded.filter((r) => r[1] > r[0]);
-  const out = [];
-  let e = 0;
-  const queue = ranges.map((r) => [r[0], r[1]]);
-  let i = 0;
-  let next = queue[i++];
-  while (next) {
-    const range = next;
-    while (e < exclusions.length && exclusions[e][1] <= range[0])
-      e++;
-    const exclusion = exclusions[e];
-    if (exclusion && rangesIntersect(range, exclusion)) {
-      const preceding = [range[0], exclusion[0]];
-      const remaining = [exclusion[1], range[1]];
-      if (remaining[1] > remaining[0]) {
-        next = remaining;
-        e++;
-      } else {
-        next = queue[i++];
-      }
-      if (preceding[1] > preceding[0])
-        out.push(preceding);
-      continue;
-    }
-    next = queue[i++];
-    out.push(range);
-  }
-  return out;
-}
-
-class SyntaxCursor {
-  syntax;
-  current;
-  cursor;
-  constructor(syntax) {
-    this.syntax = syntax;
-    this.current = syntax.root;
-    this.cursor = syntax.newCursor(syntax.treeOf(syntax.root));
-  }
-  use(layer, tree) {
-    this.syntax.dropCursor(this.cursor);
-    this.current = layer;
-    this.cursor = this.syntax.newCursor(tree);
-  }
-  node() {
-    return this.cursor.currentNode;
-  }
-  gotoParent() {
-    if (this.cursor.gotoParent())
-      return true;
-    let layer = this.current;
-    for (;; ) {
-      const parent = layer.parent;
-      if (!parent)
-        return false;
-      layer = parent;
-      if (layer.tree) {
-        this.use(layer, layer.tree);
-        return true;
-      }
-    }
-  }
-  gotoParentWith(predicate) {
-    while (this.gotoParent()) {
-      if (predicate(this.node()))
-        return true;
-    }
-    return false;
-  }
-  gotoFirstChild() {
-    const node = this.cursor.currentNode;
-    const injection = this.syntax.injectionAtByteIdx(this.current, node.startByte);
-    if (injection && injection.range[1] >= node.endByte && injection.layer.tree) {
-      this.use(injection.layer, injection.layer.tree);
-      return true;
-    }
-    return this.cursor.gotoFirstChild();
-  }
-  gotoNextSibling() {
-    return this.cursor.gotoNextSibling();
-  }
-  gotoPreviousSibling() {
-    return this.cursor.gotoPreviousSibling();
-  }
-  resetToByteRange(start, end) {
-    const [layer, tree] = this.syntax.layerAndTreeForByteRange(start, end);
-    this.use(layer, tree);
-    for (;; ) {
-      const node = this.cursor.currentNode;
-      if (start < node.startByte || end > node.endByte) {
-        this.cursor.gotoParent();
-        break;
-      }
-      if (!this.cursor.gotoFirstChildForByte(start))
-        break;
-    }
-  }
-  children() {
-    const out = [];
-    if (!this.gotoFirstChild())
-      return out;
-    out.push(this.node());
-    while (this.gotoNextSibling())
-      out.push(this.node());
-    return out;
-  }
-  dispose() {
-    this.syntax.dropCursor(this.cursor);
-  }
-}
-
-// src/ui/picker.ts
-function columnQueries(names, primary, input) {
-  const fields = new Map;
-  const primaryField = names[primary];
-  let escaped = false;
-  let inField = false;
-  let field = null;
-  let text = "";
-  const finish = () => {
-    const key = field ?? primaryField;
-    field = null;
-    const pat = text.endsWith(" ") ? text.slice(0, -1) : text;
-    const existing = fields.get(key);
-    fields.set(key, existing === undefined ? pat : `${existing} ${pat}`);
-    text = "";
-  };
-  for (const ch of input) {
-    if (escaped) {
-      if (ch !== "%")
-        text += "\\";
-      text += ch;
-      escaped = false;
-    } else if (ch === "\\")
-      escaped = !escaped;
-    else if (ch === "%") {
-      if (text !== "")
-        finish();
-      inField = true;
-    } else if (ch === " " && inField) {
-      text = "";
-      inField = false;
-    } else if (inField) {
-      text += ch;
-      let best = null;
-      for (const name of names)
-        if (name.startsWith(text) && (best === null || name.length < best.length))
-          best = name;
-      field = best;
-    } else
-      text += ch;
-  }
-  if (!inField && text !== "")
-    finish();
-  return fields;
-}
-var PAGE_SIZE = 20;
-
-class Picker2 {
-  editor;
-  host;
-  matcher;
-  options;
-  modal = true;
-  anchored = null;
-  className = "hx-picker";
-  prompt;
-  all = [];
-  matches = [];
-  cursor = 0;
-  showPreview = true;
-  patterns = new Map;
-  previewCache = new Map;
-  streaming = false;
-  filtered;
-  names;
-  primary;
-  constructor(editor, host, matcher, options) {
-    this.editor = editor;
-    this.host = host;
-    this.matcher = matcher;
-    this.options = options;
-    this.prompt = new Prompt(editor, host, { label: "", initial: options.initialQuery ?? "", onAccept: () => {} });
-    this.filtered = options.columns.flatMap((column, index) => column.filter === false ? [] : [{ column, index }]);
-    this.names = options.columns.map((c) => c.name);
-    this.primary = options.primaryColumn ?? 0;
-    this.cursor = options.cursor ?? 0;
-    this.loadItems();
-    this.refilter();
-    if (options.cursor !== undefined)
-      this.cursor = Math.min(options.cursor, Math.max(this.matches.length - 1, 0));
-  }
-  loadItems() {
-    const items = this.options.items;
-    if (Array.isArray(items)) {
-      this.all = [...items];
-    } else if (items instanceof Promise) {
-      this.streaming = true;
-      items.then((list) => this.addItems(list, true)).catch(() => this.addItems([], true));
-    } else {
-      this.streaming = true;
-      this.consume(items);
-    }
-  }
-  async consume(items) {
-    for await (const batch of items)
-      this.addItems(batch, false);
-    this.addItems([], true);
-  }
-  addItems(list, finished) {
-    this.all.push(...list);
-    if (finished)
-      this.streaming = false;
-    this.refilter();
-    this.requestRender();
-  }
-  replaceItems(list) {
-    this.all = [...list];
-    this.refilter();
-    this.requestRender();
-  }
-  requestRender() {
-    this.editor.renderLayers(this.host);
-  }
-  freePatterns() {
-    for (const pattern of this.patterns.values())
-      pattern.free();
-    this.patterns.clear();
-  }
-  refilter() {
-    this.freePatterns();
-    const queries = columnQueries(this.names, this.primary, this.prompt.line);
-    for (const { column, index } of this.filtered) {
-      const query = queries.get(column.name);
-      if (query)
-        this.patterns.set(index, this.matcher.pattern(query));
-    }
-    const out = [];
-    this.all.forEach((item, index) => {
-      let score = 0;
-      let length = 0;
-      for (const { column, index: c } of this.filtered) {
-        const text = column.format(item);
-        length += text.length;
-        const pattern = this.patterns.get(c);
-        if (!pattern)
-          continue;
-        const s = pattern.score(text, column.paths === true);
-        if (s === null)
-          return;
-        score += s;
-      }
-      out.push({ item, index, score, length });
-    });
-    if (this.patterns.size > 0)
-      out.sort((a, b) => b.score - a.score || a.length - b.length || a.index - b.index);
-    this.matches = out;
-    this.cursor = 0;
-  }
-  move(delta) {
-    const n = this.matches.length;
-    if (n === 0)
-      return;
-    this.cursor = (this.cursor + delta + n * 1024) % n;
-  }
-  selection() {
-    return this.matches[this.cursor]?.item ?? null;
-  }
-  matchCount() {
-    return this.matches.length;
-  }
-  itemCount() {
-    return this.all.length;
-  }
-  query() {
-    return this.prompt.line;
-  }
-  handleKey(key, cx) {
-    switch (key) {
-      case "S-tab":
-      case "up":
-      case "C-p":
-        this.move(-1);
-        return "consumed";
-      case "tab":
-      case "down":
-      case "C-n":
-        this.move(1);
-        return "consumed";
-      case "pagedown":
-      case "C-d":
-        this.cursor = Math.min(this.matches.length - 1, this.cursor + PAGE_SIZE);
-        if (this.cursor < 0)
-          this.cursor = 0;
-        return "consumed";
-      case "pageup":
-      case "C-u":
-        this.cursor = Math.max(0, this.cursor - PAGE_SIZE);
-        return "consumed";
-      case "home":
-        this.cursor = 0;
-        return "consumed";
-      case "end":
-        this.cursor = Math.max(0, this.matches.length - 1);
-        return "consumed";
-      case "esc":
-      case "C-c":
-        return "close";
-      case "A-ret": {
-        const item = this.selection();
-        if (item !== null)
-          this.options.onSelect(cx, item, "load");
-        return "consumed";
-      }
-      case "ret": {
-        const item = this.selection();
-        if (item !== null)
-          this.options.onSelect(cx, item, "replace");
-        return "close";
-      }
-      case "C-s": {
-        const item = this.selection();
-        if (item !== null)
-          this.options.onSelect(cx, item, "hsplit");
-        return "close";
-      }
-      case "C-v": {
-        const item = this.selection();
-        if (item !== null)
-          this.options.onSelect(cx, item, "vsplit");
-        return "close";
-      }
-      case "C-t":
-        this.showPreview = !this.showPreview;
-        return "consumed";
-      default: {
-        const before = this.prompt.line;
-        const result = this.prompt.handleKey(key);
-        if (result === "closed")
-          return "close";
-        if (this.prompt.line !== before) {
-          this.options.dynamic?.(this.prompt.line);
-          this.refilter();
-        }
-        return "consumed";
-      }
-    }
-  }
-  cellText(parent, column, index, item) {
-    const text = column.format(item);
-    const pattern = this.patterns.get(index);
-    if (!pattern) {
-      parent.textContent = text;
-      return;
-    }
-    const hits = new Set(pattern.indices(text, column.paths === true));
-    let run = "";
-    let runHit = false;
-    let i = 0;
-    const flush = () => {
-      if (run === "")
-        return;
-      if (runHit)
-        add(parent, "span", "hx-picker-hit hx-s-special", run);
-      else
-        parent.append(run);
-      run = "";
-    };
-    for (const ch of text) {
-      const hit = hits.has(i++);
-      if (hit !== runHit)
-        flush();
-      runHit = hit;
-      run += ch;
-    }
-    flush();
-  }
-  renderList(parent) {
-    const left = add(parent, "div", "hx-picker-list");
-    const head = add(left, "div", "hx-picker-prompt");
-    add(head, "span", undefined, this.prompt.line.slice(0, this.prompt.cursor));
-    add(head, "span", "hx-prompt-cursor", this.prompt.line.slice(this.prompt.cursor, this.prompt.cursor + 1) || " ");
-    add(head, "span", undefined, this.prompt.line.slice(this.prompt.cursor + 1));
-    add(head, "span", "hx-picker-count hx-s-ui-text-inactive", `${this.matches.length ? this.cursor + 1 : 0}/${this.matches.length}${this.all.length !== this.matches.length ? ` (${this.all.length})` : ""}${this.streaming ? " …" : ""}`);
-    const columns = this.options.columns.filter((c) => !c.hidden);
-    const table = add(left, "div", "hx-picker-rows");
-    table.style.setProperty("--hx-picker-columns", columns.map((_, i) => i === columns.length - 1 ? "1fr" : "auto").join(" "));
-    if (columns.length > 1) {
-      const header = add(table, "div", "hx-picker-row hx-picker-header hx-s-ui-picker-header");
-      for (const column of columns)
-        add(header, "span", "hx-picker-cell hx-s-ui-picker-header-column", column.name);
-    }
-    const rows = 256;
-    const start = Math.max(0, Math.min(this.cursor - Math.floor(rows / 2), this.matches.length - rows));
-    for (let i = start;i < Math.min(this.matches.length, start + rows); i++) {
-      const row = add(table, "div", i === this.cursor ? "hx-picker-row hx-picker-selected hx-s-ui-text-focus" : "hx-picker-row");
-      const item = this.matches[i].item;
-      for (const column of columns)
-        this.cellText(add(row, "span", "hx-picker-cell"), column, this.options.columns.indexOf(column), item);
-    }
-    table.querySelector(".hx-picker-selected")?.scrollIntoView({ block: "nearest" });
-  }
-  renderPreview(parent) {
-    const box = add(parent, "div", "hx-picker-preview");
-    const item = this.selection();
-    if (item === null || !this.options.preview)
-      return;
-    if (!this.previewCache.has(item)) {
-      const result = this.options.preview(item);
-      if (result instanceof Promise) {
-        this.previewCache.set(item, null);
-        result.then((preview) => {
-          this.previewCache.set(item, preview);
-          this.requestRender();
-        });
-      } else
-        this.previewCache.set(item, result);
-    }
-    const preview = this.previewCache.get(item);
-    if (!preview) {
-      add(box, "div", "hx-picker-note", "<File not found>");
-      return;
-    }
-    if (preview.note)
-      add(box, "div", "hx-picker-note", preview.note);
-    if (preview.text === null)
-      return;
-    const body = add(box, "div", "hx-picker-preview-body");
-    renderPreviewText(body, this.editor, preview);
-    body.querySelector(".hx-picker-focus")?.scrollIntoView({ block: "center" });
-  }
-  render(parent, view) {
-    this.renderList(parent);
-    if (this.showPreview && this.options.preview && parent.getBoundingClientRect().width / view.defaultCharacterWidth > 72)
-      this.renderPreview(parent);
-  }
-  closed() {
-    this.freePatterns();
-  }
-}
-var MAX_PREVIEW_LINES = 2000;
-function renderPreviewText(parent, editor, preview) {
-  const doc = parent.ownerDocument;
-  const text = preview.text;
-  const language = preview.language ? editor.languages?.languageForName(preview.language) : preview.path ? editor.languages?.languageForFilename(preview.path) : null;
-  const scopes = editor.theme?.scopes ?? DEFAULT_SCOPES;
-  let spans = [];
-  const clipped = text.split(`
-`).slice(0, MAX_PREVIEW_LINES).join(`
-`);
-  if (language !== null && language !== undefined && editor.languages?.isLoaded(language) && editor.languages.getConfig(language)) {
-    try {
-      const syntax = new Syntax(editor.languages, clipped, language);
-      spans = highlightSpans(syntax, scopes, 0, syntax.byteLength).map((s) => ({ from: syntax.posOf(s.from), to: syntax.posOf(s.to), cls: s.scopes.map((h) => scopeClass(scopes[h])).join(" ") }));
-      syntax.delete();
-    } catch {
-      spans = [];
-    }
-  } else if (language !== null && language !== undefined)
-    editor.languages?.load(language);
-  let pos = 0;
-  let spanIndex = 0;
-  const lines = clipped.split(`
-`);
-  for (const line of lines) {
-    const lineEnd = pos + line.length;
-    const focused = preview.from !== undefined && preview.to !== undefined && lineEnd >= preview.from && pos <= preview.to;
-    const row = make(doc, "div", focused ? "hx-picker-preview-line hx-picker-focus hx-s-ui-highlight" : "hx-picker-preview-line");
-    let at = pos;
-    while (spanIndex < spans.length && spans[spanIndex].to <= pos)
-      spanIndex++;
-    for (let i = spanIndex;i < spans.length && spans[i].from < lineEnd; i++) {
-      const span = spans[i];
-      const from = Math.max(span.from, pos);
-      const to = Math.min(span.to, lineEnd);
-      if (from > at)
-        row.append(text.slice(at, from));
-      if (to > from)
-        add(row, "span", span.cls, text.slice(from, to));
-      at = Math.max(at, to);
-    }
-    if (at < lineEnd)
-      row.append(text.slice(at, lineEnd));
-    if (line === "")
-      row.append("​");
-    parent.appendChild(row);
-    pos = lineEnd + 1;
   }
 }
 
@@ -13397,506 +10465,6 @@ var COMMAND_DOCS = {
   rotate_selections_last: "Make the last selection your primary one"
 };
 
-// src/commands/workspace.ts
-function picker(cx, options) {
-  cx.editor.withMatcher((matcher) => {
-    cx.editor.pushLayer(new Picker2(cx.editor, cx.host, matcher, options), cx.host);
-  });
-}
-function filePreview(editor, path, target) {
-  const read = editor.workspace?.readFile?.(path) ?? null;
-  const make = (text) => {
-    if (text === null)
-      return { text: null, note: "<File not found>", path };
-    const span = targetSpan(text, target);
-    return { text, path, from: span?.[0], to: span?.[1] };
-  };
-  return read instanceof Promise ? read.then(make) : make(read);
-}
-function targetSpan(text, target) {
-  if (!target)
-    return null;
-  if (target.from !== undefined)
-    return [target.from, target.to ?? target.from];
-  if (target.line === undefined)
-    return null;
-  let at = 0;
-  for (let n = 0;n < target.line; n++) {
-    const next = text.indexOf(`
-`, at);
-    if (next < 0)
-      return null;
-    at = next + 1;
-  }
-  return [at, at];
-}
-function openLocation(cx, location, action = "replace") {
-  const path = location.path;
-  const isHere = !path || path === (cx.host.path ?? null);
-  if (isHere) {
-    const doc = docOf2(cx);
-    let from = location.from;
-    let to = location.to;
-    if (from === undefined && location.line !== undefined) {
-      const line = doc.line(Math.min(location.line + 1, doc.lines));
-      from = line.from + Math.min(location.column ?? 0, line.length);
-      to = from;
-    }
-    if (from === undefined)
-      return;
-    pushJump2(cx);
-    setSel2(cx, Selection2.single(Math.min(from, doc.length), Math.min(to ?? from, doc.length)));
-    return;
-  }
-  cx.editor.workspace?.openFile?.(cx, path, location, action);
-}
-function diagnosticColumns() {
-  return [
-    { name: "severity", format: (d) => (d.severity ?? "warning").toUpperCase() },
-    { name: "code", format: (d) => d.code ?? "" },
-    { name: "source", format: (d) => d.source ?? "" },
-    { name: "message", format: (d) => d.message.replace(/\n/g, " ") }
-  ];
-}
-function diagnosticsPicker(cx, list) {
-  const doc = docOf2(cx);
-  const items = list.map((d) => ({ ...d, line: doc.lineAt(d.from).number }));
-  picker(cx, {
-    columns: diagnosticColumns(),
-    primaryColumn: 3,
-    items,
-    onSelect: (cx, d, action) => openLocation(cx, { from: d.from, to: d.to }, action),
-    preview: (d) => ({ text: doc.toString(), path: cx.host.path, from: d.from, to: d.to })
-  });
-}
-function gotoDiagnostic(cx, find, reversed = false) {
-  const list = diagnosticsOf(cx.host.state);
-  const doc = docOf2(cx);
-  const diag = find(list, selOf2(cx).primary().cursor(doc));
-  if (!diag)
-    return;
-  pushJump2(cx);
-  setSel2(cx, reversed ? Selection2.single(diag.to, diag.from) : Selection2.single(diag.from, diag.to));
-}
-function gotoChange(cx, which) {
-  const hunks = lastDiffHunks(cx.host);
-  if (!hunks || hunks.length === 0)
-    return;
-  const doc = docOf2(cx);
-  const count = cx.count();
-  const moved = selOf2(cx).transform((range) => {
-    let line = doc.lineAt(range.cursor(doc)).number - 1;
-    let target = range;
-    for (let i = 0;i < count; i++) {
-      let index;
-      if (which === "first")
-        index = 0;
-      else if (which === "last")
-        index = hunks.length - 1;
-      else if (which === "next") {
-        index = hunks.findIndex((h) => h.afterStart > line);
-      } else {
-        index = -1;
-        for (let k = hunks.length - 1;k >= 0; k--) {
-          if (hunks[k].afterEnd <= line || hunks[k].afterStart === hunks[k].afterEnd && hunks[k].afterEnd <= line) {
-            index = k;
-            break;
-          }
-        }
-      }
-      const hunk = hunks[index];
-      if (!hunk)
-        break;
-      const startLine = Math.min(hunk.afterStart + 1, doc.lines);
-      const start = doc.line(startLine).from;
-      const end = hunk.afterEnd >= doc.lines ? doc.length : doc.line(hunk.afterEnd + 1).from;
-      line = hunk.afterStart;
-      target = hunk.afterStart === hunk.afterEnd ? new Range2(start, start) : new Range2(start, end);
-    }
-    return target;
-  });
-  pushJump2(cx);
-  setSel2(cx, moved);
-}
-function syntaxTags(cx) {
-  const syntax = cx.editor.syntax?.(cx.host);
-  if (!syntax)
-    return null;
-  const loader = syntax.loader;
-  const tags = [];
-  for (const layer of syntax.allLayers()) {
-    const query = loader.tagsQuery(layer.language);
-    if (!query || !layer.tree)
-      continue;
-    const cursor = new QueryCursor(query, layer.tree.rootNode, syntax.input);
-    try {
-      for (let match = cursor.nextMatch();match; match = cursor.nextMatch()) {
-        for (const node of match.nodes) {
-          const name = query.captureName(node.capture);
-          if (!name.startsWith("definition."))
-            continue;
-          const start = node.node.startByte;
-          const end = node.node.endByte;
-          tags.push({ kind: name.slice("definition.".length), name: syntax.slice(start, end), from: syntax.posOf(start), to: syntax.posOf(end) });
-        }
-      }
-    } finally {
-      cursor.delete();
-    }
-  }
-  return tags.sort((a, b) => a.from - b.from);
-}
-function symbolColumns() {
-  return [
-    { name: "kind", format: (s) => s.kind },
-    { name: "name", format: (s) => s.name },
-    { name: "path", format: (s) => s.path ?? "", filter: true, paths: true }
-  ];
-}
-function symbolPicker(cx) {
-  const language = cx.editor.workspace?.language;
-  if (language?.symbols) {
-    const pending = language.symbols(cx);
-    picker(cx, { columns: symbolColumns().slice(0, 2), primaryColumn: 1, items: pending, onSelect: (cx, s, action) => openLocation(cx, s, action), preview: (s) => previewLocation(cx, s) });
-    return;
-  }
-  const tags = syntaxTags(cx);
-  if (!tags) {
-    cx.editor.setError("Syntax tree is not available on this buffer");
-    return;
-  }
-  picker(cx, {
-    columns: [
-      { name: "kind", format: (t) => t.kind },
-      { name: "name", format: (t) => t.name }
-    ],
-    primaryColumn: 1,
-    items: tags,
-    onSelect: (cx, t, action) => openLocation(cx, { from: t.from, to: t.to }, action),
-    preview: (t) => ({ text: docOf2(cx).toString(), path: cx.host.path, from: t.from, to: t.to })
-  });
-}
-function previewLocation(cx, location) {
-  const path = location.path;
-  if (!path || path === (cx.host.path ?? null)) {
-    const text = docOf2(cx).toString();
-    const span = targetSpan(text, location);
-    return { text, path: cx.host.path, from: span?.[0], to: span?.[1] };
-  }
-  return filePreview(cx.editor, path, location);
-}
-function locationCommand(kind, empty) {
-  return {
-    available: (cx) => cx.editor.workspace?.language?.locations !== undefined,
-    run: async (cx) => {
-      const list = await cx.editor.workspace.language.locations(cx, kind);
-      if (list.length === 0) {
-        cx.editor.setError(empty);
-        cx.editor.ui.render?.(cx.host);
-        return;
-      }
-      if (list.length === 1) {
-        openLocation(cx, list[0]);
-        return;
-      }
-      picker(cx, {
-        columns: [
-          { name: "path", format: (l) => l.path ?? cx.host.name, paths: true },
-          { name: "label", format: (l) => l.label ?? "" }
-        ],
-        items: list,
-        onSelect: (cx, l, action) => openLocation(cx, l, action),
-        preview: (l) => previewLocation(cx, l)
-      });
-    }
-  };
-}
-function applyTextEdits(cx, edits) {
-  const doc = docOf2(cx);
-  if (edits.length === 0)
-    return;
-  const sorted = [...edits].sort((a, b) => a.from - b.from);
-  commitHistoryNow2(cx.host);
-  apply(cx, changeSetOf(doc, sorted.map((e) => [e.from, e.to, e.insert])));
-  commitHistoryNow2(cx.host);
-}
-function popup(cx, text, scope) {
-  const value = cx.host.state.field(helixField2);
-  const anchor = value.selection.primary().cursor(cx.host.state.doc);
-  cx.editor.pushLayer(new Popup2(text, anchor, scope), cx.host);
-}
-function signatureText(help) {
-  const signature = help.signatures[help.active ?? 0];
-  if (!signature)
-    return "";
-  const lines = [`\`${signature.label}\``];
-  if (signature.documentation)
-    lines.push("", signature.documentation);
-  return lines.join(`
-`);
-}
-function jumpLabel(jump, host) {
-  return jump.docId === host.id ? host.name : jump.docId;
-}
-function jumplistPicker(cx) {
-  const list = jumplistFor2(cx);
-  const doc = docOf2(cx);
-  const items = [...list.jumps].reverse().map((jump) => {
-    const inDoc = jump.docId === cx.host.id;
-    const contents = inDoc ? jump.selection.ranges.map((r) => doc.sliceString(r.from(), Math.min(r.to(), doc.length))).join(" ").replace(/\s+/g, " ") : "";
-    return { jump, contents };
-  });
-  picker(cx, {
-    columns: [
-      { name: "id", format: (i) => jumpLabel(i.jump, cx.host), paths: true },
-      { name: "path", format: () => cx.host.path ?? "", filter: false, hidden: true },
-      { name: "flags", format: () => "", filter: false, hidden: true },
-      { name: "contents", format: (i) => i.contents }
-    ],
-    primaryColumn: 3,
-    items,
-    onSelect: (cx, i) => {
-      pushJump2(cx);
-      cx.editor.jumpTo(cx, i.jump);
-    },
-    preview: (i) => i.jump.docId === cx.host.id ? { text: doc.toString(), path: cx.host.path, from: i.jump.selection.primary().from(), to: i.jump.selection.primary().to() } : null
-  });
-}
-function keyBindings(editor) {
-  const bindings = new Map;
-  const visit = (node, prefix) => {
-    if (node.kind === "node" && node.map) {
-      for (const [key, child] of node.map)
-        visit(child, prefix + key);
-    } else if (node.kind === "command" && node.command?.kind === "static") {
-      const list = bindings.get(node.command.name) ?? [];
-      list.push(prefix);
-      bindings.set(node.command.name, list);
-    }
-  };
-  const mode = "normal";
-  visit(editor.keymaps.map[mode], "");
-  return bindings;
-}
-function commandPalette(cx) {
-  const bindings = keyBindings(cx.editor);
-  const items = Object.entries(COMMAND_DOCS).map(([name, doc]) => ({ name, doc, keys: (bindings.get(name) ?? []).join(", ") }));
-  picker(cx, {
-    columns: [
-      { name: "name", format: (i) => i.name },
-      { name: "bindings", format: (i) => i.keys },
-      { name: "doc", format: (i) => i.doc }
-    ],
-    items,
-    onSelect: (cx, i) => cx.editor.runStatic(cx, i.name)
-  });
-}
-function bufferPicker(cx) {
-  const buffers = cx.editor.workspace.buffers(cx);
-  const current = buffers.findIndex((b) => b.id === cx.host.id || b.path !== null && b.path === (cx.host.path ?? null));
-  const start = cx.editor.config.bufferPicker.startPosition === "previous" ? Math.min(1, buffers.length - 1) : Math.max(current, 0);
-  picker(cx, {
-    columns: [
-      { name: "id", format: (b) => b.id, filter: false, hidden: true },
-      { name: "flags", format: (b) => (b.modified ? "+" : "") + (b.id === cx.host.id ? "*" : ""), filter: false },
-      { name: "path", format: (b) => b.path ?? b.name, paths: true }
-    ],
-    primaryColumn: 2,
-    items: buffers,
-    cursor: start,
-    onSelect: (cx, b, action) => cx.editor.workspace?.openBuffer?.(cx, b.id, action),
-    preview: (b) => b.path ? filePreview(cx.editor, b.path, null) : null
-  });
-}
-function filePicker(cx, root) {
-  const workspace = cx.editor.workspace;
-  const files = workspace.files(cx, root);
-  const items = Array.isArray(files) || files instanceof Promise ? files : files;
-  picker(cx, {
-    columns: [{ name: "path", format: (p) => p, paths: true }],
-    items,
-    onSelect: (cx, path, action) => workspace.openFile?.(cx, path, null, action),
-    preview: (path) => filePreview(cx.editor, path, null)
-  });
-}
-function globalSearch(cx) {
-  const workspace = cx.editor.workspace;
-  cx.editor.prompt(cx, {
-    label: "global-search:",
-    history: "/",
-    onAccept: (pattern) => {
-      if (!pattern)
-        return;
-      const results = workspace.search(cx, pattern, null);
-      picker(cx, {
-        columns: [
-          { name: "path", format: (m) => `${m.path}:${m.line + 1}`, paths: true },
-          { name: "contents", format: (m) => m.text.trim() }
-        ],
-        primaryColumn: 1,
-        items: results,
-        onSelect: (cx, m, action) => openLocation(cx, { path: m.path, line: m.line }, action),
-        preview: (m) => filePreview(cx.editor, m.path, { line: m.line })
-      });
-    }
-  });
-}
-var always = () => true;
-var hasLanguage = (name) => (cx) => cx.editor.workspace?.language?.[name] !== undefined;
-var WORKSPACE_BUILTINS = {
-  goto_first_diag: { available: always, run: (cx) => gotoDiagnostic(cx, (list) => list[0]) },
-  goto_last_diag: { available: always, run: (cx) => gotoDiagnostic(cx, (list) => list[list.length - 1]) },
-  goto_next_diag: { available: always, run: (cx) => gotoDiagnostic(cx, (list, cursor) => list.find((d) => d.from > cursor)) },
-  goto_prev_diag: { available: always, run: (cx) => gotoDiagnostic(cx, (list, cursor) => [...list].reverse().find((d) => d.from < cursor), true) },
-  goto_next_change: { available: always, run: (cx) => gotoChange(cx, "next") },
-  goto_prev_change: { available: always, run: (cx) => gotoChange(cx, "prev") },
-  goto_first_change: { available: always, run: (cx) => gotoChange(cx, "first") },
-  goto_last_change: { available: always, run: (cx) => gotoChange(cx, "last") },
-  diagnostics_picker: { available: always, run: (cx) => diagnosticsPicker(cx, diagnosticsOf(cx.host.state)) },
-  workspace_diagnostics_picker: { available: always, run: (cx) => diagnosticsPicker(cx, cx.editor.workspaceDiagnostics(cx.host)) },
-  jumplist_picker: { available: always, run: jumplistPicker },
-  command_palette: { available: always, run: commandPalette },
-  last_picker: {
-    available: (cx) => cx.editor.lastPicker !== null,
-    run: (cx) => {
-      if (cx.editor.lastPicker)
-        cx.editor.pushLayer(cx.editor.lastPicker, cx.host);
-    }
-  },
-  symbol_picker: { available: always, run: symbolPicker },
-  workspace_symbol_picker: {
-    available: hasLanguage("workspaceSymbols"),
-    run: (cx) => {
-      const language = cx.editor.workspace.language;
-      let current = null;
-      let latest = 0;
-      cx.editor.withMatcher((matcher) => {
-        const options = {
-          columns: symbolColumns(),
-          primaryColumn: 1,
-          items: [],
-          onSelect: (cx, s, action) => openLocation(cx, s, action),
-          preview: (s) => previewLocation(cx, s),
-          dynamic: (query) => {
-            const request = ++latest;
-            language.workspaceSymbols(cx, query).then((list) => {
-              if (request === latest)
-                current?.replaceItems(list);
-            });
-          }
-        };
-        current = new Picker2(cx.editor, cx.host, matcher, options);
-        cx.editor.pushLayer(current, cx.host);
-        options.dynamic("");
-      });
-    }
-  },
-  buffer_picker: { available: (cx) => cx.editor.workspace?.buffers !== undefined, run: bufferPicker },
-  file_picker: { available: (cx) => cx.editor.workspace?.files !== undefined, run: (cx, args) => filePicker(cx, args[0] ?? null) },
-  file_picker_in_current_buffer_directory: {
-    available: (cx) => cx.editor.workspace?.files !== undefined,
-    run: (cx) => {
-      const path = cx.host.path ?? null;
-      filePicker(cx, path && path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : null);
-    }
-  },
-  global_search: { available: (cx) => cx.editor.workspace?.search !== undefined, run: globalSearch },
-  changed_file_picker: {
-    available: (cx) => cx.editor.workspace?.changedFiles !== undefined,
-    run: (cx) => {
-      const workspace = cx.editor.workspace;
-      const files = workspace.changedFiles(cx);
-      picker(cx, {
-        columns: [
-          { name: "change", format: (f) => f.status },
-          { name: "path", format: (f) => f.path, paths: true }
-        ],
-        primaryColumn: 1,
-        items: files,
-        onSelect: (cx, f, action) => workspace.openFile?.(cx, f.path, null, action),
-        preview: (f) => filePreview(cx.editor, f.path, null)
-      });
-    }
-  },
-  goto_definition: locationCommand("definition", "No definition found."),
-  goto_declaration: locationCommand("declaration", "No declaration found."),
-  goto_type_definition: locationCommand("typeDefinition", "No type definition found."),
-  goto_implementation: locationCommand("implementation", "No implementation found."),
-  goto_reference: locationCommand("references", "No references found."),
-  hover: {
-    available: hasLanguage("hover"),
-    run: async (cx) => {
-      const text = await cx.editor.workspace.language.hover(cx);
-      if (text)
-        popup(cx, text);
-      else {
-        cx.editor.setStatus("No hover results available.");
-        cx.editor.ui.render?.(cx.host);
-      }
-    }
-  },
-  signature_help: {
-    available: hasLanguage("signatureHelp"),
-    run: async (cx) => {
-      const help = await cx.editor.workspace.language.signatureHelp(cx);
-      if (help)
-        popup(cx, signatureText(help));
-    }
-  },
-  code_action: {
-    available: hasLanguage("codeActions"),
-    run: async (cx) => {
-      const actions = await cx.editor.workspace.language.codeActions(cx);
-      if (actions.length === 0) {
-        cx.editor.setStatus("No code actions available");
-        cx.editor.ui.render?.(cx.host);
-        return;
-      }
-      picker(cx, {
-        columns: [{ name: "action", format: (a) => a.title }],
-        items: actions,
-        onSelect: (cx, action) => void action.run(cx)
-      });
-    }
-  },
-  rename_symbol: {
-    available: hasLanguage("rename"),
-    run: (cx) => {
-      cx.editor.prompt(cx, {
-        label: "rename-to:",
-        wordUnderCursor: undefined,
-        onAccept: (name) => {
-          cx.editor.workspace.language.rename(cx, name).then((edits) => {
-            if (edits)
-              applyTextEdits(cx, edits);
-          });
-        }
-      });
-    }
-  },
-  format_selections: {
-    available: hasLanguage("format"),
-    run: async (cx) => {
-      const edits = await cx.editor.workspace.language.format(cx);
-      if (edits)
-        applyTextEdits(cx, edits);
-    }
-  },
-  select_references_to_symbol_under_cursor: {
-    available: hasLanguage("highlights"),
-    run: async (cx) => {
-      const spans = await cx.editor.workspace.language.highlights(cx);
-      if (spans.length === 0)
-        return;
-      const doc = docOf2(cx);
-      const cursor = selOf2(cx).primary().cursor(doc);
-      const ranges = spans.map((s) => new Range2(s.from, s.to));
-      const primary = Math.max(ranges.findIndex((r) => r.from() <= cursor && cursor < r.to()), 0);
-      setSel2(cx, new Selection2(ranges, primary));
-    }
-  }
-};
-
 // src/core/editor.ts
 class Context2 {
   editor;
@@ -13937,7 +10505,7 @@ class HelixEditor2 {
   status = null;
   autoinfo = null;
   ui = {};
-  workspace = null;
+  app = null;
   viewOps = null;
   activePrompt = null;
   visualLines = false;
@@ -14026,63 +10594,28 @@ class HelixEditor2 {
       setSel2(cx, jump.selection);
       return;
     }
-    if (this.workspace?.openJump)
-      this.workspace.openJump(cx, jump);
+    this.app?.openJump?.(cx, jump);
   }
   runStatic(cx, name) {
     executeCommand2(cx, { kind: "static", name });
   }
-  workspaceCommand(cx, name, args = []) {
-    const builtin = WORKSPACE_BUILTINS[name];
-    if (builtin?.available(cx) && (!this.workspace || this.hasProvider(name))) {
-      builtin.run(cx, args);
-      return;
-    }
-    if (this.workspace && this.workspace.run(cx, name, args) !== false)
-      return;
-    if (builtin?.available(cx))
-      builtin.run(cx, args);
-    else
-      this.setStatus(`${name} is not available in this editor`);
+  appCommand(name) {
+    if (!this.app)
+      return null;
+    const fallback = appFallback(name);
+    const found = this.app.command(name) ?? (fallback ? this.app.command(fallback) : null);
+    return typeof found === "function" ? found : found?.run ?? null;
   }
-  hasProvider(name) {
-    const workspace = this.workspace;
-    const language = workspace.language;
-    switch (name) {
-      case "buffer_picker":
-        return workspace.buffers !== undefined;
-      case "file_picker":
-      case "file_picker_in_current_buffer_directory":
-        return workspace.files !== undefined;
-      case "global_search":
-        return workspace.search !== undefined;
-      case "changed_file_picker":
-        return workspace.changedFiles !== undefined;
-      case "goto_definition":
-      case "goto_declaration":
-      case "goto_type_definition":
-      case "goto_implementation":
-      case "goto_reference":
-        return language?.locations !== undefined;
-      case "hover":
-        return language?.hover !== undefined;
-      case "signature_help":
-        return language?.signatureHelp !== undefined;
-      case "code_action":
-        return language?.codeActions !== undefined;
-      case "rename_symbol":
-        return language?.rename !== undefined;
-      case "format_selections":
-        return language?.format !== undefined;
-      case "select_references_to_symbol_under_cursor":
-        return language?.highlights !== undefined;
-      case "symbol_picker":
-        return language?.symbols !== undefined;
-      case "workspace_symbol_picker":
-        return language?.workspaceSymbols !== undefined;
-      default:
-        return false;
-    }
+  runApp(cx, name, args = []) {
+    const command = this.appCommand(name);
+    if (!command)
+      return false;
+    const result = command(cx, args);
+    if (result === false)
+      return false;
+    if (result instanceof Promise)
+      result.catch((err) => this.setError(err instanceof Error ? err.message : String(err)));
+    return true;
   }
   scroll(cx, amount, dir, sync) {
     this.viewOps?.scroll(cx, amount, dir, sync);
@@ -14127,7 +10660,9 @@ class HelixEditor2 {
       history: ":",
       complete: (input) => completeCommandLine(input, {
         path: this.pathCompleter,
-        languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? []
+        languages: () => this.languages?.languages.map((l) => l.config.languageId) ?? [],
+        available: (name) => this.appCommand(name) !== null,
+        appNames: () => [...this.app?.commandNames?.() ?? []].filter((name) => !(name in APP_COMMANDS2))
       }),
       onChange: (input) => executeCommandLine(fresh(), input, "update"),
       onAccept: (input) => executeCommandLine(fresh(), input, "validate"),
@@ -14152,10 +10687,6 @@ class HelixEditor2 {
     return this.languageConfig(host)?.languageId ?? null;
   }
   savedRevisions = new Map;
-  theme = null;
-  themes = null;
-  onThemeChanged = null;
-  busyLabel = null;
   isModified(host) {
     const history = host.state.field(historyField2, false);
     if (!history)
@@ -14166,79 +10697,6 @@ class HelixEditor2 {
     const history = host.state.field(historyField2, false);
     if (history)
       this.savedRevisions.set(host.id, history.current);
-  }
-  busyFrame() {
-    return this.busyLabel;
-  }
-  workspaceDiagnostics(host) {
-    return this.workspace?.diagnostics?.(host) ?? diagnosticsOf(host.state);
-  }
-  versionControlHead(host) {
-    return this.workspace?.versionControlHead?.(host) ?? "";
-  }
-  workingDirectory(host) {
-    return this.workspace?.cwd?.(host) ?? "";
-  }
-  layers = [];
-  lastPicker = null;
-  matcher = null;
-  matcherLoader = null;
-  layerListeners = new Set;
-  onLayersChanged(listener) {
-    this.layerListeners.add(listener);
-    return () => this.layerListeners.delete(listener);
-  }
-  hasOverlays() {
-    return this.layerListeners.size > 0;
-  }
-  renderLayers(host) {
-    for (const listener of this.layerListeners)
-      listener();
-    if (host)
-      this.ui.render?.(host);
-  }
-  pushLayer(layer, host) {
-    this.layers.push(layer);
-    this.renderLayers(host);
-  }
-  removeLayer(layer, host) {
-    const index = this.layers.indexOf(layer);
-    if (index < 0)
-      return;
-    this.layers.splice(index, 1);
-    layer.closed?.();
-    this.renderLayers(host);
-  }
-  async withMatcher(run) {
-    if (!this.matcher && this.matcherLoader)
-      this.matcher = await this.matcherLoader();
-    if (this.matcher)
-      run(this.matcher);
-    else
-      this.setError("the fuzzy matcher is not available");
-  }
-  themeBeforePreview = undefined;
-  themeChanged() {
-    this.onThemeChanged?.();
-    this.renderLayers();
-  }
-  setTheme(theme) {
-    this.themeBeforePreview = undefined;
-    this.theme = theme;
-    this.themeChanged();
-  }
-  setThemePreview(theme) {
-    if (this.themeBeforePreview === undefined)
-      this.themeBeforePreview = this.theme;
-    this.theme = theme;
-    this.themeChanged();
-  }
-  unsetThemePreview() {
-    if (this.themeBeforePreview === undefined)
-      return;
-    this.theme = this.themeBeforePreview;
-    this.themeBeforePreview = undefined;
-    this.themeChanged();
   }
   focusedHost(host) {
     return hooksOf(host).focused?.(host) ?? host;
@@ -14279,6 +10737,8 @@ class HelixEditor2 {
     if (this.macroRecording && this.macroReplaying.length === 0) {
       this.macroRecording.keys.push(key);
     }
+    if (hooksOf(host).intercept?.(key, host))
+      return true;
     if (this.activePrompt && this.activePrompt.host.id !== host.id) {
       const other = this.activePrompt;
       other.handleKey("esc");
@@ -14286,22 +10746,6 @@ class HelixEditor2 {
         this.activePrompt = null;
       this.ui.promptChanged?.(other.host, this.activePrompt);
       this.ui.render?.(other.host);
-    }
-    const layer = this.activePrompt ? null : this.layers[this.layers.length - 1];
-    if (layer) {
-      const cx = new Context2(this, host, null, null);
-      const result = layer.handleKey(key, cx);
-      if (result === "close" || result === "close-ignored") {
-        if (layer.modal && "options" in layer && layer.className === "hx-picker")
-          this.lastPicker = layer;
-        this.removeLayer(layer);
-      }
-      for (const callback of cx.callbacks)
-        callback();
-      this.renderLayers();
-      this.ui.render?.(host);
-      if (result === "consumed" || result === "close")
-        return true;
     }
     if (this.activePrompt) {
       const prompt = this.activePrompt;
@@ -14467,13 +10911,134 @@ class HelixEditor2 {
   runTypable(cx, input) {
     runTypable(cx, input);
   }
+  commandDoc(name) {
+    if (COMMAND_DOCS[name])
+      return COMMAND_DOCS[name];
+    const found = this.app?.command(name);
+    return typeof found === "object" && found?.doc || name;
+  }
   hasCommand(name) {
-    return name in STATIC_COMMANDS;
+    return name in STATIC_COMMANDS || this.appCommand(name) !== null;
   }
 }
 
 // src/config-loader.ts
 import { parse as parse2 } from "smol-toml";
+
+// src/keymap/trie.ts
+function parseCommand(input) {
+  if (input.startsWith(":")) {
+    const raw = input.slice(1).trim();
+    const space = raw.search(/\s/);
+    const name = space < 0 ? raw : raw.slice(0, space);
+    const args = space < 0 ? "" : raw.slice(space + 1).trim();
+    return { kind: "typable", name, args, raw };
+  }
+  if (input.startsWith("@"))
+    return { kind: "macro", keys: input.slice(1) };
+  return { kind: "static", name: input };
+}
+function buildTrie(raw) {
+  if (typeof raw === "string")
+    return { kind: "command", command: parseCommand(raw) };
+  if (Array.isArray(raw)) {
+    const commands = raw.map(parseCommand);
+    if (commands.some((c) => c.kind === "macro")) {
+      throw new Error("macro keybindings may not be used in command sequences");
+    }
+    return { kind: "sequence", commands };
+  }
+  const map = new Map;
+  for (const [key, value] of Object.entries(raw.map)) {
+    map.set(normalizeKeyString(key), buildTrie(value));
+  }
+  return { kind: "node", name: raw.name, sticky: raw.sticky ?? false, map };
+}
+function cloneTrie(trie) {
+  if (trie.kind !== "node")
+    return trie;
+  return { ...trie, map: new Map([...trie.map].map(([k, v]) => [k, cloneTrie(v)])) };
+}
+function mergeNodes(dst, other) {
+  for (const [key, trie] of other.map) {
+    const existing = dst.map.get(key);
+    if (existing && existing.kind === "node" && trie.kind === "node") {
+      mergeNodes(existing, trie);
+      continue;
+    }
+    dst.map.delete(key);
+    dst.map.set(key, trie);
+  }
+}
+function search(trie, keys) {
+  let current = trie;
+  for (const key of keys) {
+    if (!current || current.kind !== "node")
+      return;
+    current = current.map.get(key);
+  }
+  return current;
+}
+
+class Keymaps {
+  map;
+  state = [];
+  sticky = null;
+  constructor(map) {
+    this.map = map;
+  }
+  pending() {
+    return this.state;
+  }
+  reset() {
+    this.state = [];
+    this.sticky = null;
+  }
+  containsKey(mode, key) {
+    const node = search(this.map[mode], this.state);
+    return !!node && node.kind === "node" && node.map.has(key);
+  }
+  get(mode, key) {
+    const keymap = this.map[mode];
+    if (key === "esc") {
+      if (this.state.length > 0) {
+        const keys = this.state;
+        this.state = [];
+        return { kind: "cancelled", keys };
+      }
+      this.sticky = null;
+    }
+    const first = this.state[0] ?? key;
+    const root = this.sticky ?? keymap;
+    const trie = search(root, [first]);
+    if (!trie)
+      return { kind: "notFound" };
+    if (trie.kind === "command")
+      return { kind: "matched", command: trie.command };
+    if (trie.kind === "sequence")
+      return { kind: "matchedSequence", commands: trie.commands };
+    this.state.push(key);
+    const found = search(trie, this.state.slice(1));
+    if (!found) {
+      const keys = this.state;
+      this.state = [];
+      return { kind: "cancelled", keys };
+    }
+    if (found.kind === "node") {
+      if (found.sticky) {
+        this.state = [];
+        this.sticky = found;
+      }
+      return { kind: "pending", node: found };
+    }
+    this.state = [];
+    if (found.kind === "command")
+      return { kind: "matched", command: found.command };
+    return { kind: "matchedSequence", commands: found.commands };
+  }
+}
+
+// src/config-loader.ts
 var IGNORED_EDITOR = new Set(["true-color", "undercurl", "workspace-lsp-roots", "atomic-save", "clipboard-provider", "editor-config", "kitty-keyboard-protocol", "auto-save", "workspace-trust", "terminal"]);
 function table(value, key, warnings) {
   if (value && typeof value === "object" && !Array.isArray(value))
@@ -14846,31 +11411,31 @@ function applyEditor(config, editor, warnings) {
     }
   }
 }
-function checkCommand(raw, path, warnings) {
+function checkCommand(raw, path, warnings, known) {
   const cmd = parseCommand(raw);
-  if (cmd.kind === "static" && !isKnownCommand(cmd.name)) {
+  if (cmd.kind === "static" && !isKnownCommand(cmd.name) && !known(cmd.name)) {
     warnings.push(`${path}: unknown command "${cmd.name}"`);
     return false;
   }
   if (cmd.kind === "typable") {
     const [name] = splitCommandLine(cmd.raw);
-    if (!/^\d+$/.test(name) && !TYPABLE_MAP.has(name)) {
+    if (!/^\d+$/.test(name) && !TYPABLE_MAP.has(name) && !known(name) && !name.includes(":")) {
       warnings.push(`${path}: typed command ":${name}" is not supported`);
       return false;
     }
   }
   return true;
 }
-function convertTrie(value, path, warnings) {
+function convertTrie(value, path, warnings, known) {
   if (typeof value === "string")
-    return checkCommand(value, path, warnings) ? value : null;
+    return checkCommand(value, path, warnings, known) ? value : null;
   if (Array.isArray(value)) {
     const cmds = value.map(String);
     if (cmds.some((c) => c.startsWith("@"))) {
       warnings.push(`${path}: macro keybindings may not be used in command sequences`);
       return null;
     }
-    const ok = cmds.filter((c) => checkCommand(c, path, warnings));
+    const ok = cmds.filter((c) => checkCommand(c, path, warnings, known));
     return ok.length > 0 ? ok : null;
   }
   if (value && typeof value === "object") {
@@ -14882,7 +11447,7 @@ function convertTrie(value, path, warnings) {
         warnings.push(`${path}.${k}: ${err.message}`);
         continue;
       }
-      const t = convertTrie(v, `${path}.${k}`, warnings);
+      const t = convertTrie(v, `${path}.${k}`, warnings, known);
       if (t !== null)
         map[k] = t;
     }
@@ -14891,7 +11456,7 @@ function convertTrie(value, path, warnings) {
   warnings.push(`${path}: expected a command, list of commands, or sub-keymap`);
   return null;
 }
-function loadConfig2(source, base = defaultConfig2()) {
+function loadConfig2(source, base = defaultConfig2(), known = () => false) {
   const config = structuredClone(base);
   const warnings = [];
   const keys = {};
@@ -14913,7 +11478,7 @@ function loadConfig2(source, base = defaultConfig2()) {
           warnings.push(`keys.${mode}: unknown mode`);
           continue;
         }
-        const t = convertTrie(table, `keys.${mode}`, warnings);
+        const t = convertTrie(table, `keys.${mode}`, warnings, known);
         if (t && typeof t === "object" && !Array.isArray(t))
           keys[mode] = t;
       }
@@ -15345,17 +11910,81 @@ var defaultInsert = { name: "Insert mode", map: {
 } };
 
 // src/keymap/index.ts
-function defaultKeymaps() {
+function prune(node, keep) {
+  const map = {};
+  for (const [key, value] of Object.entries(node.map)) {
+    if (typeof value === "string") {
+      if (keep(value))
+        map[key] = value;
+    } else if (Array.isArray(value)) {
+      if (value.every(keep))
+        map[key] = value;
+    } else {
+      const inner = prune(value, keep);
+      if (inner)
+        map[key] = inner;
+    }
+  }
+  return Object.keys(map).length > 0 ? { ...node, map } : null;
+}
+var editing = (name) => !isAppCommandName(name);
+function layer(normal, select, insert, keep) {
+  const out = {};
+  const n = prune(normal, keep);
+  const s = prune(select, keep);
+  const i = prune(insert, keep);
+  if (n)
+    out.normal = n;
+  if (s)
+    out.select = s;
+  if (i)
+    out.insert = i;
+  return out;
+}
+var helixAppKeys2 = layer(defaultNormal, selectOverrides, defaultInsert, isAppCommandName);
+function reorder(node, like) {
+  const entries = [...node.map];
+  const rank = new Map([...like.map.keys()].map((key, i) => [key, i]));
+  entries.sort(([a], [b]) => (rank.get(a) ?? Infinity) - (rank.get(b) ?? Infinity));
+  node.map.clear();
+  for (const [key, value] of entries) {
+    node.map.set(key, value);
+    const other = like.map.get(key);
+    if (value.kind === "node" && other?.kind === "node")
+      reorder(value, other);
+  }
+}
+function fullKeymaps() {
   const normal = buildTrie(defaultNormal);
   const select = cloneTrie(normal);
   mergeNodes(select, buildTrie(selectOverrides));
   select.name = "Select mode";
-  const insert = buildTrie(defaultInsert);
-  return { normal, select, insert };
+  return { normal, select, insert: buildTrie(defaultInsert) };
 }
-function buildKeymaps2(user = {}) {
+function defaultKeymaps() {
+  const base = layer(defaultNormal, selectOverrides, defaultInsert, editing);
+  const normal = buildTrie(base.normal);
+  const select = cloneTrie(normal);
+  mergeNodes(select, buildTrie(base.select));
+  select.name = "Select mode";
+  return { normal, select, insert: buildTrie(base.insert) };
+}
+function buildKeymaps2(user = {}, options = {}) {
   const maps = defaultKeymaps();
+  const full = fullKeymaps();
+  const available = options.available ?? (() => true);
+  const keep = (name) => name.startsWith(":") || name.startsWith("@") || available(name);
   for (const mode of ["normal", "select", "insert"]) {
+    const app = options.app?.[mode];
+    const provided = app ? prune(app, keep) : null;
+    if (mode === "select" && options.app?.normal) {
+      const shared = prune(options.app.normal, keep);
+      if (shared)
+        mergeNodes(maps.select, buildTrie(shared));
+    }
+    if (provided)
+      mergeNodes(maps[mode], buildTrie(provided));
+    reorder(maps[mode], full[mode]);
     const delta = user[mode];
     if (delta)
       mergeNodes(maps[mode], buildTrie(delta));
@@ -16084,6 +12713,572 @@ class LanguageLoader2 {
   }
 }
 
+// src/syntax/syntax.ts
+var MAX3 = 4294967295;
+function freshFlags() {
+  return { reused: false, modified: false, moved: false, touched: false };
+}
+
+class Layer {
+  language;
+  parent;
+  tree = null;
+  injections = [];
+  ranges = [];
+  flags = freshFlags();
+  locals = null;
+  constructor(language, parent) {
+    this.language = language;
+    this.parent = parent;
+  }
+}
+
+class Source {
+  rt;
+  text;
+  utf8;
+  decoder = new TextDecoder;
+  ptr;
+  maps = null;
+  constructor(rt, text) {
+    this.rt = rt;
+    this.text = text;
+    this.utf8 = new TextEncoder().encode(text);
+    this.ptr = rt.alloc(this.utf8);
+  }
+  build() {
+    if (this.maps)
+      return this.maps;
+    const text = this.text;
+    const byteAt = new Uint32Array(text.length + 1);
+    const posAt = new Uint32Array(this.utf8.length + 1);
+    let byte = 0;
+    for (let pos = 0;pos < text.length; ) {
+      const code = text.codePointAt(pos);
+      const units = code > 65535 ? 2 : 1;
+      const bytes = code < 128 ? 1 : code < 2048 ? 2 : code < 65536 ? 3 : 4;
+      for (let u = 0;u < units; u++)
+        byteAt[pos + u] = byte;
+      for (let b = 0;b < bytes; b++)
+        posAt[byte + b] = pos;
+      pos += units;
+      byte += bytes;
+    }
+    byteAt[text.length] = byte;
+    posAt[byte] = text.length;
+    this.maps = { byteAt, posAt };
+    return this.maps;
+  }
+  byteOf(pos) {
+    const { byteAt } = this.build();
+    return byteAt[Math.min(Math.max(pos, 0), byteAt.length - 1)];
+  }
+  posOf(byte) {
+    const { posAt } = this.build();
+    return posAt[Math.min(byte, posAt.length - 1)];
+  }
+  slice(start, end) {
+    return this.decoder.decode(this.utf8.subarray(start, end));
+  }
+  free() {
+    this.rt.x.hm_free(this.ptr);
+  }
+}
+function utf8Length(s) {
+  let n = 0;
+  for (let i = 0;i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 128)
+      n += 1;
+    else if (c < 2048)
+      n += 2;
+    else if (c >= 55296 && c <= 56319) {
+      n += 4;
+      i++;
+    } else
+      n += 3;
+  }
+  return n;
+}
+
+class Syntax {
+  loader;
+  root;
+  layers = new Set;
+  cursors = new Set;
+  source;
+  constructor(loader, text, language) {
+    this.loader = loader;
+    this.root = new Layer(language, null);
+    this.root.ranges = [[0, MAX3]];
+    this.layers.add(this.root);
+    this.source = new Source(loader.rt, text);
+    this.update([]);
+    if (!this.root.tree) {
+      this.delete();
+      throw new Error("`LanguageLoader::get_config` for the root layer language returned `None`");
+    }
+  }
+  get input() {
+    return this.source;
+  }
+  byteOf(pos) {
+    return this.source.byteOf(pos);
+  }
+  posOf(byte) {
+    return this.source.posOf(byte);
+  }
+  slice(start, end) {
+    return this.source.slice(start, end);
+  }
+  get byteLength() {
+    return this.source.utf8.length;
+  }
+  applyChanges(changes, newDoc) {
+    const old = this.source;
+    const edits = [];
+    changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      const start = old.byteOf(fromA);
+      edits.push({ start, oldEnd: old.byteOf(toA), newEnd: start + utf8Length(inserted.toString()) });
+    });
+    this.source = new Source(this.loader.rt, newDoc.toString());
+    old.free();
+    this.update(edits);
+  }
+  update(edits) {
+    const queue = [this.root];
+    this.root.flags.touched = true;
+    this.root.flags.modified = true;
+    while (queue.length > 0) {
+      const layer = queue.pop();
+      if (layer.ranges.length === 0)
+        continue;
+      if (layer.tree) {
+        if (layer.flags.moved || layer.flags.modified) {
+          for (let i = edits.length - 1;i >= 0; i--)
+            layer.tree.edit(edits[i].start, edits[i].oldEnd, edits[i].newEnd);
+        }
+        if (layer.flags.modified)
+          this.parse(layer);
+      } else {
+        this.parse(layer);
+      }
+      this.runInjectionQuery(layer, edits, (child) => queue.push(child));
+    }
+    for (const layer of this.layers) {
+      if (!layer.flags.touched) {
+        layer.tree?.delete();
+        layer.tree = null;
+        this.layers.delete(layer);
+      }
+      layer.flags = freshFlags();
+      layer.locals = null;
+    }
+  }
+  parse(layer) {
+    const config = this.loader.getConfig(layer.language);
+    if (!config)
+      return;
+    const ranges = layer.ranges.length === 1 && layer.ranges[0][0] === 0 && layer.ranges[0][1] === MAX3 ? null : layer.ranges.map(([start, end]) => ({ start, end }));
+    let old = layer.tree;
+    if (old && ranges) {
+      const first = layer.ranges[0]?.[0] ?? 0;
+      const last = layer.ranges[layer.ranges.length - 1]?.[1] ?? MAX3;
+      const root = old.rootNode;
+      if (!(root.startByte <= first && root.endByte >= last))
+        old = null;
+    }
+    const tree = this.loader.parser.parse(config.grammar, this.source.ptr, this.source.utf8.length, ranges, old);
+    if (!tree)
+      throw new Error("tree-sitter parse failed");
+    layer.tree?.delete();
+    layer.tree = tree;
+  }
+  allLayers() {
+    return this.layers;
+  }
+  localsOf(layer) {
+    layer.locals ??= runLocalQuery(this, layer);
+    return layer.locals;
+  }
+  treeOf(layer) {
+    return layer.tree;
+  }
+  layerAndTreeForByteRange(start, end) {
+    let layer = this.layerForByteRange(start, end);
+    for (;; ) {
+      if (layer.tree)
+        return [layer, layer.tree];
+      if (layer.parent)
+        layer = layer.parent;
+    }
+  }
+  injectionAtByteIdx(layer, idx) {
+    const injections = layer.injections;
+    let lo = 0;
+    let hi = injections.length;
+    while (lo < hi) {
+      const mid = lo + hi >> 1;
+      if (injections[mid].range[1] <= idx)
+        lo = mid + 1;
+      else
+        hi = mid;
+    }
+    const first = injections[lo];
+    return first && first.range[0] <= idx ? first : null;
+  }
+  *layersForByteRange(start, end) {
+    let parent = this.root;
+    yield parent;
+    for (;; ) {
+      const atStart = this.injectionAtByteIdx(parent, start);
+      if (!atStart)
+        return;
+      const atEnd = this.injectionAtByteIdx(parent, end);
+      if (!atEnd || atStart.layer !== atEnd.layer)
+        return;
+      parent = atStart.layer;
+      yield parent;
+    }
+  }
+  layerForByteRange(start, end) {
+    let last = this.root;
+    for (const layer of this.layersForByteRange(start, end))
+      last = layer;
+    return last;
+  }
+  treeForByteRange(start, end) {
+    return this.layerAndTreeForByteRange(start, end)[1];
+  }
+  namedDescendantForByteRange(start, end) {
+    return this.treeForByteRange(start, end).rootNode.namedDescendantForByteRange(start, end);
+  }
+  descendantForByteRange(start, end) {
+    return this.treeForByteRange(start, end).rootNode.descendantForByteRange(start, end);
+  }
+  walk() {
+    return new SyntaxCursor(this);
+  }
+  newCursor(tree) {
+    const cursor = tree.walk();
+    this.cursors.add(cursor);
+    return cursor;
+  }
+  dropCursor(cursor) {
+    if (this.cursors.delete(cursor))
+      cursor.delete();
+  }
+  delete() {
+    for (const cursor of this.cursors)
+      cursor.delete();
+    this.cursors.clear();
+    for (const layer of this.layers) {
+      layer.tree?.delete();
+      layer.tree = null;
+    }
+    this.layers.clear();
+    this.source.free();
+  }
+  mapInjections(layer, edits) {
+    if (edits.length === 0)
+      return;
+    const injections = layer.injections;
+    let first = 0;
+    while (first < injections.length && injections[first].range[1] < edits[0].start)
+      first++;
+    if (first === injections.length)
+      return;
+    let offset = 0;
+    let e = 0;
+    const shift = (edit) => edit.newEnd - edit.oldEnd;
+    for (let i = first;i < injections.length; i++) {
+      const injection = injections[i];
+      const range = injection.range;
+      const node = injection.matchedNodeRange;
+      const flags = injection.layer.flags;
+      while (e < edits.length && edits[e].oldEnd < node[0])
+        offset += shift(edits[e++]);
+      let mappedNodeStart = node[0] + offset;
+      if (e < edits.length && edits[e].start <= node[0])
+        mappedNodeStart = edits[e].newEnd + offset;
+      while (e < edits.length && edits[e].oldEnd < range[0])
+        offset += shift(edits[e++]);
+      flags.moved = offset !== 0;
+      let mappedStart = range[0] + offset;
+      if (e < edits.length && edits[e].oldEnd <= range[1]) {
+        const edit = edits[e++];
+        if (edit.start < range[0]) {
+          flags.moved = true;
+          mappedStart = edit.newEnd + offset;
+        } else {
+          flags.modified = true;
+        }
+        offset += shift(edit);
+        while (e < edits.length && edits[e].oldEnd <= range[1])
+          offset += shift(edits[e++]);
+      }
+      let mappedEnd = range[1] + offset;
+      if (e < edits.length && edits[e].start <= range[1]) {
+        flags.modified = true;
+        if (edits[e].start < range[0]) {
+          mappedStart = edits[e].newEnd + offset;
+          mappedEnd = mappedStart;
+        }
+      }
+      let mappedNodeEnd = node[1] + offset;
+      if (e < edits.length && edits[e].start <= node[1] && edits[e].start < node[0]) {
+        mappedNodeStart = edits[e].newEnd + offset;
+        mappedNodeEnd = mappedNodeStart;
+      }
+      injection.range = [mappedStart, mappedEnd];
+      injection.matchedNodeRange = [mappedNodeStart, mappedNodeEnd];
+    }
+  }
+  runInjectionQuery(layer, edits, parseLayer) {
+    this.mapInjections(layer, edits);
+    const config = this.loader.getConfig(layer.language);
+    if (!config || config.injectionQuery.contentCapture === null || !layer.tree)
+      return;
+    const parentRanges = layer.ranges;
+    layer.ranges = [];
+    const injections = [];
+    const old = layer.injections;
+    layer.injections = [];
+    let oi = 0;
+    const combined = new Map;
+    for (const mat of config.injectionQuery.execute(layer.tree.rootNode, this.source, this.loader)) {
+      const matched = [mat.range[0], mat.range[1]];
+      let insertPosition = injections.length;
+      const last = injections[injections.length - 1];
+      if (last && rangesIntersect(last.range, matched)) {
+        if (last.range[0] <= matched[0])
+          continue;
+        insertPosition = injections.findIndex((injection) => injection.range[1] > matched[0]);
+        if (insertPosition < 0)
+          insertPosition = injections.length;
+        if (injections[insertPosition].range[0] < matched[1])
+          continue;
+      }
+      while (oi < old.length && old[oi].range[1] <= matched[0])
+        old[oi++].layer.flags.modified = true;
+      let reused = null;
+      const candidate = old[oi];
+      if (candidate && candidate.range[0] < matched[1] && candidate.layer.language === mat.language && !candidate.layer.flags.reused) {
+        reused = candidate;
+        oi++;
+      }
+      let child;
+      if (mat.scope !== null && mat.scope.startsWith("match:") && mat.lastMatch) {
+        child = combined.get(mat.scope) ?? this.initInjection(layer, mat.language, reused);
+        combined.delete(mat.scope);
+      } else if (mat.scope !== null) {
+        let existing = combined.get(mat.scope);
+        if (!existing) {
+          existing = this.initInjection(layer, mat.language, reused);
+          combined.set(mat.scope, existing);
+        }
+        child = existing;
+      } else {
+        child = this.initInjection(layer, mat.language, reused);
+      }
+      if (!child.flags.touched) {
+        child.flags.touched = true;
+        parseLayer(child);
+      }
+      if (child.flags.reused) {
+        child.flags.modified ||= !reused || reused.matchedNodeRange[0] !== matched[0] || reused.matchedNodeRange[1] !== matched[1] || reused.layer !== child;
+      } else if (reused) {
+        child.flags.reused = true;
+        child.flags.modified = true;
+        const tree = reused.layer.tree?.copy() ?? null;
+        child.tree?.delete();
+        child.tree = tree;
+      }
+      const oldLen = injections.length;
+      for (const range of intersectRanges(mat.includeChildren, mat.node, parentRanges)) {
+        child.ranges.push(range);
+        injections.push({ range, layer: child, matchedNodeRange: matched });
+      }
+      if (oldLen !== insertPosition) {
+        const inserted = injections.length - oldLen;
+        rotateRight(injections, insertPosition, inserted);
+        if (insertPosition <= child.ranges.length && inserted <= child.ranges.length - insertPosition)
+          rotateRight(child.ranges, insertPosition, inserted);
+      }
+    }
+    for (;oi < old.length; oi++)
+      old[oi].layer.flags.modified = true;
+    layer.ranges = parentRanges;
+    layer.injections = injections;
+  }
+  initInjection(parent, language, reuse) {
+    if (reuse) {
+      reuse.layer.flags.reused = true;
+      reuse.layer.ranges = [];
+      return reuse.layer;
+    }
+    const layer = new Layer(language, parent);
+    this.layers.add(layer);
+    return layer;
+  }
+}
+function rotateRight(items, from, count) {
+  if (count === 0)
+    return;
+  const moved = items.splice(items.length - count, count);
+  items.splice(from, 0, ...moved);
+}
+function rangesIntersect(a, b) {
+  return a[0] === b[0] || a[1] > b[0] && b[1] > a[0];
+}
+function intersectRanges(includeChildren, node, parentRanges) {
+  const range = [node.startByte, node.endByte];
+  const excluded = [];
+  if (includeChildren !== "all") {
+    for (const child of node.children) {
+      if (includeChildren === "unnamed" && !child.isNamed)
+        continue;
+      excluded.push([child.startByte, child.endByte]);
+    }
+  }
+  const i = parentRanges.findIndex((r) => r[1] > range[0]);
+  const parents = excludeRanges(i < 0 ? [] : parentRanges.slice(i), excluded);
+  const merged = [];
+  for (const r of parents) {
+    const prev = merged[merged.length - 1];
+    if (prev && prev[1] === r[0])
+      prev[1] = r[1];
+    else
+      merged.push([r[0], r[1]]);
+  }
+  const out = [];
+  let start = range[0];
+  for (const parent of merged) {
+    if (start >= range[1])
+      break;
+    if (parent[1] <= start)
+      continue;
+    if (parent[0] > start)
+      start = parent[0];
+    const end = Math.min(range[1], parent[1]);
+    if (end > start)
+      out.push([start, end]);
+    start = Math.max(start, end);
+  }
+  return out;
+}
+function excludeRanges(ranges, excluded) {
+  const exclusions = excluded.filter((r) => r[1] > r[0]);
+  const out = [];
+  let e = 0;
+  const queue = ranges.map((r) => [r[0], r[1]]);
+  let i = 0;
+  let next = queue[i++];
+  while (next) {
+    const range = next;
+    while (e < exclusions.length && exclusions[e][1] <= range[0])
+      e++;
+    const exclusion = exclusions[e];
+    if (exclusion && rangesIntersect(range, exclusion)) {
+      const preceding = [range[0], exclusion[0]];
+      const remaining = [exclusion[1], range[1]];
+      if (remaining[1] > remaining[0]) {
+        next = remaining;
+        e++;
+      } else {
+        next = queue[i++];
+      }
+      if (preceding[1] > preceding[0])
+        out.push(preceding);
+      continue;
+    }
+    next = queue[i++];
+    out.push(range);
+  }
+  return out;
+}
+
+class SyntaxCursor {
+  syntax;
+  current;
+  cursor;
+  constructor(syntax) {
+    this.syntax = syntax;
+    this.current = syntax.root;
+    this.cursor = syntax.newCursor(syntax.treeOf(syntax.root));
+  }
+  use(layer, tree) {
+    this.syntax.dropCursor(this.cursor);
+    this.current = layer;
+    this.cursor = this.syntax.newCursor(tree);
+  }
+  node() {
+    return this.cursor.currentNode;
+  }
+  gotoParent() {
+    if (this.cursor.gotoParent())
+      return true;
+    let layer = this.current;
+    for (;; ) {
+      const parent = layer.parent;
+      if (!parent)
+        return false;
+      layer = parent;
+      if (layer.tree) {
+        this.use(layer, layer.tree);
+        return true;
+      }
+    }
+  }
+  gotoParentWith(predicate) {
+    while (this.gotoParent()) {
+      if (predicate(this.node()))
+        return true;
+    }
+    return false;
+  }
+  gotoFirstChild() {
+    const node = this.cursor.currentNode;
+    const injection = this.syntax.injectionAtByteIdx(this.current, node.startByte);
+    if (injection && injection.range[1] >= node.endByte && injection.layer.tree) {
+      this.use(injection.layer, injection.layer.tree);
+      return true;
+    }
+    return this.cursor.gotoFirstChild();
+  }
+  gotoNextSibling() {
+    return this.cursor.gotoNextSibling();
+  }
+  gotoPreviousSibling() {
+    return this.cursor.gotoPreviousSibling();
+  }
+  resetToByteRange(start, end) {
+    const [layer, tree] = this.syntax.layerAndTreeForByteRange(start, end);
+    this.use(layer, tree);
+    for (;; ) {
+      const node = this.cursor.currentNode;
+      if (start < node.startByte || end > node.endByte) {
+        this.cursor.gotoParent();
+        break;
+      }
+      if (!this.cursor.gotoFirstChildForByte(start))
+        break;
+    }
+  }
+  children() {
+    const out = [];
+    if (!this.gotoFirstChild())
+      return out;
+    out.push(this.node());
+    while (this.gotoNextSibling())
+      out.push(this.node());
+    return out;
+  }
+  dispose() {
+    this.syntax.dropCursor(this.cursor);
+  }
+}
+
 // src/syntax/languages.ts
 var MARKDOWN_LANGUAGES2 = `[[language]]
 name = "markdown"
@@ -16387,72 +13582,6 @@ class SyntaxSessions2 {
   }
 }
 
-// src/core/matcher.ts
-var encoder2 = new TextEncoder;
-
-class FuzzyPattern2 {
-  matcher;
-  ptr;
-  constructor(matcher, ptr) {
-    this.matcher = matcher;
-    this.ptr = ptr;
-  }
-  score(text, paths = false) {
-    return this.matcher.score(this, text, paths);
-  }
-  indices(text, paths = false) {
-    return this.matcher.indices(this, text, paths);
-  }
-  free() {
-    this.matcher.freePattern(this);
-  }
-}
-
-class Matcher2 {
-  x;
-  constructor(x) {
-    this.x = x;
-  }
-  static async load(bytes) {
-    const { instance } = await WebAssembly.instantiate(bytes, {});
-    return new Matcher2(instance.exports);
-  }
-  withText(text, use) {
-    const encoded = encoder2.encode(text);
-    const ptr = this.x.mt_alloc(encoded.length);
-    new Uint8Array(this.x.memory.buffer, ptr, encoded.length).set(encoded);
-    try {
-      return use(ptr, encoded.length);
-    } finally {
-      this.x.mt_free(ptr, encoded.length);
-    }
-  }
-  pattern(text) {
-    return new FuzzyPattern2(this, this.withText(text, (ptr, len) => this.x.mt_pattern(ptr, len)));
-  }
-  freePattern(pattern) {
-    this.x.mt_pattern_free(pattern.ptr);
-  }
-  score(pattern, text, paths) {
-    const score = this.withText(text, (ptr, len) => this.x.mt_score(pattern.ptr, ptr, len, paths ? 1 : 0));
-    return score < 0n ? null : Number(score);
-  }
-  indices(pattern, text, paths) {
-    const count = this.withText(text, (ptr, len) => this.x.mt_indices(pattern.ptr, ptr, len, paths ? 1 : 0));
-    return [...new Uint32Array(this.x.memory.buffer, this.x.mt_output(), count)];
-  }
-  diff(before, after) {
-    return this.withText(before, (bp, bl) => this.withText(after, (ap, al) => {
-      const count = this.x.mt_diff(bp, bl, ap, al);
-      const out = new Uint32Array(this.x.memory.buffer, this.x.mt_output(), count * 4);
-      const hunks = [];
-      for (let i = 0;i < count; i++)
-        hunks.push({ beforeStart: out[i * 4], beforeEnd: out[i * 4 + 1], afterStart: out[i * 4 + 2], afterEnd: out[i * 4 + 3] });
-      return hunks;
-    }));
-  }
-}
-
 // src/core/rx.ts
 class Haystack {
   x;
@@ -16609,10 +13738,6 @@ async function loadRegex2(source) {
   const bytes = source === undefined ? await unpack((await import("./regex-wasm.js")).default) : await wasmBytes2(source);
   return RustRegexEngine2.load(bytes);
 }
-async function loadMatcher(source) {
-  const bytes = source === undefined ? await unpack((await import("./matcher-wasm.js")).default) : await wasmBytes2(source);
-  return Matcher2.load(bytes);
-}
 
 // src/view/syntax.ts
 async function loadSyntax2(win, wasm, options = {}) {
@@ -16626,8 +13751,33 @@ async function loadSyntax2(win, wasm, options = {}) {
 }
 
 // src/view/status.ts
-import { Facet as Facet4 } from "@codemirror/state";
-var onHelixStatus2 = Facet4.define();
+import { Facet as Facet3 } from "@codemirror/state";
+function describe(editor, command) {
+  if (command.kind === "static")
+    return editor.commandDoc(command.name);
+  if (command.kind === "typable")
+    return `:${command.raw}`;
+  return `@${command.keys}`;
+}
+function infoOf2(editor) {
+  const auto = editor.autoinfo;
+  if (!auto)
+    return null;
+  if (!("kind" in auto))
+    return { title: auto.title, rows: auto.body.map(([keys, doc]) => ({ keys, doc, available: true })) };
+  const grouped = new Map;
+  for (const [key, trie] of auto.map) {
+    const doc = trie.kind === "node" ? trie.name : trie.kind === "sequence" ? "[Multiple commands]" : describe(editor, trie.command);
+    if (doc === "no_op")
+      continue;
+    const available = trie.kind !== "command" || trie.command.kind !== "static" || editor.hasCommand(trie.command.name);
+    const row = grouped.get(doc) ?? { keys: [], available };
+    row.keys.push(key);
+    grouped.set(doc, row);
+  }
+  return { title: auto.name, rows: [...grouped].map(([doc, row]) => ({ keys: row.keys.join(", "), doc, available: row.available })) };
+}
+var onHelixStatus2 = Facet3.define();
 function statusOf2(editor, host, focused) {
   const state = host.state.field(helixField2, false);
   if (!state)
@@ -16638,7 +13788,21 @@ function statusOf2(editor, host, focused) {
   let column = 1;
   for (let pos = line.from;pos < cursor; pos = nextGraphemeBoundary2(doc, pos))
     column++;
+  const diagnostics = { hint: 0, info: 0, warning: 0, error: 0 };
+  for (const d of diagnosticsOf(host.state))
+    diagnostics[d.severity ?? "warning"]++;
+  const prompt = focused ? editor.activePrompt : null;
   return {
+    modified: editor.isModified(host),
+    diagnostics,
+    prompt: prompt && {
+      label: prompt.label,
+      input: prompt.line,
+      cursor: prompt.cursor,
+      completions: prompt.completions.map((c) => c.label),
+      selected: prompt.selection
+    },
+    info: focused ? infoOf2(editor) : null,
     mode: state.mode,
     pending: focused ? editor.pendingDisplay() : "",
     count: focused ? editor.count : null,
@@ -16653,8 +13817,1061 @@ function statusOf2(editor, host, focused) {
   };
 }
 
+// src/view/theme.ts
+import { EditorView } from "@codemirror/view";
+var fg = "var(--hx-fg, CanvasText)";
+var bg = "var(--hx-bg, Canvas)";
+var selection2 = "var(--hx-selection, Highlight)";
+var error = "var(--hx-error, #d32f2f)";
+var muted = "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))";
+var panel = "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))";
+var border = "var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))";
+var hover = "var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent))";
+var radius = "var(--hx-cursor-radius, 2px)";
+var nativeSelectionTheme = EditorView.baseTheme({
+  "&.hx .cm-line::selection, &.hx .cm-line ::selection, &.hx .cm-content::selection": { backgroundColor: `${selection2} !important` }
+});
+var helixTheme = EditorView.baseTheme({
+  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
+  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer": { display: "none" },
+  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
+  "&.hx .cm-selectionLayer": { display: "none" },
+  "& ::highlight(hx-sel)": { backgroundColor: selection2 },
+  ".cm-layer .hx-cell": {
+    position: "absolute",
+    left: "var(--hx-cell-left)",
+    top: "var(--hx-cell-top)",
+    width: "var(--hx-cell-width)",
+    height: "var(--hx-cell-height)",
+    borderRadius: radius,
+    pointerEvents: "none"
+  },
+  ".cm-layer .hx-cell-block": {
+    borderRadius: "0",
+    backgroundColor: "var(--hx-cell-backdrop)",
+    backgroundImage: "var(--hx-cell-backdrop-image)"
+  },
+  ".cm-layer .hx-cell-block::before": {
+    content: '""',
+    position: "absolute",
+    inset: "0",
+    borderRadius: radius,
+    backgroundColor: `var(--hx-cursor-bg, color-mix(in srgb, ${fg} 45%, ${bg}))`
+  },
+  ".cm-layer .hx-cell-block.hx-cell-primary::before": { backgroundColor: "var(--hx-cursor-primary-bg, var(--hx-fg, CanvasText))" },
+  ".cm-layer .hx-cell-sq-tl, .cm-layer .hx-cell-sq-tl::before": { borderTopLeftRadius: "0" },
+  ".cm-layer .hx-cell-sq-tr, .cm-layer .hx-cell-sq-tr::before": { borderTopRightRadius: "0" },
+  ".cm-layer .hx-cell-sq-bl, .cm-layer .hx-cell-sq-bl::before": { borderBottomLeftRadius: "0" },
+  ".cm-layer .hx-cell-sq-br, .cm-layer .hx-cell-sq-br::before": { borderBottomRightRadius: "0" },
+  ".cm-layer .hx-cell-underline": { boxShadow: `inset 0 -2px 0 ${fg}` },
+  ".cm-layer .hx-cell-bar": { boxShadow: `inset 2px 0 0 ${fg}` },
+  ".cm-layer .hx-cell-sel": { backgroundColor: selection2, borderRadius: "0" },
+  ".cm-layer .hx-cell-glyph": {
+    position: "absolute",
+    left: "0",
+    top: "var(--hx-glyph-top)",
+    height: "var(--hx-glyph-height)",
+    font: "var(--hx-glyph-font)",
+    lineHeight: "var(--hx-glyph-height)",
+    letterSpacing: "var(--hx-glyph-spacing)",
+    fontFeatureSettings: "var(--hx-glyph-features)",
+    fontVariationSettings: "var(--hx-glyph-variations)",
+    whiteSpace: "pre",
+    color: `var(--hx-cursor-primary-fg, ${bg})`
+  },
+  "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
+  "&.hx .hx-cursorline": { backgroundColor: "var(--hx-cursorline, var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent)))" },
+  ".hx-panel": {
+    position: "relative",
+    color: fg,
+    fontFamily: "var(--hx-panel-font, monospace)",
+    fontSize: "var(--hx-panel-font-size, 0.85em)",
+    background: panel,
+    borderTop: `1px solid ${border}`
+  },
+  ".hx-panel.hx-panel-empty": { borderTop: "none" },
+  ".hx-panel > .hx-hidden": { display: "none" },
+  ".hx-autoinfo": {
+    position: "absolute",
+    right: "12px",
+    bottom: "calc(100% + 8px + var(--hx-autoinfo-lift, 0px))",
+    padding: "6px 12px",
+    maxHeight: "min(60vh, var(--hx-autoinfo-room, 60vh))",
+    maxWidth: "calc(100% - 24px)",
+    overflow: "auto",
+    background: panel,
+    border: `1px solid ${border}`,
+    borderRadius: "var(--hx-radius, 4px)",
+    boxShadow: "var(--hx-shadow, 0 2px 8px rgb(0 0 0 / 0.15))",
+    whiteSpace: "nowrap"
+  },
+  ".hx-autoinfo-title": { fontWeight: "600", textAlign: "center", marginBottom: "4px" },
+  ".hx-autoinfo-row": { display: "flex", gap: "1.5em" },
+  ".hx-autoinfo-key": { minWidth: "3em", color: "var(--hx-accent, LinkText)" },
+  ".hx-autoinfo-unavailable": { opacity: "0.45" },
+  ".hx-prompt, .hx-message": {
+    padding: "3px calc(10px + var(--hx-bar-overlap, 0px)) 3px 10px",
+    whiteSpace: "pre"
+  },
+  ".hx-message": { overflow: "hidden", textOverflow: "ellipsis" },
+  ".hx-message-error": { color: error },
+  ".hx-prompt-label": { color: muted, marginRight: "0.25em" },
+  ".hx-prompt-cursor": { background: fg, color: bg },
+  ".hx-completions": { display: "flex", flexWrap: "wrap", gap: "0 1.5em", paddingBottom: "3px", color: muted },
+  ".hx-completion-selected": { color: fg, background: hover }
+});
+
+// src/view/view.ts
+import { EditorState as EditorState3, Facet as Facet4, Prec, RangeSetBuilder } from "@codemirror/state";
+import {
+  Decoration,
+  EditorView as EditorView2,
+  ViewPlugin as ViewPlugin2,
+  WidgetType,
+  showPanel
+} from "@codemirror/view";
+
+// src/view/cursor.ts
+import { StateEffect as StateEffect5 } from "@codemirror/state";
+import { ViewPlugin, layer as layer2 } from "@codemirror/view";
+
+// src/view/dom.ts
+function make(doc, tag, cls, text) {
+  const node = doc.createElement(tag);
+  if (cls)
+    node.className = cls;
+  if (text !== undefined)
+    node.textContent = text;
+  return node;
+}
+function add(parent, tag, cls, text) {
+  return parent.appendChild(make(parent.ownerDocument, tag, cls, text));
+}
+function setProps(node, props) {
+  for (const [name, value] of Object.entries(props))
+    node.style.setProperty(name, value);
+}
+function windowOf(view) {
+  return view.dom.ownerDocument.defaultView;
+}
+function styleOf(el) {
+  return el.ownerDocument.defaultView.getComputedStyle(el);
+}
+
+// src/view/cursor.ts
+class CellMarker {
+  doc;
+  cls;
+  box;
+  glyph;
+  backdrop;
+  constructor(doc, cls, box, glyph, backdrop) {
+    this.doc = doc;
+    this.cls = cls;
+    this.box = box;
+    this.glyph = glyph;
+    this.backdrop = backdrop;
+  }
+  eq(other) {
+    if (!(other instanceof CellMarker) || other.cls !== this.cls)
+      return false;
+    if (this.backdrop?.color !== other.backdrop?.color || this.backdrop?.image !== other.backdrop?.image)
+      return false;
+    const a = this.box;
+    const b = other.box;
+    if (a.left !== b.left || a.top !== b.top || a.right !== b.right || a.bottom !== b.bottom)
+      return false;
+    const g = this.glyph;
+    const h = other.glyph;
+    if (!g || !h)
+      return g === h;
+    return g.text === h.text && g.top === h.top && g.height === h.height && g.font === h.font && g.spacing === h.spacing && g.features === h.features && g.variations === h.variations;
+  }
+  draw() {
+    const node = make(this.doc, "div");
+    this.apply(node);
+    return node;
+  }
+  update(dom, prev) {
+    if (!(prev instanceof CellMarker))
+      return false;
+    this.apply(dom);
+    return true;
+  }
+  apply(node) {
+    node.className = this.cls;
+    setProps(node, {
+      "--hx-cell-left": `${this.box.left}px`,
+      "--hx-cell-top": `${this.box.top}px`,
+      "--hx-cell-width": `${this.box.right - this.box.left}px`,
+      "--hx-cell-height": `${this.box.bottom - this.box.top}px`,
+      "--hx-cell-backdrop": this.backdrop?.color ?? "transparent",
+      "--hx-cell-backdrop-image": this.backdrop?.image ?? "none"
+    });
+    node.replaceChildren();
+    const g = this.glyph;
+    if (!g)
+      return;
+    const span = add(node, "span", "hx-cell-glyph", g.text);
+    setProps(span, {
+      "--hx-glyph-top": `${g.top}px`,
+      "--hx-glyph-height": `${g.height}px`,
+      "--hx-glyph-font": g.font,
+      "--hx-glyph-spacing": g.spacing,
+      "--hx-glyph-features": g.features,
+      "--hx-glyph-variations": g.variations
+    });
+  }
+}
+
+class Measure {
+  view;
+  model;
+  rows = new Map;
+  opaque = new Map;
+  lineBoxes = new Map;
+  backdrops = new Map;
+  constructor(view, model) {
+    this.view = view;
+    this.model = model;
+  }
+  lineElement(pos) {
+    const { node, offset } = this.view.domAtPos(pos);
+    const target = node.nodeType === 1 && offset < node.childNodes.length ? node.childNodes[offset] : node;
+    const el = target.nodeType === 1 ? target : target.parentElement;
+    return el?.closest(".cm-line") ?? null;
+  }
+  row(line, y) {
+    if (!line)
+      return null;
+    let metrics = this.rows.get(line);
+    if (!metrics) {
+      const rect = line.getBoundingClientRect();
+      const style = styleOf(line);
+      const top = rect.top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop);
+      const height = parseFloat(style.lineHeight);
+      if (!(height > 0))
+        return null;
+      metrics = { top, height };
+      this.rows.set(line, metrics);
+    }
+    const k = Math.max(0, Math.floor((y - metrics.top) / metrics.height));
+    return [metrics.top + k * metrics.height, metrics.top + (k + 1) * metrics.height];
+  }
+  backdrop(pos) {
+    const { node } = this.view.domAtPos(pos, 1);
+    const start = node.nodeType === 1 ? node : node.parentElement;
+    if (!start)
+      return null;
+    const known = this.backdrops.get(start);
+    if (known)
+      return known;
+    const layers = [];
+    let color = "transparent";
+    for (let e = start;e; e = e.parentElement) {
+      const bg = styleOf(e).backgroundColor;
+      if (isOpaque(bg)) {
+        color = bg;
+        break;
+      }
+      if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg))
+        layers.push(`linear-gradient(${bg}, ${bg})`);
+    }
+    const result = { color, image: layers.length > 0 ? layers.join(", ") : "none" };
+    this.backdrops.set(start, result);
+    return result;
+  }
+  onOpaque(el) {
+    const chain = [];
+    let result = false;
+    for (let e = el;e && !e.classList.contains("cm-content"); e = e.parentElement) {
+      const known = this.opaque.get(e);
+      if (known !== undefined) {
+        result = known;
+        break;
+      }
+      chain.push(e);
+      if (isOpaque(styleOf(e).backgroundColor)) {
+        result = true;
+        break;
+      }
+      if (e.classList.contains("cm-line"))
+        break;
+    }
+    for (const e of chain)
+      this.opaque.set(e, result);
+    return result;
+  }
+  boxes(n) {
+    let boxes = this.lineBoxes.get(n);
+    if (boxes)
+      return boxes;
+    boxes = [];
+    this.lineBoxes.set(n, boxes);
+    const doc = this.view.state.doc;
+    if (n < 1 || n > doc.lines)
+      return boxes;
+    const line = doc.line(n);
+    const el = this.lineElement(line.from);
+    for (const seg of this.model.byLine.get(n) ?? []) {
+      if (seg.to > seg.from) {
+        const r = domRange(this.view, seg.from, seg.to);
+        for (const rect of r ? Array.from(r.getClientRects()) : []) {
+          const row = this.row(el, (rect.top + rect.bottom) / 2);
+          if (row && rect.width > 0)
+            boxes.push({ left: rect.left, right: rect.right, top: row[0], bottom: row[1] });
+        }
+      }
+    }
+    if (this.model.newlines.has(n) && !this.model.eol.has(line.to) && el) {
+      const c = this.view.coordsAtPos(line.to, -1) ?? this.view.coordsAtPos(line.to, 1);
+      const row = c && this.row(el, (c.top + c.bottom) / 2);
+      if (c && row)
+        boxes.push({ left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] });
+    }
+    return boxes;
+  }
+}
+function cellWidth(el) {
+  return 0.6 * parseFloat(styleOf(el).fontSize);
+}
+var spaces = new Map;
+function spaceWidth(el) {
+  const font = styleOf(el).font;
+  let width = spaces.get(font);
+  if (width === undefined) {
+    const canvas = make(el.ownerDocument, "canvas").getContext("2d");
+    if (!canvas)
+      return cellWidth(el);
+    canvas.font = font;
+    width = canvas.measureText(" ").width;
+    spaces.set(font, width);
+  }
+  return width;
+}
+function isOpaque(color) {
+  if (color === "transparent")
+    return false;
+  const alpha = /rgba\([^)]*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color);
+  if (!alpha)
+    return true;
+  const a = alpha[1];
+  return a.endsWith("%") ? parseFloat(a) >= 100 : parseFloat(a) >= 1;
+}
+function covered(boxes, x, y) {
+  return boxes.some((b) => x >= b.left && x < b.right && y >= b.top && y < b.bottom);
+}
+function model(view, editor) {
+  const value = view.state.field(helixField2, false);
+  if (!value)
+    return null;
+  const doc = view.state.doc;
+  const shape = editor.config.cursorShape[value.mode];
+  const insert = value.mode === "insert";
+  const { from: vFrom, to: vTo } = view.viewport;
+  const byLine = new Map;
+  const newlines = new Map;
+  const cells = [];
+  value.selection.ranges.forEach((range, i) => {
+    const primary = i === value.selection.primaryIndex;
+    const native = primary && !insert;
+    const drawsCell = shape !== "hidden" && !(insert && primary && shape === "bar") && !view.composing;
+    let from = range.from();
+    let to = range.to();
+    if (insert) {
+      const r = range.minWidth1(doc);
+      if (r.head > r.anchor) {
+        from = r.anchor;
+        to = prevGraphemeBoundary2(doc, r.head);
+      } else {
+        const cursorEnd = nextGraphemeBoundary2(doc, r.head);
+        from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
+        to = r.anchor;
+      }
+    }
+    const start = Math.max(from, vFrom);
+    const end = Math.min(to, vTo);
+    for (let pos = start;pos < end; ) {
+      const line = doc.lineAt(pos);
+      const segEnd = Math.min(end, line.to);
+      const list = byLine.get(line.number) ?? [];
+      list.push({ from: pos, to: segEnd, native });
+      byLine.set(line.number, list);
+      if (to > line.to && line.to < doc.length)
+        newlines.set(line.number, native && newlines.get(line.number) !== false);
+      pos = line.to + 1;
+    }
+    const pos = range.cursor(doc);
+    if (drawsCell && pos >= vFrom && pos <= vTo) {
+      const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
+      cells.push({ pos, end: eol ? pos : nextGraphemeBoundary2(doc, pos), primary, eol });
+    }
+  });
+  const eol = new Set(cells.filter((c) => c.eol).map((c) => c.pos));
+  return { value, shape, byLine, newlines, eol, cells };
+}
+var highlights = new WeakMap;
+function setHighlight(view, ranges) {
+  const win = view.dom.ownerDocument.defaultView;
+  if (!win?.Highlight || !win.CSS.highlights)
+    return;
+  let entry = highlights.get(win);
+  if (!entry) {
+    entry = { highlight: new win.Highlight, views: new Map };
+    highlights.set(win, entry);
+    win.CSS.highlights.set("hx-sel", entry.highlight);
+  }
+  for (const r of entry.views.get(view) ?? [])
+    entry.highlight.delete(r);
+  if (ranges.length === 0)
+    entry.views.delete(view);
+  else
+    entry.views.set(view, ranges);
+  for (const r of ranges)
+    entry.highlight.add(r);
+}
+function domRange(view, from, to) {
+  try {
+    const a = view.domAtPos(from, 1);
+    const b = view.domAtPos(to, -1);
+    const r = view.dom.ownerDocument.createRange();
+    r.setStart(a.node, a.offset);
+    r.setEnd(b.node, b.offset);
+    return r.collapsed ? null : r;
+  } catch {
+    return null;
+  }
+}
+function opaqueParts(measure, range) {
+  const out = [];
+  const doc = range.startContainer.ownerDocument;
+  if (!doc)
+    return out;
+  const root = range.commonAncestorContainer;
+  const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = root.nodeType === 3 ? [root] : [];
+  for (let n = walker.nextNode();n; n = walker.nextNode())
+    nodes.push(n);
+  for (const node of nodes) {
+    if (!range.intersectsNode(node) || !measure.onOpaque(node.parentElement))
+      continue;
+    const r = doc.createRange();
+    r.setStart(node, node === range.startContainer ? range.startOffset : 0);
+    r.setEnd(node, node === range.endContainer ? range.endOffset : (node.nodeValue ?? "").length);
+    if (!r.collapsed)
+      out.push(r);
+  }
+  return out;
+}
+function glyphAt(view, cell, top, coords) {
+  const text = view.state.doc.sliceString(cell.pos, cell.end);
+  if (/^\s*$/.test(text))
+    return null;
+  const { node } = view.domAtPos(cell.pos, 1);
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  if (!el)
+    return null;
+  const style = styleOf(el);
+  return {
+    text,
+    top: coords.top - top,
+    height: coords.bottom - coords.top,
+    font: style.font,
+    spacing: style.letterSpacing,
+    features: style.fontFeatureSettings,
+    variations: style.fontVariationSettings
+  };
+}
+function base(view, box) {
+  const rect = view.scrollDOM.getBoundingClientRect();
+  const left = rect.left - view.scrollDOM.scrollLeft * view.scaleX;
+  const top = rect.top - view.scrollDOM.scrollTop * view.scaleY;
+  return { left: box.left - left, right: box.right - left, top: box.top - top, bottom: box.bottom - top };
+}
+function selectionMarkers(view, editor) {
+  const m = model(view, editor);
+  if (!m) {
+    setHighlight(view, []);
+    return [];
+  }
+  const measure = new Measure(view, m);
+  const doc = view.state.doc;
+  const out = [];
+  const ranges = [];
+  for (const [n, segs] of m.byLine) {
+    const drawn = segs.filter((s) => !s.native);
+    const ownNewline = m.newlines.get(n) === false;
+    if (drawn.length === 0 && !ownNewline)
+      continue;
+    const line = doc.line(n);
+    const el = measure.lineElement(line.from);
+    for (const seg of drawn) {
+      if (seg.to <= seg.from)
+        continue;
+      const r = domRange(view, seg.from, seg.to);
+      if (!r)
+        continue;
+      ranges.push(...opaqueParts(measure, r));
+      for (const rect of Array.from(r.getClientRects())) {
+        const row = measure.row(el, (rect.top + rect.bottom) / 2);
+        if (row && rect.width > 0) {
+          out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: rect.left, right: rect.right, top: row[0], bottom: row[1] }), null, null));
+        }
+      }
+    }
+    if (ownNewline && !m.eol.has(line.to) && el) {
+      const c = view.coordsAtPos(line.to, -1) ?? view.coordsAtPos(line.to, 1);
+      const row = c && measure.row(el, (c.top + c.bottom) / 2);
+      if (c && row) {
+        out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] }), null, null));
+      }
+    }
+  }
+  setHighlight(view, ranges);
+  return out;
+}
+function cellMarkers(view, editor) {
+  const m = model(view, editor);
+  if (!m || m.cells.length === 0)
+    return [];
+  const measure = new Measure(view, m);
+  const doc = view.state.doc;
+  const out = [];
+  for (const cell of m.cells) {
+    const line = doc.lineAt(cell.pos);
+    const el = measure.lineElement(line.from);
+    let left;
+    let right;
+    let coords;
+    if (cell.eol) {
+      const c = view.coordsAtPos(cell.pos, -1) ?? view.coordsAtPos(cell.pos, 1);
+      if (!c || !el)
+        continue;
+      left = c.right;
+      right = c.right + cellWidth(el);
+      coords = c;
+    } else {
+      const a = view.coordsAtPos(cell.pos, 1);
+      const b = view.coordsAtPos(cell.end, -1);
+      if (!a || !b)
+        continue;
+      left = Math.min(a.left, b.right);
+      right = Math.max(a.left, b.right);
+      coords = a;
+    }
+    const row = measure.row(el, (coords.top + coords.bottom) / 2);
+    if (!row)
+      continue;
+    const box = { left, right, top: row[0], bottom: row[1] };
+    const near = [...measure.boxes(line.number - 1), ...measure.boxes(line.number), ...measure.boxes(line.number + 1)];
+    const square = (x1, y1, x2, y2) => covered(near, x1, y1) || covered(near, x2, y2);
+    const corners = [
+      square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
+      square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
+      square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
+      square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : ""
+    ];
+    const insertPrimary = m.value.mode === "insert" && cell.primary;
+    const shape = insertPrimary ? m.shape : "block";
+    const cls = ["hx-cell", `hx-cell-${shape}`, cell.primary ? "hx-cell-primary" : "", ...corners].filter(Boolean).join(" ");
+    const glyph = shape === "block" && !cell.eol ? glyphAt(view, cell, row[0], coords) : null;
+    const backdrop = shape === "block" ? measure.backdrop(cell.pos) : null;
+    out.push(new CellMarker(view.dom.ownerDocument, cls, base(view, box), glyph, backdrop));
+  }
+  return out;
+}
+var remeasure = StateEffect5.define();
+var layoutWatcher = ViewPlugin.fromClass(class {
+  view;
+  frame = null;
+  observer;
+  constructor(view) {
+    this.view = view;
+    this.observer = new MutationObserver((records) => {
+      if (records.some((r) => r.target.classList.contains("cm-line") && r.oldValue !== r.target.getAttribute("style")))
+        this.schedule();
+    });
+    this.observer.observe(view.contentDOM, { subtree: true, attributes: true, attributeFilter: ["style"], attributeOldValue: true });
+  }
+  schedule() {
+    const win = this.view.dom.ownerDocument.defaultView;
+    if (!win || this.frame !== null)
+      return;
+    this.frame = win.requestAnimationFrame(() => {
+      this.frame = null;
+      if (this.view.dom.isConnected)
+        this.view.dispatch({ effects: remeasure.of(null) });
+    });
+  }
+  destroy() {
+    this.observer.disconnect();
+    if (this.frame !== null)
+      this.view.dom.ownerDocument.defaultView?.cancelAnimationFrame(this.frame);
+  }
+});
+function cursorLayers(editor) {
+  return [
+    layoutWatcher,
+    layer2({
+      above: false,
+      class: "hx-selections",
+      update: () => true,
+      markers: (view) => selectionMarkers(view, editor),
+      destroy: (_layer, view) => setHighlight(view, [])
+    }),
+    layer2({
+      above: true,
+      class: "hx-cursors",
+      update: () => true,
+      markers: (view) => cellMarkers(view, editor)
+    })
+  ];
+}
+
+// src/view/view.ts
+var helixEnv2 = Facet4.define({ combine: (values) => values[0] ?? null });
+
+class LabelWidget extends WidgetType {
+  text;
+  constructor(text) {
+    super();
+    this.text = text;
+  }
+  eq(other) {
+    return other.text === this.text;
+  }
+  toDOM(view) {
+    return make(view.dom.ownerDocument, "span", "hx-jump-label", this.text);
+  }
+}
+function endComposition(view) {
+  const scroller = view.scrollDOM;
+  const parent = scroller.parentElement;
+  if (!parent)
+    return;
+  const sibling = scroller.nextSibling;
+  const selection = view.dom.ownerDocument.getSelection();
+  const saved = selection && {
+    anchorNode: selection.anchorNode,
+    anchorOffset: selection.anchorOffset,
+    focusNode: selection.focusNode,
+    focusOffset: selection.focusOffset
+  };
+  scroller.remove();
+  parent.insertBefore(scroller, sibling);
+  try {
+    if (saved && selection && saved.anchorNode) {
+      selection.setPosition(saved.anchorNode, saved.anchorOffset);
+      if (saved.focusNode)
+        selection.extend(saved.focusNode, saved.focusOffset);
+    }
+  } catch {
+    selection?.removeAllRanges();
+  }
+  view.focus();
+  view.contentDOM.dispatchEvent(new CustomEvent("compositionend"));
+}
+function buildDecorations(view, env) {
+  const state = view.state;
+  const value = state.field(helixField2, false);
+  if (!value)
+    return Decoration.none;
+  const doc = state.doc;
+  const builder = [];
+  const labels = [...env.editor.jumpLabels.get(env.hostFor(view).id) ?? []].sort((x, y) => x.pos - y.pos);
+  const groups = [];
+  for (const label of labels) {
+    if (label.pos >= doc.length || doc.lineAt(label.pos).to === label.pos)
+      continue;
+    const end = nextGraphemeBoundary2(doc, label.pos);
+    const last = groups[groups.length - 1];
+    if (last && last.end === label.pos) {
+      last.end = end;
+      last.text += label.text;
+    } else {
+      groups.push({ pos: label.pos, end, text: label.text });
+    }
+  }
+  for (const group of groups) {
+    builder.push({ from: group.pos, to: group.end, deco: Decoration.replace({ widget: new LabelWidget(group.text) }) });
+  }
+  builder.sort((a, b) => a.from - b.from || a.deco.startSide - b.deco.startSide || a.to - b.to);
+  const set = new RangeSetBuilder;
+  let lastReplaceEnd = -1;
+  for (const d of builder) {
+    if (d.from < lastReplaceEnd)
+      continue;
+    set.add(d.from, d.to, d.deco);
+    if (d.deco.spec.widget && d.to > d.from)
+      lastReplaceEnd = d.to;
+  }
+  return set.finish();
+}
+function cursorLineDecorations(view, env) {
+  if (!env.editor.config.cursorline)
+    return Decoration.none;
+  const value = view.state.field(helixField2, false);
+  if (!value)
+    return Decoration.none;
+  const doc = view.state.doc;
+  const lines = new Set;
+  const { from: vFrom, to: vTo } = view.viewport;
+  for (const r of value.selection.ranges) {
+    const cursor = r.cursor(doc);
+    if (cursor >= vFrom && cursor <= vTo)
+      lines.add(doc.lineAt(cursor).from);
+  }
+  const builder = new RangeSetBuilder;
+  for (const from of [...lines].sort((a, b) => a - b))
+    builder.add(from, from, Decoration.line({ class: "hx-cursorline" }));
+  return builder.finish();
+}
+function literalWanted(editor, mode) {
+  return editor.activePrompt !== null || editor.onNextKeyState !== null || mode === "insert";
+}
+function pendingNode(editor, mode) {
+  const root = editor.keymaps.sticky ?? editor.keymaps.map[mode];
+  const node = search(root, editor.keymaps.pending());
+  return node && node.kind === "node" ? node : editor.keymaps.map[mode];
+}
+var HOST_INSERT_KEYS = new Set(["ret", "tab", "S-tab", "backspace", "S-backspace"]);
+var OS_NAVIGATION = new Set(["Home", "End", "PageUp", "PageDown"]);
+function helixExtension2(env) {
+  const { editor } = env;
+  let lastKeydown = null;
+  const onKey = (event, view) => {
+    const host = env.hostFor(view);
+    const value = view.state.field(helixField2, false);
+    if (!value)
+      return false;
+    const mode = value.mode;
+    if (mode === "insert" && env.suggestTakes(event) && !editor.activePrompt)
+      return false;
+    const dead = event.key === "Dead";
+    if (dead && mode === "insert" && !editor.activePrompt)
+      return false;
+    const literal = literalWanted(editor, mode);
+    let key = keyFromDom2(event, literal, env.physicalKeys());
+    if (key === null) {
+      if (!dead || event.metaKey)
+        return false;
+      event.preventDefault();
+      event.stopPropagation();
+      return true;
+    }
+    if (mode === "insert" && !editor.activePrompt && editor.onNextKeyState === null && (event.altKey || event.ctrlKey)) {
+      const physical = keyFromDom2(event, false);
+      if (physical && physical !== key && pendingNode(editor, "insert").map.has(physical))
+        key = physical;
+    }
+    if (event.metaKey && (editor.activePrompt || editor.onNextKeyState || !pendingNode(editor, mode).map.has(key)))
+      return false;
+    if (OS_NAVIGATION.has(event.key) && event.ctrlKey && !event.altKey && !event.metaKey && mode !== "insert" && !editor.activePrompt && !editor.onNextKeyState && editor.keymaps.pending().length === 0 && !pendingNode(editor, mode).map.has(key))
+      return false;
+    lastKeydown = { view, key: event.key };
+    const consumed = editor.handleKey(host, key, {
+      nativeInsert: true,
+      passThrough: (k) => !env.insertKeysHelix() && HOST_INSERT_KEYS.has(k)
+    });
+    if (!consumed && !dead) {
+      lastKeydown = null;
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    return true;
+  };
+  const keyHandler = Prec.highest(EditorView2.domEventHandlers({
+    compositionstart(_event, view) {
+      const value = view.state.field(helixField2, false);
+      if (!value || value.mode === "insert" && !editor.activePrompt)
+        return false;
+      windowOf(view)?.setTimeout(() => {
+        if (view.compositionStarted)
+          endComposition(view);
+      }, 0);
+      return false;
+    },
+    keyup() {
+      lastKeydown = null;
+      return false;
+    },
+    keydown(event, view) {
+      lastKeydown = null;
+      if (event.isComposing || event.key === "Process") {
+        const value = view.state.field(helixField2, false);
+        if (!value || value.mode === "insert" && !editor.activePrompt)
+          return false;
+        endComposition(view);
+      }
+      return onKey(event, view);
+    }
+  }));
+  const stuckComposition = ViewPlugin2.fromClass(class {
+    view;
+    constructor(view) {
+      this.view = view;
+      view.contentDOM.addEventListener("keydown", this.listener, true);
+    }
+    listener = (event) => {
+      const view = this.view;
+      if (!view.composing)
+        return;
+      const value = view.state.field(helixField2, false);
+      if (!value || value.mode === "insert" && !editor.activePrompt)
+        return;
+      endComposition(view);
+      onKey(event, view);
+    };
+    destroy() {
+      this.view.contentDOM.removeEventListener("keydown", this.listener, true);
+    }
+  });
+  const swallowInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
+    if (lastKeydown && lastKeydown.view !== view && lastKeydown.key === text) {
+      lastKeydown = null;
+      return true;
+    }
+    const value = view.state.field(helixField2, false);
+    if (!value || value.mode === "insert" && !editor.activePrompt)
+      return false;
+    if (view.compositionStarted) {
+      windowOf(view)?.setTimeout(() => endComposition(view), 0);
+      return true;
+    }
+    const host = env.hostFor(view);
+    for (const ch of text) {
+      const key = keyFromDom2({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
+      if (key !== null)
+        editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
+    }
+    return true;
+  }));
+  const autoPairsInput = Prec.highest(EditorView2.inputHandler.of((view, _from, _to, text) => {
+    const value = view.state.field(helixField2, false);
+    if (!value || value.mode !== "insert" || !editor.helixAutoPairs)
+      return false;
+    if ([...text].length !== 1 || !mayAutoPair(editor, text))
+      return false;
+    const host = env.hostFor(view);
+    const map = autoPairsFor(editor, host, insertDiffers(view.state.doc, value.selection.ranges, text));
+    if (!map || !map.has(text) && !/^\p{White_Space}$/u.test(text))
+      return false;
+    const doc = view.state.doc;
+    const touched = value.selection.ranges.some((r) => hookInsert(doc, r, text, map) !== null);
+    if (!touched)
+      return false;
+    const cx = new Context2(editor, host, null, null);
+    changeByAndWithSelection(cx, (range) => {
+      const hooked = hookInsert(doc, range, text, map);
+      if (hooked)
+        return hooked;
+      const cursor = range.cursor(doc);
+      return [[cursor, cursor, text], null];
+    });
+    return true;
+  }));
+  const decorations = ViewPlugin2.fromClass(class {
+    view;
+    decorations;
+    constructor(view) {
+      this.view = view;
+      env.onViewOpen(view);
+      this.decorations = buildDecorations(view, env);
+      queueMicrotask(() => {
+        const value = view.state.field(helixField2, false);
+        if (!value)
+          return;
+        const native = toNative2(value, view.state.doc);
+        if (!native.eq(view.state.selection)) {
+          view.dispatch({ selection: native, effects: setHelix2.of({}), annotations: helixOwned2.of(true) });
+        }
+      });
+    }
+    update(update) {
+      for (const tr of update.transactions)
+        if (tr.docChanged)
+          env.onDocTransaction(update.view, tr);
+      if (update.docChanged)
+        env.onChanges(update.view, update.changes);
+      if (update.docChanged || update.selectionSet || update.viewportChanged || update.transactions.length > 0) {
+        this.decorations = buildDecorations(update.view, env);
+      }
+      if (update.focusChanged && update.view.hasFocus)
+        env.onFocusChange(update.view);
+      if (update.transactions.length > 0 || update.focusChanged)
+        env.onRender(update.view);
+    }
+    destroy() {
+      env.onViewClose(this.view);
+    }
+  }, { decorations: (v) => v.decorations });
+  const cursorLine = ViewPlugin2.fromClass(class {
+    lines;
+    constructor(view) {
+      this.lines = cursorLineDecorations(view, env);
+    }
+    update(update) {
+      this.lines = cursorLineDecorations(update.view, env);
+    }
+  }, { decorations: (v) => v.lines });
+  const pasteHandler = Prec.highest(EditorView2.domEventHandlers({
+    paste(event, view) {
+      const value = view.state.field(helixField2, false);
+      if (!value || value.mode === "insert")
+        return false;
+      const text = event.clipboardData?.getData("text/plain");
+      if (!text)
+        return false;
+      event.preventDefault();
+      const cx = new Context2(editor, env.hostFor(view), editor.count, null);
+      editor.count = null;
+      pasteImpl2(cx, [text], value.mode === "normal" ? "before" : "cursor", cx.count());
+      exitSelectMode(cx);
+      return true;
+    }
+  }));
+  const attributes = EditorView2.editorAttributes.compute([helixField2], (state) => {
+    const value = state.field(helixField2, false);
+    const mode = value?.mode ?? "normal";
+    return { class: `hx hx-${mode} hx-shape-${editor.config.cursorShape[mode]}` };
+  });
+  const scrollMargins = EditorView2.scrollMargins.of((view) => {
+    const m = editor.config.scrolloff * view.defaultLineHeight;
+    return { top: m, bottom: m };
+  });
+  const panel = showPanel.of((view) => {
+    const dom = make(view.dom.ownerDocument, "div", "hx-panel");
+    const info = add(dom, "div", "hx-autoinfo hx-hidden");
+    const prompt = add(dom, "div", "hx-prompt hx-hidden");
+    const message = add(dom, "div", "hx-message hx-hidden");
+    const render = () => renderPanel(view, env, dom, info, prompt, message);
+    render();
+    return {
+      dom,
+      top: false,
+      update: render
+    };
+  });
+  return [
+    helixEnv2.of(env),
+    EditorState3.allowMultipleSelections.of(true),
+    helixField2,
+    diagnosticsField2,
+    changesField2,
+    historyField2,
+    syncNativeSelection2,
+    keyHandler,
+    stuckComposition,
+    swallowInput,
+    pasteHandler,
+    autoPairsInput,
+    decorations,
+    cursorLayers(editor),
+    helixTheme,
+    cursorLine,
+    attributes,
+    scrollMargins,
+    env.noPanel ? [] : panel
+  ];
+}
+function renderPanel(view, env, dom, info, prompt, message) {
+  const { editor } = env;
+  const owner = env.panelOwner?.(view) ?? null;
+  if (owner && owner !== view) {
+    prompt.replaceChildren();
+    info.replaceChildren();
+    message.textContent = "";
+    for (const part of [prompt, info, message])
+      part.classList.add("hx-hidden");
+    dom.classList.add("hx-panel-empty");
+    return;
+  }
+  const guest = env.panelGuest?.(view) ?? null;
+  const source = guest?.hasFocus ? guest : view;
+  const focused = source.hasFocus;
+  const host = env.hostFor(source);
+  const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
+  prompt.replaceChildren();
+  prompt.classList.toggle("hx-hidden", !active);
+  if (active) {
+    if (active.completions.length > 0) {
+      const list = add(prompt, "div", "hx-completions");
+      active.completions.slice(0, 40).forEach((c, i) => {
+        add(list, "span", i === active.selection ? "hx-completion hx-completion-selected" : "hx-completion", c.label);
+      });
+    }
+    add(prompt, "span", "hx-prompt-label", active.label);
+    add(prompt, "span", undefined, active.line.slice(0, active.cursor));
+    add(prompt, "span", "hx-prompt-cursor", active.line.slice(active.cursor, active.cursor + 1) || " ");
+    add(prompt, "span", undefined, active.line.slice(active.cursor + 1));
+  }
+  const status = !active && focused ? editor.status : null;
+  message.textContent = status?.message ?? "";
+  message.classList.toggle("hx-hidden", !status);
+  message.classList.toggle("hx-message-error", status?.severity === "error");
+  const statusBar = env.statusBar?.(view) ?? null;
+  const editorRect = statusBar ? view.dom.getBoundingClientRect() : null;
+  const statusRect = statusBar?.getBoundingClientRect();
+  const strip = statusBar?.querySelector(".hx-status-strip:not(.hx-hidden)")?.getBoundingClientRect();
+  const covered = editorRect && statusRect && statusRect.height > 0 && statusRect.top < editorRect.bottom && statusRect.left < editorRect.right;
+  const overlap = covered ? Math.max(0, editorRect.right - Math.min(statusRect.left, strip?.left ?? Infinity)) : 0;
+  setProps(dom, { "--hx-bar-overlap": `${overlap}px` });
+  const opened = dom.classList.contains("hx-panel-empty") && (!!active || !!status);
+  dom.classList.toggle("hx-panel-empty", !active && !status);
+  if (opened) {
+    windowOf(view)?.requestAnimationFrame(() => {
+      if (view.dom.isConnected)
+        view.dispatch({ effects: EditorView2.scrollIntoView(view.state.selection.main.head, { y: "nearest" }) });
+    });
+  }
+  if (focused)
+    env.joinStatus?.(view, !!covered && (!!active || !!status));
+  info.replaceChildren();
+  const auto = editor.config.autoInfo && focused ? infoOf2(editor) : null;
+  info.classList.toggle("hx-hidden", !auto);
+  if (!auto)
+    return;
+  add(info, "div", "hx-autoinfo-title").textContent = auto.title;
+  for (const entry of auto.rows) {
+    const row = add(info, "div", entry.available ? "hx-autoinfo-row" : "hx-autoinfo-row hx-autoinfo-unavailable");
+    add(row, "span", "hx-autoinfo-key", entry.keys);
+    add(row, "span", undefined, entry.doc);
+  }
+  const panelRect = dom.getBoundingClientRect();
+  const lift = statusRect && statusRect.height > 0 && statusRect.left < panelRect.right ? Math.max(0, panelRect.bottom - statusRect.top) : 0;
+  setProps(dom, { "--hx-autoinfo-lift": `${lift}px`, "--hx-autoinfo-room": `${Math.max(0, panelRect.top - lift - (editorRect ?? view.dom.getBoundingClientRect()).top - 16)}px` });
+}
+function uiRefresher2(editor) {
+  const last = new WeakMap;
+  return (host) => {
+    const view = host.view;
+    if (!view)
+      return;
+    const next = uiSignature2(editor, host);
+    if (last.get(view) === next)
+      return;
+    last.set(view, next);
+    view.dispatch({});
+  };
+}
+function uiSignature2(editor, host) {
+  const p = editor.activePrompt;
+  const auto = editor.autoinfo;
+  return JSON.stringify([
+    p ? [p.label, p.line, p.cursor, p.selection, p.completions.length] : null,
+    auto ? "kind" in auto ? auto.name : auto.title : null,
+    editor.status,
+    editor.jumpLabels.get(host.id)?.length ?? 0,
+    editor.pendingDisplay(),
+    editor.count,
+    editor.selectedRegister,
+    editor.macroRecording?.register ?? null
+  ]);
+}
+
 // src/view/viewops.ts
-import { EditorView as EditorView5 } from "@codemirror/view";
+import { EditorView as EditorView3 } from "@codemirror/view";
 function rows(view, amount) {
   const lh = view.defaultLineHeight;
   const height = view.scrollDOM.clientHeight;
@@ -16712,7 +14929,7 @@ function makeViewOps2(scrolloff) {
         return;
       const pos = selOf2(cx).primary().cursor(view.state.doc);
       const y = align === "top" ? "start" : align === "center" ? "center" : "end";
-      view.dispatch({ effects: EditorView5.scrollIntoView(pos, { y, yMargin: align === "center" ? 0 : scrolloff() * view.defaultLineHeight }) });
+      view.dispatch({ effects: EditorView3.scrollIntoView(pos, { y, yMargin: align === "center" ? 0 : scrolloff() * view.defaultLineHeight }) });
     },
     gotoWindow(cx, align) {
       const view = cx.host.view;
@@ -16774,6 +14991,9 @@ function helixKeys2(view, keys) {
   return true;
 }
 var hostOf = new WeakMap;
+function helixHost(view) {
+  return hostOf.get(view) ?? null;
+}
 var helixEditor2 = Facet5.define({ combine: (values) => values[0] ?? null });
 var helixDocument2 = Facet5.define({
   combine: (values) => Object.assign({}, ...values)
@@ -16798,12 +15018,19 @@ function detectLanguage(loader, view) {
   return loader.languageForFilename(document.path) ?? loader.languageForShebang(view.state.doc.sliceString(0, 1024));
 }
 function helix2(options = {}) {
-  const loaded = loadConfig2(options.config ?? null);
+  const commands = options.commands;
+  const lookup = (name) => typeof commands === "function" ? commands(name) : commands?.[name] ?? null;
+  const loaded = loadConfig2(options.config ?? null, undefined, (name) => lookup(name) !== null);
   const editor = new HelixEditor2(buildKeymaps2(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
-  editor.workspace = options.workspace ?? null;
-  editor.matcherLoader = () => loadMatcher(options.matcher);
+  editor.app = {
+    command: lookup,
+    commandNames: () => typeof commands === "object" ? Object.keys(commands) : [],
+    openJump: options.openJump,
+    variable: options.variable
+  };
+  editor.keymaps = buildKeymaps2(loaded.keys, { app: options.keys, available: (name) => editor.hasCommand(name) });
   const clipboard = new SystemClipboard2;
   editor.registers = new Registers2(clipboard);
   editor.viewOps = makeViewOps2(() => editor.config.scrolloff);
@@ -16880,10 +15107,6 @@ function helix2(options = {}) {
         open.dispatch({});
     }).catch(() => editor.setError("the syntax tree failed to load"));
   };
-  editor.onThemeChanged = () => {
-    for (const open of views)
-      open.dispatch({});
-  };
   let active = null;
   const refresh = uiRefresher2(editor);
   const rerender = () => {
@@ -16899,7 +15122,7 @@ function helix2(options = {}) {
     promptChanged: refresh,
     jumpLabels: refresh
   };
-  const clipboardReader = EditorView6.domEventObservers({
+  const clipboardReader = EditorView4.domEventObservers({
     keydown: () => {
       queueMicrotask(() => {
         const pending = editor.keymaps.pending();
@@ -16909,7 +15132,7 @@ function helix2(options = {}) {
       });
     }
   });
-  const nativeUndo = EditorView6.domEventHandlers({
+  const nativeUndo = EditorView4.domEventHandlers({
     beforeinput: (event) => {
       if (event.inputType !== "historyUndo" && event.inputType !== "historyRedo")
         return false;
@@ -16922,6 +15145,7 @@ function helix2(options = {}) {
     hostFor,
     insertKeysHelix: () => true,
     physicalKeys: () => false,
+    noPanel: options.panel === false,
     suggestTakes: () => false,
     onFocusChange: (view) => {
       active = view;
@@ -16960,1190 +15184,102 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-// src/ui/bufferline.ts
-import { Prec as Prec2 } from "@codemirror/state";
-import { EditorView as EditorView7, showPanel as showPanel2 } from "@codemirror/view";
-function helixBufferline2() {
-  const panel = showPanel2.of((view) => {
-    const dom = make(view.dom.ownerDocument, "div", "hx-bufferline hx-s-ui-bufferline");
-    let last = "";
-    const render = () => {
-      const env = view.state.facet(helixEnv2);
-      const workspace = env?.editor.workspace;
-      if (!env || !workspace?.buffers)
-        return;
-      const host = env.hostFor(view);
-      const cx = new Context2(env.editor, host, null, null);
-      const buffers = workspace.buffers(cx);
-      const mode = env.editor.config.bufferline;
-      const visible = mode === "always" || mode === "multiple" && buffers.length > 1;
-      const key = JSON.stringify([visible, buffers, host.id]);
-      if (key === last)
-        return;
-      last = key;
-      dom.replaceChildren();
-      dom.classList.toggle("hx-hidden", !visible);
-      if (!visible)
-        return;
-      for (const buffer of buffers) {
-        const active = buffer.id === host.id;
-        const name = buffer.path?.slice(buffer.path.lastIndexOf("/") + 1) ?? buffer.name;
-        add(dom, "span", active ? "hx-bufferline-item hx-bufferline-active hx-s-ui-bufferline-active" : "hx-bufferline-item", ` ${name}${buffer.modified ? "[+]" : ""} `);
-      }
-    };
-    render();
-    return { dom, top: true, update: render };
-  });
-  return [Prec2.high(panel), bufferlineTheme];
+// src/api.ts
+function helixCommandList2() {
+  const names = new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS2)]);
+  return [...names].sort().map((name) => ({ name, doc: COMMAND_DOCS[name] ?? name, app: isAppCommandName(name) }));
 }
-var bufferlineTheme = EditorView7.baseTheme({
-  ".hx-bufferline": { display: "flex", overflow: "hidden", whiteSpace: "pre", fontFamily: "var(--hx-panel-font, monospace)", fontSize: "var(--hx-panel-font-size, 0.85em)", background: "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))", color: "var(--hx-fg, CanvasText)" },
-  ".hx-bufferline.hx-hidden": { display: "none" },
-  ".hx-bufferline-active": { fontWeight: "600", background: "var(--hx-bg, Canvas)" }
-});
-
-// src/ui/decorations.ts
-import { RangeSetBuilder as RangeSetBuilder2, StateEffect as StateEffect7, StateField as StateField5 } from "@codemirror/state";
-import { Decoration as Decoration2, EditorView as EditorView8, ViewPlugin as ViewPlugin5, WidgetType as WidgetType2, layer as layer2 } from "@codemirror/view";
-function configOf(view) {
-  return view.state.facet(helixEnv2)?.editor.config ?? null;
+function helixTypedCommandList2() {
+  return TYPABLE.map((c) => ({ name: c.name, aliases: c.aliases, doc: c.doc, app: c.app ?? null }));
 }
-var MARKS = {
-  space: Decoration2.mark({ class: "hx-ws hx-ws-space" }),
-  tab: Decoration2.mark({ class: "hx-ws hx-ws-tab" }),
-  nbsp: Decoration2.mark({ class: "hx-ws hx-ws-nbsp" }),
-  nnbsp: Decoration2.mark({ class: "hx-ws hx-ws-nnbsp" })
-};
-
-class NewlineWidget extends WidgetType2 {
-  eq() {
-    return true;
-  }
-  toDOM(view) {
-    return make(view.dom.ownerDocument, "span", "hx-ws-newline");
-  }
-  ignoreEvent() {
-    return true;
-  }
+function parts(view) {
+  const editor = view.state.facet(helixEditor2);
+  const host = editor ? helixHost(view) : null;
+  return editor && host ? { editor, host } : null;
 }
-var newlineDecoration = Decoration2.widget({ widget: new NewlineWidget, side: 1 });
-function whitespaceDecorations(view) {
-  const config = configOf(view);
-  if (!config)
-    return Decoration2.none;
-  const { render } = config.whitespace;
-  if (!render.space && !render.tab && !render.nbsp && !render.nnbsp && !render.newline)
-    return Decoration2.none;
-  const builder = new RangeSetBuilder2;
-  const doc = view.state.doc;
-  for (const { from, to } of view.visibleRanges) {
-    for (let pos = from;pos <= to; ) {
-      const line = doc.lineAt(pos);
-      const text = line.text;
-      const start = Math.max(pos, line.from) - line.from;
-      const end = Math.min(to, line.to) - line.from;
-      for (let i = start;i < end; i++) {
-        const c = text.charCodeAt(i);
-        const at = line.from + i;
-        if (c === 32 && render.space)
-          builder.add(at, at + 1, MARKS.space);
-        else if (c === 9 && render.tab)
-          builder.add(at, at + 1, MARKS.tab);
-        else if (c === 160 && render.nbsp)
-          builder.add(at, at + 1, MARKS.nbsp);
-        else if (c === 8239 && render.nnbsp)
-          builder.add(at, at + 1, MARKS.nnbsp);
-      }
-      if (render.newline && line.to <= to && line.number < doc.lines)
-        builder.add(line.to, line.to, newlineDecoration);
-      pos = line.to + 1;
-    }
-  }
-  return builder.finish();
+function context(view) {
+  const found = parts(view);
+  return found ? new Context2(found.editor, found.host, null, null) : null;
 }
-var whitespacePlugin = ViewPlugin5.fromClass(class {
-  decorations;
-  signature;
-  constructor(view) {
-    this.decorations = whitespaceDecorations(view);
-    this.signature = JSON.stringify(configOf(view)?.whitespace.render);
-  }
-  update(update) {
-    const signature = JSON.stringify(configOf(update.view)?.whitespace.render);
-    if (update.docChanged || update.viewportChanged || signature !== this.signature) {
-      this.signature = signature;
-      this.decorations = whitespaceDecorations(update.view);
-    }
-  }
-}, { decorations: (v) => v.decorations });
-var whitespaceChars = EditorView8.editorAttributes.of((view) => {
-  const config = configOf(view);
-  if (!config)
-    return null;
-  const c = config.whitespace.characters;
-  const quote = (s) => JSON.stringify(s);
-  return { style: `--hx-ws-space: ${quote(c.space)}; --hx-ws-tab: ${quote(c.tab)}; --hx-ws-nbsp: ${quote(c.nbsp)}; --hx-ws-nnbsp: ${quote(c.nnbsp)}; --hx-ws-newline: ${quote(c.newline)};` };
-});
-
-class GuidesWidget extends WidgetType2 {
-  levels;
-  character;
-  constructor(levels, character) {
-    super();
-    this.levels = levels;
-    this.character = character;
-  }
-  eq(other) {
-    return other.character === this.character && other.levels.length === this.levels.length && other.levels.every((l, i) => l === this.levels[i]);
-  }
-  toDOM(view) {
-    const doc = view.dom.ownerDocument;
-    const dom = make(doc, "span", "hx-indent-guides");
-    dom.setAttribute("aria-hidden", "true");
-    for (const column of this.levels) {
-      const guide = make(doc, "span", "hx-indent-guide hx-s-ui-virtual-indent-guide", this.character);
-      guide.style.setProperty("--hx-guide-column", String(column));
-      dom.appendChild(guide);
-    }
-    return dom;
-  }
-  ignoreEvent() {
-    return true;
-  }
+function helixEdit2(view, edits) {
+  const cx = context(view);
+  if (cx)
+    applyTextEdits2(cx, edits);
 }
-function indentColumns(text, tabWidth) {
-  let column = 0;
-  for (let i = 0;i < text.length; i++) {
-    const c = text[i];
-    if (c === " ")
-      column += 1;
-    else if (c === "\t")
-      column += tabWidth - column % tabWidth;
-    else
-      return column;
-  }
-  return null;
+function helixSelect2(view, ranges, primary = 0) {
+  const cx = context(view);
+  if (!cx || ranges.length === 0)
+    return;
+  setSel2(cx, new Selection2(ranges.map((r) => new Range2(r.anchor, r.head)), primary).ensureInvariants(view.state.doc));
 }
-function guideDecorations(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env?.editor.config.indentGuides)
-    return Decoration2.none;
-  const { editor } = env;
-  const indent = editor.indent(env.hostFor(view));
-  const width = indent.style.kind === "tabs" ? indent.tabWidth : indent.style.width;
-  if (width <= 0)
-    return Decoration2.none;
-  const builder = new RangeSetBuilder2;
-  const doc = view.state.doc;
-  for (const { from, to } of view.visibleRanges) {
-    let last = 0;
-    const first = doc.lineAt(from);
-    for (let n = first.number - 1;n >= 1; n--) {
-      const level = indentColumns(doc.line(n).text, indent.tabWidth);
-      if (level !== null) {
-        last = level;
-        break;
-      }
-    }
-    for (let pos = from;pos <= to; ) {
-      const line = doc.lineAt(pos);
-      const own = indentColumns(line.text, indent.tabWidth);
-      const level = own ?? last;
-      if (own !== null)
-        last = own;
-      const levels = [];
-      const end = Math.floor(level / width);
-      for (let i = editor.config.indentGuideSkipLevels;i < end; i++)
-        levels.push(i * width);
-      if (levels.length > 0)
-        builder.add(line.from, line.from, Decoration2.widget({ widget: new GuidesWidget(levels, editor.config.indentGuideCharacter), side: -1 }));
-      pos = line.to + 1;
-    }
-  }
-  return builder.finish();
+function helixMessage2(view, text, severity = "info") {
+  const found = parts(view);
+  if (!found)
+    return;
+  if (severity === "error")
+    found.editor.setError(text);
+  else
+    found.editor.setStatus(text);
+  found.editor.ui.render?.(found.host);
 }
-var guidesPlugin = ViewPlugin5.fromClass(class {
-  decorations;
-  signature;
-  constructor(view) {
-    this.decorations = guideDecorations(view);
-    this.signature = guideSignature(view);
-  }
-  update(update) {
-    const signature = guideSignature(update.view);
-    if (update.docChanged || update.viewportChanged || signature !== this.signature) {
-      this.signature = signature;
-      this.decorations = guideDecorations(update.view);
-    }
-  }
-}, { decorations: (v) => v.decorations });
-function guideSignature(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env)
-    return "";
-  const config = env.editor.config;
-  return JSON.stringify([config.indentGuides, config.indentGuideCharacter, config.indentGuideSkipLevels, env.editor.indent(env.hostFor(view))]);
+function helixPrompt2(view, request) {
+  const cx = context(view);
+  if (cx)
+    cx.editor.prompt(cx, request);
 }
-
-class BoxMarker {
-  doc;
-  cls;
-  left;
-  top;
-  width;
-  height;
-  text;
-  constructor(doc, cls, left, top, width, height, text = null) {
-    this.doc = doc;
-    this.cls = cls;
-    this.left = left;
-    this.top = top;
-    this.width = width;
-    this.height = height;
-    this.text = text;
-  }
-  eq(other) {
-    return other instanceof BoxMarker && other.cls === this.cls && other.left === this.left && other.top === this.top && other.width === this.width && other.height === this.height && other.text === this.text;
-  }
-  draw() {
-    const dom = this.doc.createElement("div");
-    this.apply(dom);
-    return dom;
-  }
-  update(dom) {
-    this.apply(dom);
-    return true;
-  }
-  apply(dom) {
-    dom.className = this.cls;
-    dom.textContent = this.text;
-    dom.style.left = `${this.left}px`;
-    dom.style.top = `${this.top}px`;
-    dom.style.width = `${this.width}px`;
-    dom.style.height = `${this.height}px`;
-  }
-}
-function contentLeft(view) {
-  const scroller = view.scrollDOM.getBoundingClientRect();
-  const line = view.contentDOM.querySelector(".cm-line");
-  const style = line ? view.dom.ownerDocument.defaultView?.getComputedStyle(line) : null;
-  const padding = style ? parseFloat(style.paddingLeft) + parseFloat(style.textIndent) : 0;
-  return (view.contentDOM.getBoundingClientRect().left - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft + padding;
-}
-function rulersOf(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env)
-    return [];
-  const host = env.hostFor(view);
-  return env.editor.languageConfig(host)?.rulers ?? env.editor.config.rulers;
-}
-var rulersLayer = layer2({
-  above: false,
-  class: "hx-rulers",
-  update: (update) => update.geometryChanged || update.transactions.length > 0,
-  markers(view) {
-    const left = contentLeft(view);
-    const height = view.contentHeight / view.scaleY;
-    return rulersOf(view).map((column) => new BoxMarker(view.dom.ownerDocument, "hx-ruler hx-s-ui-virtual-ruler", left + (column - 1) * view.defaultCharacterWidth, 0, view.defaultCharacterWidth, height));
-  }
-});
-var cursorColumnLayer = layer2({
-  above: false,
-  class: "hx-cursorcolumns",
-  update: () => true,
-  markers(view) {
-    const env = view.state.facet(helixEnv2);
-    const value = view.state.field(helixField2, false);
-    if (!env?.editor.config.cursorcolumn || !value || !view.hasFocus)
-      return [];
-    const scroller = view.scrollDOM.getBoundingClientRect();
-    const height = view.contentHeight / view.scaleY;
-    const seen = new Set;
-    const markers = [];
-    value.selection.ranges.forEach((range, i) => {
-      const coords = view.coordsAtPos(range.cursor(view.state.doc), 1);
-      if (!coords)
-        return;
-      const left = (coords.left - scroller.left) / view.scaleX + view.scrollDOM.scrollLeft;
-      if (seen.has(left))
-        return;
-      seen.add(left);
-      const primary = i === value.selection.primaryIndex;
-      markers.push(new BoxMarker(view.dom.ownerDocument, `hx-cursorcolumn hx-s-ui-cursorcolumn-${primary ? "primary" : "secondary"}`, left, 0, view.defaultCharacterWidth, height));
-    });
-    return markers;
-  }
-});
-var setSoftWrap = StateEffect7.define();
-var softWrapField = StateField5.define({
-  create: () => false,
-  update(value, tr) {
-    for (const effect of tr.effects)
-      if (effect.is(setSoftWrap))
-        return effect.value;
-    return value;
-  },
-  provide: (field) => EditorView8.contentAttributes.compute([field], (state) => state.field(field) ? { class: "cm-lineWrapping" } : {})
-});
-function softWrapOf(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env)
-    return null;
-  const { editor } = env;
-  const language = editor.languageConfig(env.hostFor(view));
-  const base = editor.config.softWrap;
-  const own = language?.softWrap;
-  return {
-    enable: own?.enable ?? base.enable,
-    maxWrap: own?.maxWrap ?? base.maxWrap,
-    maxIndentRetain: own?.maxIndentRetain ?? base.maxIndentRetain,
-    wrapIndicator: own?.wrapIndicator ?? base.wrapIndicator,
-    wrapAtTextWidth: own?.wrapAtTextWidth ?? base.wrapAtTextWidth,
-    textWidth: language?.textWidth ?? editor.config.textWidth
-  };
-}
-var softWrapSync = ViewPlugin5.fromClass(class {
-  view;
-  constructor(view) {
-    this.view = view;
-    this.sync();
-  }
-  update() {
-    this.sync();
-  }
-  sync() {
-    const wanted = softWrapOf(this.view)?.enable ?? false;
-    if (this.view.state.field(softWrapField, false) === wanted)
-      return;
-    queueMicrotask(() => {
-      if (this.view.dom.isConnected && this.view.state.field(softWrapField, false) !== wanted)
-        this.view.dispatch({ effects: setSoftWrap.of(wanted) });
-    });
-  }
-});
-var softWrapStyle = EditorView8.contentAttributes.of((view) => {
-  const wrap = softWrapOf(view);
-  if (!wrap?.enable || !wrap.wrapAtTextWidth)
-    return null;
-  return { style: `max-width: ${wrap.textWidth}ch` };
-});
-var hangingIndent = ViewPlugin5.fromClass(class {
-  decorations;
-  constructor(view) {
-    this.decorations = this.build(view);
-  }
-  update(update) {
-    if (update.docChanged || update.viewportChanged || update.transactions.length > 0)
-      this.decorations = this.build(update.view);
-  }
-  build(view) {
-    const wrap = softWrapOf(view);
-    if (!wrap?.enable)
-      return Decoration2.none;
-    const env = view.state.facet(helixEnv2);
-    const tabWidth = env.editor.indent(env.hostFor(view)).tabWidth;
-    const indicator = [...wrap.wrapIndicator].length;
-    const builder = new RangeSetBuilder2;
-    const doc = view.state.doc;
-    for (const { from, to } of view.visibleRanges) {
-      for (let pos = from;pos <= to; ) {
-        const line = doc.lineAt(pos);
-        const indent = indentColumns(line.text, tabWidth) ?? 0;
-        const hang = (indent <= wrap.maxIndentRetain ? indent : 0) + indicator;
-        if (hang > 0)
-          builder.add(line.from, line.from, Decoration2.line({ attributes: { style: `padding-inline-start: calc(var(--hx-line-padding, 6px) + ${hang}ch); text-indent: -${hang}ch` } }));
-        pos = line.to + 1;
-      }
-    }
-    return builder.finish();
-  }
-}, { decorations: (v) => v.decorations });
-var wrapIndicatorLayer = layer2({
-  above: false,
-  class: "hx-wrap-indicators",
-  update: (update) => update.geometryChanged || update.viewportChanged || update.docChanged,
-  markers(view) {
-    const wrap = softWrapOf(view);
-    if (!wrap?.enable || !wrap.wrapIndicator)
-      return [];
-    const env = view.state.facet(helixEnv2);
-    const tabWidth = env.editor.indent(env.hostFor(view)).tabWidth;
-    const lineHeight = view.defaultLineHeight;
-    const left = contentLeft(view);
-    const markers = [];
-    const paddingTop = view.documentPadding.top;
-    for (const block of view.viewportLineBlocks) {
-      const rows = Math.round(block.height / lineHeight);
-      if (rows <= 1)
-        continue;
-      const line = view.state.doc.lineAt(block.from);
-      const indent = indentColumns(line.text, tabWidth) ?? 0;
-      const retained = indent <= wrap.maxIndentRetain ? indent : 0;
-      for (let row = 1;row < rows; row++) {
-        markers.push(new BoxMarker(view.dom.ownerDocument, "hx-wrap-indicator hx-s-ui-virtual-wrap", left + retained * view.defaultCharacterWidth, paddingTop + block.top + row * lineHeight, [...wrap.wrapIndicator].length * view.defaultCharacterWidth, lineHeight, wrap.wrapIndicator));
-      }
-    }
-    return markers;
-  }
-});
-function helixDecorations2() {
-  return [whitespacePlugin, whitespaceChars, guidesPlugin, rulersLayer, cursorColumnLayer, softWrapField, softWrapSync, softWrapStyle, hangingIndent, wrapIndicatorLayer, decorationTheme];
-}
-var decorationTheme = EditorView8.baseTheme({
-  ".hx-ws": { position: "relative" },
-  ".hx-ws::before": {
-    position: "absolute",
-    left: "0",
-    color: "var(--hx-whitespace, color-mix(in srgb, CanvasText 35%, transparent))",
-    pointerEvents: "none"
-  },
-  ".hx-ws-space::before": { content: "var(--hx-ws-space)" },
-  ".hx-ws-tab::before": { content: "var(--hx-ws-tab)" },
-  ".hx-ws-nbsp::before": { content: "var(--hx-ws-nbsp)" },
-  ".hx-ws-nnbsp::before": { content: "var(--hx-ws-nnbsp)" },
-  ".hx-ws-newline": { display: "inline-block", width: "0", overflow: "visible" },
-  ".hx-ws-newline::before": { content: "var(--hx-ws-newline)", color: "var(--hx-whitespace, color-mix(in srgb, CanvasText 35%, transparent))" },
-  ".hx-indent-guides": { display: "inline-block", width: "0", position: "relative", pointerEvents: "none", textIndent: "0" },
-  ".hx-indent-guide": { position: "absolute", left: "calc(var(--hx-guide-column) * 1ch)", color: "var(--hx-indent-guide, color-mix(in srgb, CanvasText 20%, transparent))" },
-  ".hx-ruler": { position: "absolute", background: "var(--hx-ruler, color-mix(in srgb, CanvasText 6%, transparent))" },
-  ".hx-cursorcolumn": { position: "absolute", background: "var(--hx-cursorcolumn, color-mix(in srgb, CanvasText 5%, transparent))" },
-  ".hx-wrap-indicator": { position: "absolute", whiteSpace: "pre", color: "var(--hx-wrap, color-mix(in srgb, CanvasText 40%, transparent))", pointerEvents: "none" }
-});
-
-// src/ui/diagnostics.ts
-import { RangeSetBuilder as RangeSetBuilder3, StateField as StateField6 } from "@codemirror/state";
-import { Decoration as Decoration3, EditorView as EditorView9, WidgetType as WidgetType3 } from "@codemirror/view";
-var LEVELS = { hint: 0, info: 1, warning: 2, error: 3 };
-function shows(filter, severity) {
-  if (filter === "disable")
-    return false;
-  const level = LEVELS[filter];
-  return level !== undefined && severityRank(severity ?? "hint") >= level;
-}
-
-class MessageWidget extends WidgetType3 {
-  message;
-  severity;
-  block;
-  constructor(message, severity, block) {
-    super();
-    this.message = message;
-    this.severity = severity;
-    this.block = block;
-  }
-  eq(other) {
-    return other.message === this.message && other.severity === this.severity && other.block === this.block;
-  }
-  toDOM(view) {
-    const dom = make(view.dom.ownerDocument, this.block ? "div" : "span", `${this.block ? "hx-inline-diagnostic" : "hx-eol-diagnostic"} ${scopeClass(this.severity)}`);
-    dom.textContent = this.message;
-    return dom;
-  }
-  ignoreEvent() {
-    return true;
-  }
-}
-var underline = new Map;
-function mark(d) {
-  const tags = d.tags ?? [];
-  const cls = [`hx-diagnostic ${scopeClass(`diagnostic.${d.severity ?? "warning"}`)}`, tags.includes("unnecessary") ? scopeClass("diagnostic.unnecessary") : "", tags.includes("deprecated") ? scopeClass("diagnostic.deprecated") : ""].filter(Boolean).join(" ");
-  let deco = underline.get(cls);
-  if (!deco) {
-    deco = Decoration3.mark({ class: cls });
-    underline.set(cls, deco);
-  }
-  return deco;
-}
-function build(state) {
-  const list = diagnosticsOf(state);
-  const env = state.facet(helixEnv2);
-  if (list.length === 0 || !env)
-    return Decoration3.none;
-  const config = env.editor.config;
-  const value = state.field(helixField2, false);
-  const doc = state.doc;
-  const cursorLine = value ? doc.lineAt(value.selection.primary().cursor(doc)).number : -1;
-  const items = [];
-  const perLine = new Map;
-  for (const d of list) {
-    if (d.to > d.from)
-      items.push({ from: d.from, to: d.to, deco: mark(d) });
-    const line = doc.lineAt(d.from).number;
-    const group = perLine.get(line);
-    if (group)
-      group.push(d);
-    else
-      perLine.set(line, [d]);
-  }
-  for (const [lineNumber, group] of perLine) {
-    const line = doc.line(lineNumber);
-    const onCursor = lineNumber === cursorLine;
-    const inline = group.filter((d) => shows(onCursor ? config.inlineDiagnostics.cursorLine : config.inlineDiagnostics.otherLines, d.severity)).slice(0, config.inlineDiagnostics.maxDiagnostics);
-    for (const d of inline)
-      items.push({ from: line.to, to: line.to, deco: Decoration3.widget({ widget: new MessageWidget(d.message, d.severity ?? "warning", true), block: true, side: 1 }) });
-    const eol = group.filter((d) => !inline.includes(d) && shows(config.endOfLineDiagnostics, d.severity));
-    const worst = eol.reduce((best, d) => !best || severityRank(d.severity) > severityRank(best.severity) ? d : best, null);
-    if (worst)
-      items.push({ from: line.to, to: line.to, deco: Decoration3.widget({ widget: new MessageWidget(worst.message.split(`
-`)[0], worst.severity ?? "warning", false), side: 1 }) });
-  }
-  items.sort((a, b) => a.from - b.from || a.deco.startSide - b.deco.startSide || a.to - b.to);
-  const builder = new RangeSetBuilder3;
-  for (const item of items)
-    builder.add(item.from, item.to, item.deco);
-  return builder.finish();
-}
-var decorations = StateField6.define({
-  create: (state) => build(state),
-  update(value, tr) {
-    if (value === Decoration3.none && diagnosticsOf(tr.state).length === 0)
-      return value;
-    return build(tr.state);
-  },
-  provide: (field) => EditorView9.decorations.from(field)
-});
-var theme = EditorView9.baseTheme({
-  ".hx-diagnostic": { textDecorationLine: "underline", textDecorationStyle: "wavy", textDecorationSkipInk: "none" },
-  ".hx-s-diagnostic-error": { textDecorationColor: "var(--hx-error, #d32f2f)" },
-  ".hx-s-diagnostic-warning": { textDecorationColor: "var(--hx-warning, #b58900)" },
-  ".hx-s-diagnostic-info": { textDecorationColor: "var(--hx-info, #268bd2)" },
-  ".hx-s-diagnostic-hint": { textDecorationColor: "var(--hx-hint, #2aa198)" },
-  ".hx-s-diagnostic-unnecessary": { opacity: "0.6", textDecorationLine: "none" },
-  ".hx-s-diagnostic-deprecated": { textDecorationLine: "line-through" },
-  ".hx-inline-diagnostic, .hx-eol-diagnostic": { fontSize: "0.9em", whiteSpace: "pre-wrap" },
-  ".hx-eol-diagnostic": { paddingInlineStart: "2ch", whiteSpace: "pre" },
-  ".hx-inline-diagnostic.hx-s-error, .hx-eol-diagnostic.hx-s-error": { color: "var(--hx-error, #d32f2f)" },
-  ".hx-inline-diagnostic.hx-s-warning, .hx-eol-diagnostic.hx-s-warning": { color: "var(--hx-warning, #b58900)" },
-  ".hx-inline-diagnostic.hx-s-info, .hx-eol-diagnostic.hx-s-info": { color: "var(--hx-info, #268bd2)" },
-  ".hx-inline-diagnostic.hx-s-hint, .hx-eol-diagnostic.hx-s-hint": { color: "var(--hx-hint, #2aa198)" }
-});
-function helixDiagnostics2() {
-  return [decorations, theme];
-}
-
-// src/ui/highlight.ts
-import { RangeSetBuilder as RangeSetBuilder4, StateEffect as StateEffect8 } from "@codemirror/state";
-import { Decoration as Decoration4, EditorView as EditorView10, ViewPlugin as ViewPlugin6 } from "@codemirror/view";
-function syntaxOf2(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env?.editor.syntax)
-    return null;
-  return env.editor.syntax(env.hostFor(view));
-}
-function scopesOf(view) {
-  return view.state.facet(helixEnv2)?.editor.theme?.scopes ?? DEFAULT_SCOPES;
-}
-var marks = new Map;
-function mark2(cls) {
-  let deco = marks.get(cls);
-  if (!deco) {
-    deco = Decoration4.mark({ class: cls, inclusive: true });
-    marks.set(cls, deco);
-  }
-  return deco;
-}
-function build2(view, syntax) {
+function helixHighlights2(view, from, to, scopes = DEFAULT_SCOPES) {
+  const found = parts(view);
+  const syntax = found?.editor.syntax?.(found.host);
   if (!syntax)
-    return Decoration4.none;
-  const scopes = scopesOf(view);
-  const builder = new RangeSetBuilder4;
-  for (const { from, to } of view.visibleRanges) {
-    for (const span of highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to))) {
-      const start = syntax.posOf(span.from);
-      const end = syntax.posOf(span.to);
-      if (end > start)
-        builder.add(start, end, mark2(span.scopes.map((h) => scopeClass(scopes[h])).join(" ")));
-    }
+    return [];
+  return highlightSpans(syntax, scopes, syntax.byteOf(from), syntax.byteOf(to)).map((span) => ({
+    from: syntax.posOf(span.from),
+    to: syntax.posOf(span.to),
+    scopes: span.scopes.map((h) => scopes[h])
+  }));
+}
+function helixRainbow2(view, from, to, levels = 6) {
+  const found = parts(view);
+  const syntax = found?.editor.syntax?.(found.host);
+  if (!syntax)
+    return [];
+  return rainbowSpans(syntax, levels, syntax.byteOf(from), syntax.byteOf(to)).map((span) => ({
+    from: syntax.posOf(span.from),
+    to: syntax.posOf(span.to),
+    level: span.highlight
+  }));
+}
+function helixGutter2(view, fromLine, toLine) {
+  const found = parts(view);
+  const value = view.state.field(helixField2, false);
+  if (!found || !value)
+    return [];
+  const doc = view.state.doc;
+  const cursorLines = new Set(value.selection.ranges.map((r) => doc.lineAt(r.cursor(doc)).number));
+  const primary = doc.lineAt(value.selection.primary().cursor(doc)).number;
+  const relative = found.editor.config.lineNumber === "relative" && value.mode !== "insert" && view.hasFocus;
+  const severities = new Map;
+  for (const d of diagnosticsOf(view.state)) {
+    const line = doc.lineAt(d.from).number;
+    const severity = d.severity ?? "warning";
+    const known = severities.get(line);
+    if (!known || severityRank(severity) >= severityRank(known))
+      severities.set(line, severity);
   }
-  return builder.finish();
-}
-var LARGE_DOCUMENT = 1e5;
-var refresh = StateEffect8.define();
-function syntaxPlugin(buildFor, key) {
-  return ViewPlugin6.fromClass(class {
-    view;
-    decorations;
-    syntax;
-    key;
-    timer = null;
-    constructor(view) {
-      this.view = view;
-      this.syntax = syntaxOf2(view);
-      this.key = key(view);
-      this.decorations = buildFor(view, this.syntax);
-    }
-    update(update) {
-      const refreshed = update.transactions.some((tr) => tr.effects.some((e) => e.is(refresh)));
-      if (update.docChanged && !refreshed && update.state.doc.length > LARGE_DOCUMENT) {
-        this.decorations = this.decorations.map(update.changes);
-        this.schedule(update.view);
-        return;
-      }
-      if (this.timer !== null && !refreshed)
-        return;
-      const syntax = syntaxOf2(update.view);
-      const current = key(update.view);
-      if (update.docChanged || update.viewportChanged || refreshed || syntax !== this.syntax || current !== this.key) {
-        this.syntax = syntax;
-        this.key = current;
-        this.decorations = buildFor(update.view, syntax);
-      }
-    }
-    schedule(view) {
-      const win = view.dom.ownerDocument.defaultView;
-      if (!win)
-        return;
-      if (this.timer !== null)
-        win.clearTimeout(this.timer);
-      this.timer = win.setTimeout(() => {
-        this.timer = null;
-        if (view.dom.isConnected)
-          view.dispatch({ effects: refresh.of(null) });
-      }, 120);
-    }
-    destroy() {
-      if (this.timer !== null)
-        this.view.dom.ownerDocument.defaultView?.clearTimeout(this.timer);
-    }
-  }, { decorations: (v) => v.decorations });
-}
-var highlightPlugin = syntaxPlugin(build2, scopesOf);
-function rainbowEnabled(view) {
-  const env = view.state.facet(helixEnv2);
-  if (!env)
-    return false;
-  const language = env.editor.languageConfig(env.hostFor(view));
-  return language?.rainbowBrackets ?? env.editor.config.rainbowBrackets;
-}
-function buildRainbow(view, syntax) {
-  if (!syntax || !rainbowEnabled(view))
-    return Decoration4.none;
-  const length = view.state.facet(helixEnv2)?.editor.theme?.rainbowLength ?? 6;
-  const decorations = [];
-  for (const { from, to } of view.visibleRanges) {
-    for (const span of rainbowSpans(syntax, length, syntax.byteOf(from), syntax.byteOf(to))) {
-      const start = syntax.posOf(span.from);
-      const end = syntax.posOf(span.to);
-      if (end > start)
-        decorations.push({ from: start, to: end, value: mark2(scopeClass(`rainbow.${span.highlight}`)) });
-    }
-  }
-  decorations.sort((a, b) => a.from - b.from || a.to - b.to);
-  return Decoration4.set(decorations.map((d) => d.value.range(d.from, d.to)));
-}
-var rainbowPlugin = syntaxPlugin(buildRainbow, rainbowEnabled);
-var syntaxTheme = EditorView10.baseTheme({
-  ".hx-s-attribute": { color: "light-dark(#7c5e10, #d7ba7d)" },
-  ".hx-s-keyword": { color: "light-dark(#7a3e9d, #c586c0)" },
-  ".hx-s-keyword-control": { color: "light-dark(#7a3e9d, #c586c0)" },
-  ".hx-s-operator": { color: "light-dark(#5f6368, #b0b0b0)" },
-  ".hx-s-string": { color: "light-dark(#2a7f3f, #9ece6a)" },
-  ".hx-s-comment": { color: "light-dark(#6e7781, #7f8c98)", fontStyle: "italic" },
-  ".hx-s-function": { color: "light-dark(#1f5fbf, #7aa2f7)" },
-  ".hx-s-function-macro": { color: "light-dark(#a0522d, #e0af68)" },
-  ".hx-s-type": { color: "light-dark(#00708a, #4ec9b0)" },
-  ".hx-s-constructor": { color: "light-dark(#00708a, #4ec9b0)" },
-  ".hx-s-constant": { color: "light-dark(#a0522d, #ff9e64)" },
-  ".hx-s-constant-numeric": { color: "light-dark(#a0522d, #ff9e64)" },
-  ".hx-s-variable-builtin": { color: "light-dark(#a0522d, #ff9e64)" },
-  ".hx-s-variable-parameter": { color: "light-dark(#8a4b08, #e0c090)" },
-  ".hx-s-tag": { color: "light-dark(#b0301e, #f7768e)" },
-  ".hx-s-namespace": { color: "light-dark(#00708a, #4ec9b0)" },
-  ".hx-s-label": { color: "light-dark(#a0522d, #e0af68)" },
-  ".hx-s-special": { color: "light-dark(#b0301e, #f7768e)" },
-  ".hx-s-markup-heading": { fontWeight: "bold" },
-  ".hx-s-markup-bold": { fontWeight: "bold" },
-  ".hx-s-markup-italic": { fontStyle: "italic" },
-  ".hx-s-markup-strikethrough": { textDecoration: "line-through" },
-  ".hx-s-markup-link-url": { textDecoration: "underline" },
-  ".hx-s-markup-link-text": { color: "light-dark(#1f5fbf, #7aa2f7)" },
-  ".hx-s-markup-raw": { color: "light-dark(#2a7f3f, #9ece6a)" },
-  ".hx-s-markup-quote": { color: "light-dark(#6e7781, #7f8c98)" },
-  ".hx-s-rainbow-0": { color: "#cd3131" },
-  ".hx-s-rainbow-1": { color: "#b58900" },
-  ".hx-s-rainbow-2": { color: "#0dbc79" },
-  ".hx-s-rainbow-3": { color: "#2472c8" },
-  ".hx-s-rainbow-4": { color: "#11a8cd" },
-  ".hx-s-rainbow-5": { color: "#bc3fbc" }
-});
-function helixHighlighting2() {
-  return [highlightPlugin, rainbowPlugin, syntaxTheme];
-}
-
-// src/ui/overlay.ts
-import { EditorView as EditorView11, ViewPlugin as ViewPlugin7 } from "@codemirror/view";
-var overlayPlugin = ViewPlugin7.fromClass(class {
-  view;
-  dom;
-  frame = null;
-  unsubscribe;
-  constructor(view) {
-    this.view = view;
-    this.dom = make(view.dom.ownerDocument, "div", "hx-overlays");
-    view.dom.appendChild(this.dom);
-    const env = view.state.facet(helixEnv2);
-    this.unsubscribe = env?.editor.onLayersChanged(() => this.schedule()) ?? (() => {});
-    this.schedule();
-  }
-  update() {
-    this.schedule();
-  }
-  schedule() {
-    if (this.frame !== null)
-      return;
-    this.frame = 0;
-    this.view.requestMeasure({
-      read: () => this.anchors(),
-      write: (anchors) => {
-        this.frame = null;
-        this.draw(anchors);
-      }
+  const { hunks } = changesOf2(view.state);
+  const out = [];
+  for (let line = Math.max(1, fromLine);line <= Math.min(doc.lines, toLine); line++) {
+    const index = line - 1;
+    const hunk = hunks.find((h) => h.afterStart === h.afterEnd ? h.afterStart === index : h.afterStart <= index && index < h.afterEnd);
+    out.push({
+      line,
+      number: relative && line !== primary ? Math.abs(primary - line) : line,
+      selected: cursorLines.has(line),
+      diagnostic: severities.get(line) ?? null,
+      change: !hunk ? null : hunk.beforeStart === hunk.beforeEnd ? "added" : hunk.afterStart === hunk.afterEnd ? "removed" : "changed"
     });
   }
-  anchors() {
-    const anchors = new Map;
-    const env = this.view.state.facet(helixEnv2);
-    if (!env)
-      return anchors;
-    const parent = this.view.dom.getBoundingClientRect();
-    for (const layer of env.editor.layers) {
-      if (layer.anchored === null || layer.anchored === undefined)
-        continue;
-      const coords = this.view.coordsAtPos(Math.min(layer.anchored, this.view.state.doc.length), 1);
-      if (coords)
-        anchors.set(layer, { left: coords.left - parent.left, top: coords.bottom - parent.top, bottom: parent.bottom - coords.top, above: coords.bottom - parent.top > parent.height * 0.6 });
-    }
-    return anchors;
-  }
-  draw(anchors) {
-    const env = this.view.state.facet(helixEnv2);
-    const dom = this.dom;
-    dom.replaceChildren();
-    if (!env || !this.view.hasFocus)
-      return;
-    for (const layer of env.editor.layers) {
-      const box = add(dom, "div", `hx-layer ${layer.className ?? ""}`);
-      const anchor = anchors.get(layer);
-      if (anchor) {
-        box.style.setProperty("--hx-anchor-left", `${anchor.left}px`);
-        box.style.setProperty("--hx-anchor-top", `${anchor.top}px`);
-        box.style.setProperty("--hx-anchor-bottom", `${anchor.bottom}px`);
-        box.classList.add(anchor.above ? "hx-layer-above" : "hx-layer-below");
-      }
-      layer.render(box, this.view);
-    }
-  }
-  destroy() {
-    this.unsubscribe();
-    this.dom.remove();
-  }
-});
-var overlayTheme = EditorView11.baseTheme({
-  ".hx-overlays": { position: "absolute", inset: "0", pointerEvents: "none", zIndex: "300", fontFamily: "var(--hx-panel-font, monospace)", fontSize: "var(--hx-panel-font-size, 0.85em)" },
-  ".hx-layer": { pointerEvents: "auto" },
-  ".hx-picker": {
-    position: "absolute",
-    inset: "5%",
-    display: "flex",
-    gap: "1px",
-    background: "var(--hx-border, color-mix(in srgb, CanvasText 20%, Canvas))",
-    border: "1px solid var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))",
-    borderRadius: "var(--hx-radius, 4px)",
-    overflow: "hidden",
-    boxShadow: "var(--hx-shadow, 0 4px 16px rgb(0 0 0 / 0.2))"
-  },
-  ".hx-picker-list, .hx-picker-preview": { flex: "1 1 50%", minWidth: "0", display: "flex", flexDirection: "column", background: "var(--hx-bg, Canvas)", color: "var(--hx-fg, CanvasText)" },
-  ".hx-picker-prompt": { display: "flex", padding: "3px 8px", whiteSpace: "pre", borderBottom: "1px solid var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))" },
-  ".hx-picker-count": { marginLeft: "auto", paddingLeft: "1em", color: "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))" },
-  ".hx-picker-rows": { display: "grid", gridTemplateColumns: "var(--hx-picker-columns, 1fr)", alignContent: "start", overflow: "auto", flex: "1", columnGap: "1.5em", padding: "2px 0" },
-  ".hx-picker-row": { display: "contents" },
-  ".hx-picker-cell": { whiteSpace: "pre", overflow: "hidden", textOverflow: "ellipsis", padding: "0 8px" },
-  ".hx-picker-header .hx-picker-cell": { fontWeight: "600", color: "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))" },
-  ".hx-picker-selected .hx-picker-cell": { background: "var(--hx-hover, color-mix(in srgb, CanvasText 10%, transparent))" },
-  ".hx-picker-hit": { fontWeight: "bold", color: "var(--hx-accent, LinkText)" },
-  ".hx-picker-preview-body": { overflow: "auto", flex: "1", padding: "2px 8px", whiteSpace: "pre" },
-  ".hx-picker-focus": { background: "var(--hx-hover, color-mix(in srgb, CanvasText 10%, transparent))" },
-  ".hx-picker-note": { padding: "2px 8px", color: "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))" },
-  ".hx-popup, .hx-menu": { position: "absolute", left: "var(--hx-anchor-left, 0)", maxWidth: "min(80ch, 80%)", display: "flex", gap: "1px", alignItems: "flex-start" },
-  ".hx-layer-below": { top: "var(--hx-anchor-top, 0)" },
-  ".hx-layer-above": { bottom: "var(--hx-anchor-bottom, 0)" },
-  ".hx-popup-body, .hx-menu-list, .hx-menu-doc": {
-    background: "var(--hx-popup-bg, var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas)))",
-    color: "var(--hx-popup-fg, inherit)",
-    border: "1px solid var(--hx-border, color-mix(in srgb, CanvasText 20%, transparent))",
-    borderRadius: "var(--hx-radius, 4px)",
-    boxShadow: "var(--hx-shadow, 0 2px 8px rgb(0 0 0 / 0.15))",
-    maxHeight: "16em",
-    overflow: "auto"
-  },
-  ".hx-popup-body, .hx-menu-doc": { padding: "4px 8px", maxWidth: "60ch" },
-  ".hx-menu-list": { minWidth: "16ch", whiteSpace: "pre" },
-  ".hx-menu-row": { display: "flex", gap: "2em", justifyContent: "space-between", padding: "0 8px" },
-  ".hx-menu-selected": { background: "var(--hx-menu-selected-bg, var(--hx-hover, color-mix(in srgb, CanvasText 12%, transparent)))", color: "var(--hx-menu-selected-fg, inherit)" },
-  ".hx-menu-detail": { color: "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))" },
-  ".hx-md-code": { margin: "0.25em 0", whiteSpace: "pre-wrap" },
-  ".hx-md-heading": { fontWeight: "bold" },
-  ".hx-md-gap": { height: "0.5em" },
-  ".cm-editor": { position: "relative" }
-});
-function helixOverlays2() {
-  return [overlayPlugin, overlayTheme];
+  return out;
 }
 
-// src/ui/statusline.ts
-import { Prec as Prec3 } from "@codemirror/state";
-import { EditorView as EditorView12, showPanel as showPanel3 } from "@codemirror/view";
-var SCRATCH = "[scratch]";
-function counts(severities, list) {
-  const totals = { hint: 0, info: 0, warning: 0, error: 0 };
-  for (const d of list)
-    totals[d.severity ?? "hint"] = (totals[d.severity ?? "hint"] ?? 0) + 1;
-  const parts = [];
-  for (const severity of severities) {
-    const n = totals[severity] ?? 0;
-    if (n > 0)
-      parts.push({ text: "●", scope: severity }, { text: ` ${n} `, scope: null });
-  }
-  return parts;
-}
-function statuslineElement(name, editor, host, focused) {
-  const value = host.state.field(helixField2);
-  const doc = host.state.doc;
-  const sl = editor.config.statusline;
-  const cursor = value.selection.primary().cursor(doc);
-  const plain = (text) => [{ text, scope: null }];
-  const path = host.path ?? null;
-  switch (name) {
-    case "mode": {
-      const mode = value.mode === "insert" ? sl.modeInsert : value.mode === "select" ? sl.modeSelect : sl.modeNormal;
-      if (!focused)
-        return plain(" ".repeat([...mode].length + 2));
-      return [{ text: ` ${mode} `, scope: editor.config.colorModes ? `ui.statusline.${value.mode}` : null }];
-    }
-    case "spinner":
-      return plain(editor.busyFrame() ?? " ");
-    case "file-name":
-      return plain(` ${host.name} `);
-    case "file-absolute-path":
-      return plain(` ${path ?? SCRATCH} `);
-    case "file-base-name": {
-      const name_ = path ?? host.name;
-      return plain(` ${name_.slice(name_.lastIndexOf("/") + 1)} `);
-    }
-    case "file-modification-indicator":
-      return plain(editor.isModified(host) ? "[+]" : "   ");
-    case "read-only-indicator":
-      return plain(host.state.readOnly ? " [readonly] " : "");
-    case "file-encoding":
-      return [];
-    case "file-line-ending":
-      return plain(" LF ");
-    case "file-indent-style": {
-      const style = editor.indent(host).style;
-      return plain(style.kind === "tabs" ? " tabs " : ` ${style.width} space${style.width === 1 ? "" : "s"} `);
-    }
-    case "file-type":
-      return plain(` ${editor.languageName(host) ?? "text"} `);
-    case "diagnostics":
-      return counts(sl.diagnostics, diagnosticsOf(host.state));
-    case "workspace-diagnostics": {
-      const parts = counts(sl.workspaceDiagnostics, editor.workspaceDiagnostics(host));
-      return parts.length > 0 ? [{ text: " W ", scope: null }, ...parts] : [];
-    }
-    case "selections": {
-      const n = value.selection.ranges.length;
-      return plain(n === 1 ? " 1 sel " : ` ${value.selection.primaryIndex + 1}/${n} sels `);
-    }
-    case "primary-selection-length": {
-      const r = value.selection.primary();
-      const chars = [...doc.sliceString(r.from(), r.to())].length;
-      return plain(` ${chars} char${chars === 1 ? "" : "s"} `);
-    }
-    case "position": {
-      const line = doc.lineAt(cursor);
-      let col = 1;
-      for (let pos = line.from;pos < cursor; pos = nextGraphemeBoundary2(doc, pos))
-        col++;
-      return plain(` ${line.number}:${col} `);
-    }
-    case "position-percentage":
-      return plain(`${Math.floor(doc.lineAt(cursor).number * 100 / doc.lines)}%`);
-    case "total-line-numbers":
-      return plain(` ${doc.lines} `);
-    case "separator":
-      return [{ text: sl.separator, scope: "ui.statusline.separator" }];
-    case "spacer":
-      return plain(" ");
-    case "version-control":
-      return plain(editor.versionControlHead(host));
-    case "register":
-      return focused && editor.selectedRegister ? plain(` reg=${editor.selectedRegister} `) : [];
-    case "current-working-directory":
-      return plain(editor.workingDirectory(host));
-    case "code-action-hint":
-      return [];
-    default:
-      return [];
-  }
-}
-function statuslineOf2(editor, host, focused) {
-  const sl = editor.config.statusline;
-  const group = (names) => names.flatMap((name) => statuslineElement(name, editor, host, focused));
-  return { left: group(sl.left), center: group(sl.center), right: group(sl.right) };
-}
-function renderGroup(parent, cls, parts) {
-  const box = add(parent, "span", cls);
-  for (const part of parts)
-    add(box, "span", part.scope ? scopeClass(part.scope) : undefined, part.text);
-}
-function helixStatusline2() {
-  const panel = showPanel3.of((view) => {
-    const dom = make(view.dom.ownerDocument, "div", "hx-statusline");
-    let last = "";
-    const render = () => {
-      const env = view.state.facet(helixEnv2);
-      if (!env)
-        return;
-      const host = env.hostFor(view);
-      if (!host.state.field(helixField2, false))
-        return;
-      const focused = view.hasFocus;
-      const line = statuslineOf2(env.editor, host, focused);
-      const pending = focused ? (env.editor.count !== null ? String(env.editor.count) : "") + env.editor.pendingDisplay() : "";
-      const macro = env.editor.macroRecording ? `[${env.editor.macroRecording.register}]` : "";
-      const key = JSON.stringify([line, pending, macro, focused]);
-      if (key === last)
-        return;
-      last = key;
-      dom.replaceChildren();
-      dom.classList.toggle("hx-statusline-inactive", !focused);
-      renderGroup(dom, "hx-statusline-left", line.left);
-      renderGroup(dom, "hx-statusline-center", line.center);
-      const right = add(dom, "span", "hx-statusline-right");
-      if (macro)
-        add(right, "span", "hx-statusline-macro", macro);
-      if (pending)
-        add(right, "span", "hx-statusline-pending", pending);
-      for (const part of line.right)
-        add(right, "span", part.scope ? scopeClass(part.scope) : undefined, part.text);
-    };
-    render();
-    return { dom, top: false, update: render };
-  });
-  return Prec3.high(panel);
-}
-var statuslineTheme = EditorView12.baseTheme({
-  ".hx-statusline": {
-    display: "grid",
-    gridTemplateColumns: "1fr auto 1fr",
-    whiteSpace: "pre",
-    fontFamily: "var(--hx-panel-font, monospace)",
-    fontSize: "var(--hx-panel-font-size, 0.85em)",
-    background: "var(--hx-statusline-bg, color-mix(in srgb, CanvasText 8%, Canvas))",
-    color: "var(--hx-statusline-fg, CanvasText)",
-    overflow: "hidden"
-  },
-  ".hx-statusline-inactive": { background: "var(--hx-statusline-inactive-bg, color-mix(in srgb, CanvasText 4%, Canvas))", color: "var(--hx-statusline-inactive-fg, CanvasText)" },
-  ".hx-statusline-right": { justifySelf: "end" },
-  ".hx-statusline-pending, .hx-statusline-macro": { padding: "0 0.5em" },
-  ".hx-statusline .hx-s-ui-statusline-normal": { fontWeight: "600" },
-  ".hx-statusline .hx-s-ui-statusline-insert": { fontWeight: "600" },
-  ".hx-statusline .hx-s-ui-statusline-select": { fontWeight: "600" },
-  ".hx-statusline .hx-s-error": { color: "var(--hx-error, #d32f2f)" },
-  ".hx-statusline .hx-s-warning": { color: "var(--hx-warning, #b58900)" },
-  ".hx-statusline .hx-s-info": { color: "var(--hx-info, #268bd2)" },
-  ".hx-statusline .hx-s-hint": { color: "var(--hx-hint, #2aa198)" }
-});
-
-// src/ui/themes.ts
-import { EditorView as EditorView13, ViewPlugin as ViewPlugin8 } from "@codemirror/view";
-var UI_SCOPES = [
-  "ui.linenr",
-  "ui.linenr.selected",
-  "ui.statusline.normal",
-  "ui.statusline.insert",
-  "ui.statusline.select",
-  "ui.statusline.separator",
-  "ui.virtual.whitespace",
-  "ui.virtual.indent-guide",
-  "ui.virtual.ruler",
-  "ui.virtual.wrap",
-  "ui.virtual.jump-label",
-  "ui.virtual.inlay-hint",
-  "ui.cursorcolumn.primary",
-  "ui.cursorcolumn.secondary",
-  "ui.popup",
-  "ui.popup.info",
-  "ui.window",
-  "ui.help",
-  "ui.menu",
-  "ui.menu.selected",
-  "ui.menu.scroll",
-  "ui.text",
-  "ui.text.focus",
-  "ui.text.inactive",
-  "ui.text.info",
-  "ui.text.directory",
-  "ui.picker.header",
-  "ui.picker.header.column",
-  "ui.picker.header.column.active",
-  "ui.highlight",
-  "ui.bufferline",
-  "ui.bufferline.active",
-  "ui.bufferline.background",
-  "error",
-  "warning",
-  "info",
-  "hint",
-  "diagnostic",
-  "diagnostic.hint",
-  "diagnostic.info",
-  "diagnostic.warning",
-  "diagnostic.error",
-  "diagnostic.unnecessary",
-  "diagnostic.deprecated",
-  "diff.plus.gutter",
-  "diff.minus.gutter",
-  "diff.delta.gutter",
-  "markup.heading",
-  "markup.raw.inline"
-];
-function variables(theme) {
-  const get = (scope) => themeStyle(theme, scope);
-  const out = [];
-  const set = (name, value) => {
-    if (value)
-      out.push(`--hx-${name}: ${value}`);
-  };
-  const background = get("ui.background");
-  const text = get("ui.text");
-  set("bg", background?.bg);
-  set("fg", text?.fg ?? background?.fg);
-  set("selection", get("ui.selection")?.bg);
-  set("selection-primary", get("ui.selection.primary")?.bg);
-  set("cursor-bg", get("ui.cursor")?.bg);
-  set("cursor-fg", get("ui.cursor")?.fg);
-  set("cursor-primary-bg", get("ui.cursor.primary")?.bg);
-  set("cursor-primary-fg", get("ui.cursor.primary")?.fg);
-  set("cursorline", get("ui.cursorline.primary")?.bg ?? get("ui.cursorline")?.bg);
-  set("panel", get("ui.popup")?.bg ?? get("ui.statusline")?.bg);
-  set("border", get("ui.window")?.fg ?? get("ui.popup")?.fg);
-  set("muted", get("ui.text.inactive")?.fg);
-  set("error", get("error")?.fg);
-  set("warning", get("warning")?.fg);
-  set("info", get("info")?.fg);
-  set("hint", get("hint")?.fg);
-  set("linenr", get("ui.linenr")?.fg);
-  set("linenr-selected", get("ui.linenr.selected")?.fg);
-  set("statusline-bg", get("ui.statusline")?.bg);
-  set("statusline-fg", get("ui.statusline")?.fg);
-  set("statusline-inactive-bg", get("ui.statusline.inactive")?.bg);
-  set("statusline-inactive-fg", get("ui.statusline.inactive")?.fg);
-  set("whitespace", get("ui.virtual.whitespace")?.fg);
-  set("indent-guide", (get("ui.virtual.indent-guide") ?? get("ui.virtual.whitespace"))?.fg);
-  set("ruler", get("ui.virtual.ruler")?.bg);
-  set("cursorcolumn", get("ui.cursorcolumn.primary")?.bg ?? get("ui.cursorcolumn")?.bg);
-  set("wrap", get("ui.virtual.wrap")?.fg);
-  set("menu-bg", get("ui.menu")?.bg);
-  set("menu-fg", get("ui.menu")?.fg);
-  set("menu-selected-bg", get("ui.menu.selected")?.bg);
-  set("menu-selected-fg", get("ui.menu.selected")?.fg);
-  set("popup-bg", get("ui.popup")?.bg);
-  set("popup-fg", get("ui.popup")?.fg);
-  set("help-bg", get("ui.help")?.bg);
-  set("help-fg", get("ui.help")?.fg);
-  set("diff-plus", get("diff.plus.gutter")?.fg);
-  set("diff-minus", get("diff.minus.gutter")?.fg);
-  set("diff-delta", get("diff.delta.gutter")?.fg);
-  return out.join("; ");
-}
-function themeCss(theme, root) {
-  const rules = [];
-  rules.push(`.${root}.cm-editor { ${variables(theme)}; background-color: var(--hx-bg, inherit); color: var(--hx-fg, inherit) }`);
-  rules.push(`.${root} .cm-gutters { background-color: var(--hx-bg, inherit); border: none }`);
-  rules.push(`.${root} .cm-content { caret-color: var(--hx-fg, inherit) }`);
-  for (const scope of theme.scopes) {
-    if (scope.startsWith("ui."))
-      continue;
-    const css = styleCss(theme.styles.get(scope));
-    if (css)
-      rules.push(`.${root} .${scopeClass(scope)} { ${css} }`);
-  }
-  for (const scope of UI_SCOPES) {
-    const style = themeStyle(theme, scope);
-    if (!style)
-      continue;
-    const css = styleCss(style);
-    if (css)
-      rules.push(`.${root} .${scopeClass(scope)} { ${css} }`);
-  }
-  return rules.join(`
-`);
-}
-var ids = new WeakMap;
-var nextId = 0;
-function classOf(theme, doc) {
-  let id = ids.get(theme);
-  if (!id) {
-    id = `hx-theme-${++nextId}`;
-    ids.set(theme, id);
-  }
-  if (!doc.getElementById(id)) {
-    const style = doc.createElement("style");
-    style.id = id;
-    style.textContent = themeCss(theme, id);
-    doc.head.appendChild(style);
-  }
-  return id;
-}
-function setEditorThemes(editor, options) {
-  const load = (name) => options.themes?.[name] ?? options.load?.(name) ?? null;
-  editor.themes = {
-    names: () => options.names?.() ?? Object.keys(options.themes ?? {}),
-    load: (name) => {
-      const text = load(name);
-      return text === null ? null : parseTheme2(name, text, load);
-    }
-  };
-  if (options.theme) {
-    const theme = editor.themes.load(options.theme);
-    if (theme)
-      editor.theme = theme;
-  }
-}
-function helixThemes2(options = {}) {
-  return [
-    ViewPlugin8.fromClass(class {
-      constructor(view) {
-        const editor = view.state.facet(helixEnv2)?.editor;
-        if (editor && !editor.themes)
-          setEditorThemes(editor, options);
-      }
-    }),
-    EditorView13.editorAttributes.of((view) => {
-      const theme = view.state.facet(helixEnv2)?.editor.theme;
-      return theme ? { class: classOf(theme, view.dom.ownerDocument) } : null;
-    })
-  ];
-}
-
-// src/ui/index.ts
-function helixGutters2(layout = ["diagnostics", "spacer", "line-numbers", "spacer", "diff"]) {
-  return [gutterExtension(layout), gutterTheme];
-}
-function helixUi2(options = {}) {
-  return [
-    helixThemes2(options),
-    helixHighlighting2(),
-    helixDecorations2(),
-    helixOverlays2(),
-    helixCompletion2(),
-    helixDiagnostics2(),
-    helixDiff2(),
-    options.gutters === false ? [] : helixGutters2(options.gutters),
-    options.statusline === false ? [] : [helixStatusline2(), statuslineTheme],
-    options.bufferline === false ? [] : helixBufferline2()
-  ];
-}
-
-export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setDiagnostics2, diagnosticsField2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, Popup2, Menu2, helixCompletion2, parseTheme2, helixSetDiffBase2, helixDiff2, Picker2, Context2, HelixEditor2, loadConfig2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, FuzzyPattern2, Matcher2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, onHelixStatus2, statusOf2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixBufferline2, helixDecorations2, helixDiagnostics2, helixHighlighting2, helixOverlays2, statuslineOf2, helixStatusline2, helixThemes2, helixGutters2, helixUi2 };
+export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };

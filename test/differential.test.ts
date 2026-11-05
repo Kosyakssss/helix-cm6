@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { highlightSpans, rainbowSpans } from "../src/syntax/highlight";
 import { Syntax } from "../src/syntax/syntax";
-import { parseTheme } from "../src/ui/theme";
+import { parse } from "smol-toml";
 import { oracleAsync } from "./oracle/oracle";
 import { highlightSuite } from "./oracle/suites";
 import { highlightLoader, loadLayers } from "./harness";
@@ -40,7 +40,9 @@ test("code suite matches Helix with each language's grammar and queries", async 
 }, 1_800_000);
 
 test("syntax highlighting matches Helix", async () => {
-  const scopes = parseTheme("default", readFileSync(resolve(process.env.HELIX_DIR ?? resolve(import.meta.dir, "../../helix"), "theme.toml"), "utf8")).scopes;
+  const theme = parse(readFileSync(resolve(process.env.HELIX_DIR ?? resolve(import.meta.dir, "../../helix"), "theme.toml"), "utf8"));
+  const rainbow = Array.isArray(theme.rainbow) ? theme.rainbow.length : 6;
+  const scopes = [...Array.from({ length: rainbow }, (_, i) => `rainbow.${i}`), ...Object.keys(theme).filter((key) => key !== "palette" && key !== "inherits" && key !== "rainbow")];
   const cases = highlightSuite(scopes);
   const results = await oracleAsync(cases);
   const loader = await highlightLoader();

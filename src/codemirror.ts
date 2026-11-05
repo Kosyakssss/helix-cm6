@@ -1,11 +1,12 @@
 import { Facet, type Extension, type TransactionSpec } from "@codemirror/state";
 import { EditorView, drawSelection } from "@codemirror/view";
-import { Context, HelixEditor, type Workspace } from "./core/editor";
+import { Context, HelixEditor } from "./core/editor";
+import type { AppCommand, AppCommandInfo, HelixApp } from "./commands/app";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
 import { loadConfig } from "./config-loader";
 import { executeCommand, runTypable } from "./commands";
-import { buildKeymaps } from "./keymap";
+import { buildKeymaps, type KeyLayer } from "./keymap";
 import { Registers } from "./registers";
 import type { SyntaxSessions } from "./syntax/languages";
 import type { LanguageId } from "./syntax/injections";
@@ -16,7 +17,7 @@ import { onHelixStatus, statusOf, type HelixStatus } from "./view/status";
 import { nativeSelectionTheme } from "./view/theme";
 import { helixExtension, uiRefresher } from "./view/view";
 import { makeViewOps } from "./view/viewops";
-import { loadMatcher, loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
+import { loadRegex, wasmBytes, type WasmBytes, type WasmSource } from "./view/wasm";
 
 export interface GrammarSource {
   grammar(name: string): WasmBytes | null | Promise<WasmBytes | null>;
@@ -30,8 +31,11 @@ export interface HelixOptions {
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
-  workspace?: Workspace;
-  matcher?: WasmSource;
+  commands?: Record<string, AppCommand | AppCommandInfo> | ((name: string) => AppCommand | AppCommandInfo | null);
+  keys?: KeyLayer;
+  openJump?: HelixApp["openJump"];
+  variable?: HelixApp["variable"];
+  panel?: boolean;
 }
 
 export interface HelixDocument {
@@ -69,6 +73,10 @@ export function helixKeys(view: EditorView, keys: string): boolean {
 
 const hostOf = new WeakMap<EditorView, Host>();
 
+export function helixHost(view: EditorView): Host | null {
+  return hostOf.get(view) ?? null;
+}
+
 export const helixEditor = Facet.define<HelixEditor, HelixEditor | null>({ combine: (values) => values[0] ?? null });
 
 export const helixDocument = Facet.define<HelixDocument, HelixDocument>({
@@ -94,12 +102,19 @@ function detectLanguage(loader: LanguageLoader, view: EditorView): LanguageId | 
 }
 
 export function helix(options: HelixOptions = {}): Extension {
-  const loaded = loadConfig(options.config ?? null);
+  const commands = options.commands;
+  const lookup = (name: string): AppCommand | AppCommandInfo | null => (typeof commands === "function" ? commands(name) : (commands?.[name] ?? null));
+  const loaded = loadConfig(options.config ?? null, undefined, (name) => lookup(name) !== null);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
-  editor.workspace = options.workspace ?? null;
-  editor.matcherLoader = () => loadMatcher(options.matcher);
+  editor.app = {
+    command: lookup,
+    commandNames: () => (typeof commands === "object" ? Object.keys(commands) : []),
+    openJump: options.openJump,
+    variable: options.variable,
+  };
+  editor.keymaps = buildKeymaps(loaded.keys, { app: options.keys, available: (name) => editor.hasCommand(name) });
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);
@@ -178,9 +193,6 @@ export function helix(options: HelixOptions = {}): Extension {
       .catch(() => editor.setError("the syntax tree failed to load"));
   };
 
-  editor.onThemeChanged = () => {
-    for (const open of views) open.dispatch({});
-  };
   let active: EditorView | null = null;
   const refresh = uiRefresher(editor);
   const rerender = () => {
@@ -219,6 +231,7 @@ export function helix(options: HelixOptions = {}): Extension {
     hostFor,
     insertKeysHelix: () => true,
     physicalKeys: () => false,
+    noPanel: options.panel === false,
     suggestTakes: () => false,
     onFocusChange: (view) => {
       active = view;
