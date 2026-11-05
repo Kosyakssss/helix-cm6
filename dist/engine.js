@@ -1,5 +1,5 @@
 import {
-  helixHooks2,
+  hostHooks2,
   parseKey2,
   formatKey2,
   parseMacro2,
@@ -65,7 +65,7 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-h55c6tcr.js";
+} from "./chunk-0fvx8rg7.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -185,10 +185,10 @@ export {
   helixEnv2 as helixEnv,
   helixExtension2 as helixExtension,
   helixField2 as helixField,
-  helixHooks2 as helixHooks,
   helixHost2 as helixHost,
   helixOwned2 as helixOwned,
   historyField2 as historyField,
+  hostHooks2 as hostHooks,
   infoOf2 as infoOf,
   jumplistFor2 as jumplistFor,
   keyFromDom2 as keyFromDom,

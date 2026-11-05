@@ -1,9 +1,11 @@
+import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import type { HelixCommandContext } from "./commands/app";
+import { type HelixCommandContext } from "./commands/app";
 import type { HelixRunnable } from "./commands/names";
 import { type HelixSelection } from "./codemirror";
 import { type Changes } from "./changes";
 import { type Diagnostic, type Severity } from "./diagnostics";
+import { type EdgeDirection, type HelixEdge, type MotionRange } from "./hooks";
 import { type HelixStatus } from "./view/status";
 export declare function helixEnabled(view: EditorView): boolean;
 export declare function helixRun(view: EditorView, command: HelixRunnable): boolean;
@@ -84,4 +86,16 @@ export interface HelixGutterLine {
     change: "added" | "removed" | "changed" | null;
 }
 export declare function helixGutter(view: EditorView, fromLine: number, toLine: number): HelixGutterLine[];
-export type { HelixCommandContext };
+export interface HelixHooks {
+    edge?(edge: HelixEdge, view: EditorView): boolean | void;
+    motionRanges?(view: EditorView): readonly MotionRange[];
+    enter?(range: MotionRange, edge: HelixEdge, view: EditorView): boolean | void;
+    key?(key: string, cx: HelixCommandContext): boolean | void;
+    intercept?(key: string, view: EditorView): boolean | void;
+    textObject?(kind: "inside" | "around", ch: string, cx: HelixCommandContext): boolean | void;
+    command?(name: string, cx: HelixCommandContext): boolean | void;
+    focused?(view: EditorView): EditorView | null;
+    stopBeforeEnd?: boolean | ((view: EditorView) => boolean);
+}
+export declare const helixHooks: Facet<HelixHooks, readonly HelixHooks[]>;
+export type { EdgeDirection, HelixCommandContext };

@@ -17,7 +17,7 @@ export interface MotionRange {
   kind: "skip" | "row" | "enter";
 }
 
-export interface HelixHooks {
+export interface HostHooks {
   edge?(edge: HelixEdge, host: Host): boolean;
   motionRanges?(host: Host): readonly MotionRange[];
   enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
@@ -33,7 +33,7 @@ function first<A extends unknown[]>(calls: ((...args: A) => boolean)[]): (...arg
   return (...args) => calls.some((call) => call(...args));
 }
 
-export const helixHooks = Facet.define<HelixHooks, HelixHooks>({
+export const hostHooks = Facet.define<HostHooks, HostHooks>({
   combine(values) {
     if (values.length <= 1) return values[0] ?? {};
     const edge = values.flatMap((v) => (v.edge ? [v.edge.bind(v)] : []));
@@ -58,11 +58,11 @@ export const helixHooks = Facet.define<HelixHooks, HelixHooks>({
   },
 });
 
-export function hooksOf(host: Host): HelixHooks {
-  return host.state.facet(helixHooks);
+export function hooksOf(host: Host): HostHooks {
+  return host.state.facet(hostHooks);
 }
 
-export function stopsBeforeEnd(hooks: HelixHooks, host: Host): boolean {
+export function stopsBeforeEnd(hooks: HostHooks, host: Host): boolean {
   const stop = hooks.stopBeforeEnd;
   return typeof stop === "function" ? stop(host) : stop === true;
 }

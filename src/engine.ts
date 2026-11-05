@@ -19,7 +19,7 @@ export {
   type ViewOps,
 } from "./core/editor";
 export { HeadlessHost, setMode, type Host } from "./core/host";
-export { helixHooks, type EdgeDirection, type HelixEdge, type HelixHooks, type MotionRange } from "./hooks";
+export { hostHooks, type EdgeDirection, type HelixEdge, type HostHooks, type MotionRange } from "./hooks";
 export { compilePattern, escapeRegex, type Pattern } from "./core/regex";
 export { RustRegexEngine } from "./core/rx";
 export { charAt, charBefore } from "./core/text";

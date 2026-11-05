@@ -61,14 +61,14 @@ const rangesView = hooked("ranges", "one\nhidden\nhidden\ntwo\nrow one\nrow two\
   enter: (range, edge) => (entered.push(`${range.from}-${range.to}:${edge.direction}:${edge.count}`), true),
 });
 const commandView = hooked("command", "abc\n", {
-  key: (key, cx) => {
+  key: (key, { view }) => {
     if (key !== "A-O") return false;
-    cx.editor.setStatus("took the key");
+    helixMessage(view, "took the key");
     return true;
   },
-  command: (name, cx) => {
+  command: (name, { view }) => {
     if (name !== "move_char_right") return false;
-    cx.editor.setStatus("overridden");
+    helixMessage(view, "overridden");
     return true;
   },
 });

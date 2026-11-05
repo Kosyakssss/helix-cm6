@@ -1,5 +1,5 @@
 import {
-  helixHooks2,
+  hostHooks2,
   Range2,
   Selection2,
   helixField2,
@@ -12,6 +12,7 @@ import {
   diagnosticsOf,
   applyTextEdits2,
   insertSnippet,
+  commandContext,
   APP_COMMANDS2,
   isAppCommandName,
   rainbowSpans,
@@ -32,8 +33,9 @@ import {
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-h55c6tcr.js";
+} from "./chunk-0fvx8rg7.js";
 // src/api.ts
+import { Facet } from "@codemirror/state";
 function parts(view) {
   const editor = view.state.facet(helixEditor2);
   const host = editor ? helixHost2(view) : null;
@@ -219,6 +221,37 @@ function helixGutter(view, fromLine, toLine) {
   }
   return out;
 }
+function hostHooksOf(hooks) {
+  const out = {};
+  const withView = (call) => (host) => host.view !== null && call(host.view) === true;
+  if (hooks.edge)
+    out.edge = (edge, host) => withView((view) => hooks.edge(edge, view))(host);
+  if (hooks.motionRanges)
+    out.motionRanges = (host) => host.view ? hooks.motionRanges(host.view) : [];
+  if (hooks.enter)
+    out.enter = (range, edge, host) => withView((view) => hooks.enter(range, edge, view))(host);
+  if (hooks.key)
+    out.key = (key, cx) => hooks.key(key, commandContext(cx)) === true;
+  if (hooks.intercept)
+    out.intercept = (key, host) => withView((view) => hooks.intercept(key, view))(host);
+  if (hooks.textObject)
+    out.textObject = (kind, ch, cx) => hooks.textObject(kind, ch, commandContext(cx)) === true;
+  if (hooks.command)
+    out.command = (name, cx) => hooks.command(name, commandContext(cx)) === true;
+  if (hooks.focused) {
+    out.focused = (host) => {
+      const view = host.view ? hooks.focused(host.view) : null;
+      return view ? helixHost2(view) : null;
+    };
+  }
+  const stop = hooks.stopBeforeEnd;
+  if (stop !== undefined)
+    out.stopBeforeEnd = typeof stop === "function" ? (host) => host.view !== null && stop(host.view) : stop;
+  return out;
+}
+var helixHooks = Facet.define({
+  enables: (self) => hostHooks2.computeN([self], (state) => state.facet(self).map(hostHooksOf))
+});
 export {
   helix2 as helix,
   helixAppKeys2 as helixAppKeys,
@@ -230,7 +263,7 @@ export {
   helixEnabled,
   helixGutter,
   helixHighlights,
-  helixHooks2 as helixHooks,
+  helixHooks,
   helixMarkSaved,
   helixMessage,
   helixPrompt,

@@ -13,7 +13,7 @@ export interface MotionRange {
     to: number;
     kind: "skip" | "row" | "enter";
 }
-export interface HelixHooks {
+export interface HostHooks {
     edge?(edge: HelixEdge, host: Host): boolean;
     motionRanges?(host: Host): readonly MotionRange[];
     enter?(range: MotionRange, edge: HelixEdge, host: Host): boolean;
@@ -24,7 +24,7 @@ export interface HelixHooks {
     focused?(host: Host): Host | null;
     stopBeforeEnd?: boolean | ((host: Host) => boolean);
 }
-export declare const helixHooks: Facet<HelixHooks, HelixHooks>;
-export declare function hooksOf(host: Host): HelixHooks;
-export declare function stopsBeforeEnd(hooks: HelixHooks, host: Host): boolean;
+export declare const hostHooks: Facet<HostHooks, HostHooks>;
+export declare function hooksOf(host: Host): HostHooks;
+export declare function stopsBeforeEnd(hooks: HostHooks, host: Host): boolean;
 export declare function rangeAt(ranges: readonly MotionRange[], pos: number): MotionRange | null;

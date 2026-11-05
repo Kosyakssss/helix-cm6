@@ -1,6 +1,7 @@
+import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { APP_COMMANDS, isAppCommandName } from "./commands/app";
-import type { HelixCommandContext } from "./commands/app";
+import { commandContext, type HelixCommandContext } from "./commands/app";
 import { COMMAND_DOCS } from "./commands/docs";
 import type { HelixRunnable } from "./commands/names";
 import { applyTextEdits } from "./commands/goto";
@@ -14,6 +15,7 @@ import { helixEditor, helixHost, selectionInfo, type HelixSelection } from "./co
 import type { Host } from "./core/host";
 import { changesOf, setChanges, type Changes } from "./changes";
 import { diagnosticsOf, setDiagnostics, severityRank, type Diagnostic, type Severity } from "./diagnostics";
+import { hostHooks, type EdgeDirection, type HelixEdge, type HostHooks, type MotionRange } from "./hooks";
 import { Range, Selection } from "./selection";
 import { helixField } from "./state";
 import { DEFAULT_SCOPES, highlightSpans, rainbowSpans } from "./syntax/highlight";
@@ -275,4 +277,41 @@ export function helixGutter(view: EditorView, fromLine: number, toLine: number):
   return out;
 }
 
-export type { HelixCommandContext };
+export interface HelixHooks {
+  edge?(edge: HelixEdge, view: EditorView): boolean | void;
+  motionRanges?(view: EditorView): readonly MotionRange[];
+  enter?(range: MotionRange, edge: HelixEdge, view: EditorView): boolean | void;
+  key?(key: string, cx: HelixCommandContext): boolean | void;
+  intercept?(key: string, view: EditorView): boolean | void;
+  textObject?(kind: "inside" | "around", ch: string, cx: HelixCommandContext): boolean | void;
+  command?(name: string, cx: HelixCommandContext): boolean | void;
+  focused?(view: EditorView): EditorView | null;
+  stopBeforeEnd?: boolean | ((view: EditorView) => boolean);
+}
+
+function hostHooksOf(hooks: HelixHooks): HostHooks {
+  const out: HostHooks = {};
+  const withView = (call: (view: EditorView) => boolean | void) => (host: Host) => host.view !== null && call(host.view) === true;
+  if (hooks.edge) out.edge = (edge, host) => withView((view) => hooks.edge!(edge, view))(host);
+  if (hooks.motionRanges) out.motionRanges = (host) => (host.view ? hooks.motionRanges!(host.view) : []);
+  if (hooks.enter) out.enter = (range, edge, host) => withView((view) => hooks.enter!(range, edge, view))(host);
+  if (hooks.key) out.key = (key, cx) => hooks.key!(key, commandContext(cx)) === true;
+  if (hooks.intercept) out.intercept = (key, host) => withView((view) => hooks.intercept!(key, view))(host);
+  if (hooks.textObject) out.textObject = (kind, ch, cx) => hooks.textObject!(kind, ch, commandContext(cx)) === true;
+  if (hooks.command) out.command = (name, cx) => hooks.command!(name, commandContext(cx)) === true;
+  if (hooks.focused) {
+    out.focused = (host) => {
+      const view = host.view ? hooks.focused!(host.view) : null;
+      return view ? helixHost(view) : null;
+    };
+  }
+  const stop = hooks.stopBeforeEnd;
+  if (stop !== undefined) out.stopBeforeEnd = typeof stop === "function" ? (host) => host.view !== null && stop(host.view) : stop;
+  return out;
+}
+
+export const helixHooks = Facet.define<HelixHooks>({
+  enables: (self) => hostHooks.computeN([self], (state) => state.facet(self).map(hostHooksOf)),
+});
+
+export type { EdgeDirection, HelixCommandContext };
