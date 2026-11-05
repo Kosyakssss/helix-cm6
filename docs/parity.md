@@ -25,7 +25,7 @@ None.
 
 ## Commands
 
-Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40, out of scope 11.
+Static: ported 232, app 64, out of scope 17, missing 0. Typed: app 49, ported 40, out of scope 11.
 
 ### Static commands
 
