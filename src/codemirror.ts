@@ -55,7 +55,7 @@ export interface HelixConfiguration {
 
 export interface HelixOptions extends HelixConfiguration {
   languages?: string | readonly string[];
-  grammars?: HelixGrammars;
+  grammars?: string | HelixGrammars;
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
@@ -96,8 +96,21 @@ export function selectionInfo(selection: Jump["selection"], doc: EditorView["sta
   return { ranges, primary: ranges[selection.primaryIndex]!, primaryIndex: selection.primaryIndex };
 }
 
-function languageSource(grammars: HelixGrammars | undefined): LanguageSource | null {
-  if (!grammars) return null;
+function grammarsAt(base: string): HelixGrammars {
+  const root = base.replace(/\/+$/, "");
+  const get = async (path: string) => {
+    const response = await fetch(`${root}/${path}`);
+    return response.ok ? response : null;
+  };
+  return {
+    grammar: (name) => get(`grammars/${name}.wasm`),
+    query: async (language, file) => (await get(`queries/${language}/${file}`))?.text() ?? null,
+  };
+}
+
+function languageSource(option: HelixOptions["grammars"]): LanguageSource | null {
+  if (!option) return null;
+  const grammars = typeof option === "string" ? grammarsAt(option) : option;
   return {
     grammar: async (name) => {
       const bytes = await grammars.grammar(name);
@@ -205,13 +218,14 @@ export function helix(options: HelixOptions = {}): Extension {
     if (syntax === false) return;
     void regex
       .catch(() => null)
-      .then((engine) =>
-        loadSyntax(win, syntax, {
+      .then(async (engine) => {
+        const languages = options.languages ?? (options.grammars ? ((await import("./languages")).languagesToml as string) : undefined);
+        return loadSyntax(win, syntax, {
           regex: engine,
-          languages: typeof options.languages === "string" ? [options.languages] : options.languages,
+          languages: typeof languages === "string" ? [languages] : languages,
           source: languageSource(options.grammars),
-        }),
-      )
+        });
+      })
       .then((loadedSessions) => {
         sessions = loadedSessions;
         editor.languages = loadedSessions.loader;

@@ -42,7 +42,7 @@ export interface HelixConfiguration {
 }
 export interface HelixOptions extends HelixConfiguration {
     languages?: string | readonly string[];
-    grammars?: HelixGrammars;
+    grammars?: string | HelixGrammars;
     regex?: WasmSource;
     syntax?: WasmSource | false;
     shell?: ShellRunner;

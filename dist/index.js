@@ -1,4 +1,5 @@
 import {
+  __chunks,
   hostHooks2,
   keySequenceFormat,
   Range2,
@@ -34,7 +35,8 @@ import {
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-f4bgt4r0.js";
+} from "./chunk-mjnb04x6.js";
+__chunks(import.meta.url,["wshmmpk9","mjnb04x6","28qqb8e8"],[["./index.js",1],["./chunk-mjnb04x6.js"],["./languages.js"]],0);
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {

@@ -1,3 +1,34 @@
+var __chunkGraphs;
+var __chunkSeen;
+var __chunkNonce;
+var __preload = (id, seenOnly) => {
+  for (var [base, graph, ids] of __chunkGraphs || [])
+    for (var stack = [id], g = globalThis, d = g.document, head, j, node, k, link;j = stack.pop(); )
+      if (!__chunkSeen[j] && (node = graph[j])) {
+        __chunkSeen[j] = 1;
+        for (k = 1;k < node.length; k++)
+          stack.push(ids[node[k]]);
+        if (!seenOnly && j !== id && (head = d && d.head)) {
+          if (__chunkNonce === undefined)
+            __chunkNonce = (k = d.querySelector("meta[property=csp-nonce]")) && (k.nonce || k.getAttribute("nonce")) || "";
+          link = d.createElement("link");
+          link.rel = "modulepreload";
+          link.crossOrigin = "";
+          if (__chunkNonce)
+            link.nonce = __chunkNonce;
+          link.href = new g.URL(node[0], base);
+          head.appendChild(link);
+        }
+      }
+};
+var __chunks = (base, ids, nodes, entry) => {
+  for (var graph = {}, i = 0;i < ids.length; i++)
+    graph[ids[i]] = nodes[i];
+  (__chunkGraphs ||= []).push([base, graph, ids]);
+  __chunkSeen ||= {};
+  __preload(ids[entry], 1);
+};
+
 // src/codemirror.ts
 import { Facet as Facet4 } from "@codemirror/state";
 import { EditorView as EditorView4, drawSelection } from "@codemirror/view";
@@ -15873,9 +15904,21 @@ function selectionInfo(selection, doc) {
   const ranges = selection.ranges.map((r) => ({ anchor: r.anchor, head: r.head, from: r.from(), to: r.to(), cursor: r.cursor(doc) }));
   return { ranges, primary: ranges[selection.primaryIndex], primaryIndex: selection.primaryIndex };
 }
-function languageSource(grammars) {
-  if (!grammars)
+function grammarsAt(base) {
+  const root = base.replace(/\/+$/, "");
+  const get = async (path) => {
+    const response = await fetch(`${root}/${path}`);
+    return response.ok ? response : null;
+  };
+  return {
+    grammar: (name) => get(`grammars/${name}.wasm`),
+    query: async (language, file) => (await get(`queries/${language}/${file}`))?.text() ?? null
+  };
+}
+function languageSource(option) {
+  if (!option)
     return null;
+  const grammars = typeof option === "string" ? grammarsAt(option) : option;
   return {
     grammar: async (name) => {
       const bytes = await grammars.grammar(name);
@@ -15982,11 +16025,14 @@ function helix2(options = {}) {
     const syntax = options.syntax;
     if (syntax === false)
       return;
-    regex.catch(() => null).then((engine) => loadSyntax2(win, syntax, {
-      regex: engine,
-      languages: typeof options.languages === "string" ? [options.languages] : options.languages,
-      source: languageSource(options.grammars)
-    })).then((loadedSessions) => {
+    regex.catch(() => null).then(async (engine) => {
+      const languages = options.languages ?? (options.grammars ? (await (__preload("28qqb8e8"), import("./languages.js"))).languagesToml : undefined);
+      return loadSyntax2(win, syntax, {
+        regex: engine,
+        languages: typeof languages === "string" ? [languages] : languages,
+        source: languageSource(options.grammars)
+      });
+    }).then((loadedSessions) => {
       sessions = loadedSessions;
       editor.languages = loadedSessions.loader;
       for (const open of views)
@@ -16105,4 +16151,4 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-export { hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, helixDocument2, selectionInfo, helix2 };
+export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, helixDocument2, selectionInfo, helix2 };

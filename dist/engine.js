@@ -1,4 +1,5 @@
 import {
+  __chunks,
   hostHooks2,
   parseKey2,
   formatKey2,
@@ -65,7 +66,8 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-f4bgt4r0.js";
+} from "./chunk-mjnb04x6.js";
+__chunks(import.meta.url,["96akf27e","mjnb04x6","28qqb8e8"],[["./engine.js",1],["./chunk-mjnb04x6.js"],["./languages.js"]],0);
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);

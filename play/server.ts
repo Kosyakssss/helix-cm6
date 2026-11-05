@@ -44,8 +44,8 @@ const server = Bun.serve({
     "/play.js": bundle,
     "/helix.toml": () => serve(".", "helix.toml"),
     "/samples/:file": (req) => serve("samples", `${req.params.file}.txt`),
-    "/grammars/:file": (req) => serve("languages/grammars", req.params.file),
-    "/queries/:language/:file": (req) => serve("languages/queries", req.params.language, req.params.file),
+    "/languages/grammars/:file": (req) => serve("languages/grammars", req.params.file),
+    "/languages/queries/:language/:file": (req) => serve("languages/queries", req.params.language, req.params.file),
   },
   fetch: () => new Response("not found", { status: 404 }),
 });

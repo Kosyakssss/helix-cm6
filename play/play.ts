@@ -12,18 +12,5 @@ const [doc, config] = await Promise.all([text(`/samples/${encodeURIComponent(fil
 new EditorView({
   parent: document.body,
   doc: doc ?? "",
-  extensions: [
-    helix({
-      config: config ?? undefined,
-      grammars: {
-        grammar: async (name) => {
-          const response = await fetch(`/grammars/${name}.wasm`);
-          return response.ok ? response : null;
-        },
-        query: (language, query) => text(`/queries/${language}/${query}`),
-      },
-    }),
-    helixDocument.of({ path: file }),
-    EditorView.lineWrapping,
-  ],
+  extensions: [helix({ config, grammars: "/languages" }), helixDocument.of({ path: file }), EditorView.lineWrapping],
 }).focus();
