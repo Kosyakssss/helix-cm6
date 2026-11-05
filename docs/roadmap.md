@@ -22,7 +22,7 @@ The engine work lands on `main` here. The Obsidian work lands on helix-motions' 
 
 - Languages: each document has a language. Grammars load as wasm through the app. Helix's highlight, textobject, indent and injection queries apply per language.
 - Per-language settings from a `languages.toml` like Helix's.
-- Commands that need an outside source (LSP, formatter, shell, diff base, snippets) go to the app through `Workspace`, with async results that become selections, jumps and one undo step.
+- Commands that need an outside source (LSP, formatter, shell, diff base, snippets) go to the app as commands, with async results that become selections, jumps and one undo step.
 - A public state API: mode, pending keys, count, register, selections and messages, with events.
 - Hooks for apps: a motion that reaches the edge of a range hands off to the app; ranges that motions skip or treat as one row; per-editor command overrides; macros and `.` that follow focus.
 - A stable public API, separate from internals, with API docs.
