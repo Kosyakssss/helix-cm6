@@ -2,7 +2,8 @@ export { helix, helixDocument, helixEditor, helixKeys, helixRun, helixStatus, ty
 export { helixHooks, type EdgeDirection, type HelixEdge, type HelixHooks, type MotionRange } from "./hooks";
 export { onHelixStatus, type HelixInfo, type HelixInfoRow, type HelixPromptStatus, type HelixStatus } from "./view/status";
 export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixSnippet, helixTabstops, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";
-export { helixAppKeys, type KeyLayer, type ModeName } from "./keymap";
+export { helixAppKeys, type ModeName } from "./keymap";
+export type { HelixKeyBinding, HelixKeys, HelixKeyTable } from "./config-loader";
 export type { KeyNode } from "./keymap/trie";
 export type { AppCommand, AppCommandInfo, HelixCommand, HelixCommandContext, HelixCommandSpec } from "./commands/app";
 export type { HelixCommandName, HelixRunnable, HelixStaticCommandName, HelixTypedCommandName } from "./commands/names";

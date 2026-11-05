@@ -39,7 +39,7 @@ export {
 } from "./state";
 export { Range, Selection, type Direction } from "./selection";
 export { MemoryClipboard, Registers, type ClipboardProvider, type ClipboardType, type RegisterEnv } from "./registers";
-export { buildKeymaps, helixAppKeys, type KeyLayer } from "./keymap";
+export { appKeyLayer, buildKeymaps, type KeyLayer } from "./keymap";
 export { APP_COMMANDS, type AppCommand, type AppCommandInfo, type HelixApp } from "./commands/app";
 export { applyTextEdits, type TextEdit } from "./commands/goto";
 export { formatKey, keyFromDom, parseKey, parseMacro, type KeyEvent } from "./keys";

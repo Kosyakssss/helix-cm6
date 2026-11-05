@@ -44,7 +44,7 @@ import {
   Context2,
   HelixEditor2,
   loadConfig2,
-  helixAppKeys2,
+  appKeyLayer2,
   buildKeymaps2,
   SystemClipboard2,
   parseLanguagesToml2,
@@ -81,7 +81,7 @@ import {
   helixHighlights2,
   helixRainbow2,
   helixGutter2
-} from "./chunk-t7msz1s6.js";
+} from "./chunk-cdmw7v03.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -179,6 +179,7 @@ export {
   Selection2 as Selection,
   SyntaxSessions2 as SyntaxSessions,
   SystemClipboard2 as SystemClipboard,
+  appKeyLayer2 as appKeyLayer,
   applyTextEdits2 as applyTextEdits,
   buildKeymaps2 as buildKeymaps,
   changesField2 as changesField,
@@ -197,7 +198,6 @@ export {
   fromNative2 as fromNative,
   gotoLineWithoutJumplist2 as gotoLineWithoutJumplist,
   helix2 as helix,
-  helixAppKeys2 as helixAppKeys,
   helixCommandList2 as helixCommandList,
   helixDocument2 as helixDocument,
   helixEdit2 as helixEdit,

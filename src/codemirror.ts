@@ -5,9 +5,9 @@ import { commandContext, type AppCommand, type HelixApp, type HelixCommand, type
 import type { HelixCommandName } from "./commands/names";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
-import { loadConfig } from "./config-loader";
+import { loadConfig, loadKeys, type HelixKeys } from "./config-loader";
 import { executeCommand, runTypable } from "./commands";
-import { buildKeymaps, type KeyLayer } from "./keymap";
+import { buildKeymaps } from "./keymap";
 import { Registers } from "./registers";
 import type { SyntaxSessions } from "./syntax/languages";
 import type { LanguageId } from "./syntax/injections";
@@ -28,14 +28,14 @@ export interface GrammarSource {
 export type HelixCommands = { [name in HelixCommandName]?: HelixCommand | HelixCommandSpec } & { [name: string]: HelixCommand | HelixCommandSpec | undefined };
 
 export interface HelixOptions {
-  config?: string;
+  config?: string | Record<string, unknown> | null;
   languages?: string | readonly string[];
   grammars?: GrammarSource;
   regex?: WasmSource;
   syntax?: WasmSource | false;
   shell?: ShellRunner;
   commands?: HelixCommands;
-  keys?: KeyLayer;
+  keys?: HelixKeys | readonly HelixKeys[];
   openJump?: HelixApp["openJump"];
   variable?: HelixApp["variable"];
   panel?: boolean;
@@ -115,7 +115,8 @@ export function helix(options: HelixOptions = {}): Extension {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
   };
-  const loaded = loadConfig(options.config ?? null, undefined, (name) => lookup(name) !== null);
+  const known = (name: string) => lookup(name) !== null;
+  const loaded = loadConfig(options.config ?? null, undefined, known);
   const editor = new HelixEditor(buildKeymaps(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
@@ -125,7 +126,7 @@ export function helix(options: HelixOptions = {}): Extension {
     openJump: options.openJump,
     variable: options.variable,
   };
-  editor.keymaps = buildKeymaps(loaded.keys, { app: options.keys, available: (name) => editor.hasCommand(name) });
+  editor.keymaps = buildKeymaps(loaded.keys, { app: loadKeys(options.keys, known).keys, available: (name) => editor.hasCommand(name) });
   const clipboard = new SystemClipboard();
   editor.registers = new Registers(clipboard);
   editor.viewOps = makeViewOps(() => editor.config.scrolloff);

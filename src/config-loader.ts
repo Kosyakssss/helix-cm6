@@ -1,5 +1,6 @@
 import { parse } from "smol-toml";
 import { defaultConfig, type Config, type WhitespaceConfig } from "./config";
+import type { HelixRunnable } from "./commands/names";
 import type { KeyNode, RawTrie } from "./keymap/trie";
 import { parseCommand } from "./keymap/trie";
 import { normalizeKeyString } from "./keys";
@@ -329,7 +330,7 @@ function checkCommand(raw: string, path: string, warnings: string[], known: Know
   return true;
 }
 
-function convertTrie(value: unknown, path: string, warnings: string[], known: Known): RawTrie | null {
+function convertTrie(value: unknown, path: string, warnings: string[], known: Known, named = false): RawTrie | null {
   if (typeof value === "string") return checkCommand(value, path, warnings, known) ? value : null;
   if (Array.isArray(value)) {
     const cmds = value.map(String);
@@ -342,30 +343,77 @@ function convertTrie(value: unknown, path: string, warnings: string[], known: Kn
   }
   if (value && typeof value === "object") {
     const map: Record<string, RawTrie> = {};
+    let name = "";
+    let sticky = false;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (named && k === "name" && typeof v === "string") {
+        name = v;
+        continue;
+      }
+      if (named && k === "sticky" && typeof v === "boolean") {
+        sticky = v;
+        continue;
+      }
       try {
         normalizeKeyString(k);
       } catch (err) {
         warnings.push(`${path}.${k}: ${(err as Error).message}`);
         continue;
       }
-      const t = convertTrie(v, `${path}.${k}`, warnings, known);
+      const t = convertTrie(v, `${path}.${k}`, warnings, known, named);
       if (t !== null) map[k] = t;
     }
-    return { name: "", map };
+    return sticky ? { name, sticky, map } : { name, map };
   }
   warnings.push(`${path}: expected a command, list of commands, or sub-keymap`);
   return null;
 }
 
-export function loadConfig(source: string | null, base: Config = defaultConfig(), known: Known = () => false): LoadedConfig {
+export type HelixKeyBinding = HelixRunnable | readonly HelixRunnable[] | HelixKeyTable;
+
+export interface HelixKeyTable {
+  [key: string]: HelixKeyBinding | boolean | undefined;
+  name?: string;
+  sticky?: boolean;
+}
+
+export type HelixKeys = Partial<Record<"normal" | "select" | "insert", HelixKeyTable>>;
+
+function mergeTables(into: HelixKeyTable, table: HelixKeyTable): HelixKeyTable {
+  const out: HelixKeyTable = { ...into };
+  for (const [key, value] of Object.entries(table)) {
+    const held = out[key];
+    const both = (v: unknown): v is HelixKeyTable => typeof v === "object" && v !== null && !Array.isArray(v);
+    out[key] = both(held) && both(value) ? mergeTables(held, value) : value;
+  }
+  return out;
+}
+
+export function loadKeys(layers: HelixKeys | readonly HelixKeys[] | undefined, known: Known): Pick<LoadedConfig, "keys" | "warnings"> {
+  const warnings: string[] = [];
+  const keys: LoadedConfig["keys"] = {};
+  const list: readonly HelixKeys[] = Array.isArray(layers) ? layers : layers ? [layers as HelixKeys] : [];
+  for (const mode of ["normal", "select", "insert"] as const) {
+    let table: HelixKeyTable | null = null;
+    for (const layer of list) {
+      const next = layer[mode];
+      if (next) table = table ? mergeTables(table, next) : next;
+    }
+    if (!table) continue;
+    const trie = convertTrie(table, `keys.${mode}`, warnings, known, true);
+    if (trie && typeof trie === "object" && !Array.isArray(trie)) keys[mode] = trie;
+  }
+  return { keys, warnings };
+}
+
+export function loadConfig(source: string | Record<string, unknown> | null, base: Config = defaultConfig(), known: Known = () => false): LoadedConfig {
   const config: Config = structuredClone(base);
   const warnings: string[] = [];
   const keys: LoadedConfig["keys"] = {};
   if (source === null) return { config, keys, warnings };
   let doc: Record<string, unknown>;
   try {
-    doc = parse(source);
+    doc = typeof source === "string" ? parse(source) : source;
   } catch (err) {
     warnings.push(`config.toml: ${(err as Error).message}`);
     return { config, keys, warnings };

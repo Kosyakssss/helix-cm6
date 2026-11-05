@@ -23,7 +23,7 @@ import {
   helixHighlights2,
   helixRainbow2,
   helixGutter2
-} from "./chunk-t7msz1s6.js";
+} from "./chunk-cdmw7v03.js";
 export {
   Range2 as Range,
   Selection2 as Selection,

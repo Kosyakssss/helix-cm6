@@ -5,7 +5,7 @@ import { type HelixApp, type HelixCommand, type HelixCommandSpec } from "./comma
 import type { HelixCommandName } from "./commands/names";
 import type { Host } from "./core/host";
 import type { ShellRunner } from "./commands/shell";
-import { type KeyLayer } from "./keymap";
+import { type HelixKeys } from "./config-loader";
 import type { QueryFile } from "./syntax/loader";
 import { type HelixStatus } from "./view/status";
 import { type WasmBytes, type WasmSource } from "./view/wasm";
@@ -19,14 +19,14 @@ export type HelixCommands = {
     [name: string]: HelixCommand | HelixCommandSpec | undefined;
 };
 export interface HelixOptions {
-    config?: string;
+    config?: string | Record<string, unknown> | null;
     languages?: string | readonly string[];
     grammars?: GrammarSource;
     regex?: WasmSource;
     syntax?: WasmSource | false;
     shell?: ShellRunner;
     commands?: HelixCommands;
-    keys?: KeyLayer;
+    keys?: HelixKeys | readonly HelixKeys[];
     openJump?: HelixApp["openJump"];
     variable?: HelixApp["variable"];
     panel?: boolean;

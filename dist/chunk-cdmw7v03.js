@@ -12179,7 +12179,7 @@ function checkCommand(raw, path, warnings, known) {
   }
   return true;
 }
-function convertTrie(value, path, warnings, known) {
+function convertTrie(value, path, warnings, known, named = false) {
   if (typeof value === "string")
     return checkCommand(value, path, warnings, known) ? value : null;
   if (Array.isArray(value)) {
@@ -12193,21 +12193,59 @@ function convertTrie(value, path, warnings, known) {
   }
   if (value && typeof value === "object") {
     const map = {};
+    let name = "";
+    let sticky = false;
     for (const [k, v] of Object.entries(value)) {
+      if (named && k === "name" && typeof v === "string") {
+        name = v;
+        continue;
+      }
+      if (named && k === "sticky" && typeof v === "boolean") {
+        sticky = v;
+        continue;
+      }
       try {
         normalizeKeyString(k);
       } catch (err) {
         warnings.push(`${path}.${k}: ${err.message}`);
         continue;
       }
-      const t = convertTrie(v, `${path}.${k}`, warnings, known);
+      const t = convertTrie(v, `${path}.${k}`, warnings, known, named);
       if (t !== null)
         map[k] = t;
     }
-    return { name: "", map };
+    return sticky ? { name, sticky, map } : { name, map };
   }
   warnings.push(`${path}: expected a command, list of commands, or sub-keymap`);
   return null;
+}
+function mergeTables(into, table) {
+  const out = { ...into };
+  for (const [key, value] of Object.entries(table)) {
+    const held = out[key];
+    const both = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+    out[key] = both(held) && both(value) ? mergeTables(held, value) : value;
+  }
+  return out;
+}
+function loadKeys(layers, known) {
+  const warnings = [];
+  const keys = {};
+  const list = Array.isArray(layers) ? layers : layers ? [layers] : [];
+  for (const mode of ["normal", "select", "insert"]) {
+    let table = null;
+    for (const layer of list) {
+      const next = layer[mode];
+      if (next)
+        table = table ? mergeTables(table, next) : next;
+    }
+    if (!table)
+      continue;
+    const trie = convertTrie(table, `keys.${mode}`, warnings, known, true);
+    if (trie && typeof trie === "object" && !Array.isArray(trie))
+      keys[mode] = trie;
+  }
+  return { keys, warnings };
 }
 function loadConfig2(source, base = defaultConfig2(), known = () => false) {
   const config = structuredClone(base);
@@ -12217,7 +12255,7 @@ function loadConfig2(source, base = defaultConfig2(), known = () => false) {
     return { config, keys, warnings };
   let doc;
   try {
-    doc = parse3(source);
+    doc = typeof source === "string" ? parse3(source) : source;
   } catch (err) {
     warnings.push(`config.toml: ${err.message}`);
     return { config, keys, warnings };
@@ -12694,7 +12732,18 @@ function layer(normal, select, insert, keep) {
     out.insert = i;
   return out;
 }
-var helixAppKeys2 = layer(defaultNormal, selectOverrides, defaultInsert, isAppCommandName);
+var appKeyLayer2 = layer(defaultNormal, selectOverrides, defaultInsert, isAppCommandName);
+function tableOf(node) {
+  const table = {};
+  if (node.name)
+    table.name = node.name;
+  if (node.sticky)
+    table.sticky = true;
+  for (const [key, value] of Object.entries(node.map))
+    table[key] = typeof value === "string" || Array.isArray(value) ? value : tableOf(value);
+  return table;
+}
+var helixAppKeys2 = Object.fromEntries(Object.entries(appKeyLayer2).map(([mode, node]) => [mode, tableOf(node)]));
 function reorder(node, like) {
   const entries = [...node.map];
   const rank = new Map([...like.map.keys()].map((key, i) => [key, i]));
@@ -15876,7 +15925,8 @@ function helix2(options = {}) {
     const found = Object.prototype.hasOwnProperty.call(commands, name) ? commands[name] : undefined;
     return found ? adapted(found) : null;
   };
-  const loaded = loadConfig2(options.config ?? null, undefined, (name) => lookup(name) !== null);
+  const known = (name) => lookup(name) !== null;
+  const loaded = loadConfig2(options.config ?? null, undefined, known);
   const editor = new HelixEditor2(buildKeymaps2(loaded.keys), loaded.config);
   editor.visualLines = true;
   editor.shell = options.shell ?? null;
@@ -15886,7 +15936,7 @@ function helix2(options = {}) {
     openJump: options.openJump,
     variable: options.variable
   };
-  editor.keymaps = buildKeymaps2(loaded.keys, { app: options.keys, available: (name) => editor.hasCommand(name) });
+  editor.keymaps = buildKeymaps2(loaded.keys, { app: loadKeys(options.keys, known).keys, available: (name) => editor.hasCommand(name) });
   const clipboard = new SystemClipboard2;
   editor.registers = new Registers2(clipboard);
   editor.viewOps = makeViewOps2(() => editor.config.scrolloff);
@@ -16149,4 +16199,4 @@ function helixGutter2(view, fromLine, toLine) {
   return out;
 }
 
-export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixSnippet2, helixTabstops2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };
+export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixSnippet2, helixTabstops2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };

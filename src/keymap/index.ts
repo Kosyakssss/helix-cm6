@@ -1,4 +1,5 @@
 import { isAppCommandName } from "../commands/app";
+import type { HelixKeys, HelixKeyTable } from "../config-loader";
 import { defaultInsert, defaultNormal, selectOverrides } from "./default";
 import { buildTrie, cloneTrie, Keymaps, mergeNodes, type KeyNode, type RawTrie, type TrieNode } from "./trie";
 
@@ -33,7 +34,17 @@ function layer(normal: KeyNode, select: KeyNode, insert: KeyNode, keep: (name: s
   return out;
 }
 
-export const helixAppKeys: KeyLayer = layer(defaultNormal, selectOverrides, defaultInsert, isAppCommandName);
+export const appKeyLayer: KeyLayer = layer(defaultNormal, selectOverrides, defaultInsert, isAppCommandName);
+
+function tableOf(node: KeyNode): HelixKeyTable {
+  const table: HelixKeyTable = {};
+  if (node.name) table.name = node.name;
+  if (node.sticky) table.sticky = true;
+  for (const [key, value] of Object.entries(node.map)) table[key] = typeof value === "string" || Array.isArray(value) ? value : tableOf(value);
+  return table;
+}
+
+export const helixAppKeys: HelixKeys = Object.fromEntries(Object.entries(appKeyLayer).map(([mode, node]) => [mode, tableOf(node)]));
 
 function reorder(node: TrieNode, like: TrieNode): void {
   const entries = [...node.map];
