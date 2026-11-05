@@ -5,6 +5,7 @@ export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage
 export { helixAppKeys, type KeyLayer, type ModeName } from "./keymap";
 export type { KeyNode } from "./keymap/trie";
 export type { AppCommand, AppCommandInfo } from "./commands/app";
+export type { HelixCommandName, HelixRunnable, HelixStaticCommandName, HelixTypedCommandName } from "./commands/names";
 export type { TextEdit } from "./commands/goto";
 export type { WasmBytes, WasmSource } from "./view/wasm";
 export type { Context } from "./core/editor";

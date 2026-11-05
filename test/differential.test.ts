@@ -13,6 +13,10 @@ import { fuzzSuite, markdownFuzzSuite } from "./oracle/fuzz";
 import { oracleGraphemes } from "./oracle/oracle";
 import { segmentGraphemes } from "../src/graphemes";
 import { run } from "./harness";
+import { STATIC_COMMANDS } from "../src/commands";
+import { APP_COMMANDS } from "../src/commands/app";
+import { STATIC_COMMAND_NAMES, TYPED_COMMAND_NAMES } from "../src/commands/names";
+import { TYPABLE } from "../src/commands/typed";
 
 const describe = (f: { c: { keys: string; in: string }; expected: { out?: string }; actual: { out: string; error?: string } }) =>
   `${JSON.stringify(f.c.keys)} in ${JSON.stringify(f.c.in)}: want ${JSON.stringify(f.expected.out)} got ${JSON.stringify(f.actual.out)} ${f.actual.error ?? ""}`;
@@ -100,4 +104,9 @@ test("grapheme clusters match unicode-segmentation", () => {
 test("an expansion that gives an empty string still expands the rest of the argument", () => {
   expect(run("#[a|]#", ':set-register b %reg{c}x<ret>"bp').out).toBe("a#[x|]#");
   expect(run("#[a|]#", ':set-register b %reg{c}%%<ret>"bp').out).toBe("a#[%|]#");
+});
+
+test("the command name types are up to date; bun run names rebuilds them", () => {
+  expect<string[]>([...STATIC_COMMAND_NAMES]).toEqual([...new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS)])].sort());
+  expect<string[]>([...TYPED_COMMAND_NAMES]).toEqual([...new Set(TYPABLE.map((c) => c.name))].sort());
 });
