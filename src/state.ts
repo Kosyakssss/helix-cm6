@@ -17,6 +17,7 @@ export interface HelixState {
   readonly mode: Mode;
   readonly selection: Selection;
   readonly restoreCursor: boolean;
+  readonly savedRevision: number;
 }
 
 export const setHelix = StateEffect.define<Partial<HelixState>>();
@@ -29,6 +30,7 @@ export const helixField = StateField.define<HelixState>({
       mode: "normal",
       selection: fromNative(state.selection, "normal", null, state.doc).ensureInvariants(state.doc),
       restoreCursor: false,
+      savedRevision: 0,
     };
   },
   update(value, tr) {

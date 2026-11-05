@@ -5,6 +5,7 @@ export interface HelixState {
     readonly mode: Mode;
     readonly selection: Selection;
     readonly restoreCursor: boolean;
+    readonly savedRevision: number;
 }
 export declare const setHelix: import("@codemirror/state").StateEffectType<Partial<HelixState>>;
 export declare const helixOwned: import("@codemirror/state").AnnotationType<boolean>;

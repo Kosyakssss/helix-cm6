@@ -156,9 +156,7 @@ export declare class HelixEditor {
     };
     detectIndent(host: Host): void;
     languageName(host: Host): string | null;
-    private savedRevisions;
     isModified(host: Host): boolean;
-    forgetSaved(host: Host): void;
     markSaved(host: Host): void;
     focusedHost(host: Host): Host;
     isBusy(): boolean;

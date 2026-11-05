@@ -3,7 +3,7 @@ import { keyChar, keySequenceFormat, parseMacro } from "../keys";
 import { Keymaps, type KeymapResult, type MappableCommand, type TrieNode } from "../keymap/trie";
 import { MemoryClipboard, Registers, type RegisterEnv } from "../registers";
 import { defaultConfig, type Config } from "../config";
-import { doc, mode, selection, type Host } from "./host";
+import { doc, mode, patchHelix, selection, type Host } from "./host";
 import { executeCommand, runTypable, STATIC_COMMANDS } from "../commands";
 import { Prompt, type Completion } from "./prompt";
 import { commitHistoryNow, JumpList, type Jump } from "../commands/jumps";
@@ -332,21 +332,16 @@ export class HelixEditor {
     return this.languageConfig(host)?.languageId ?? null;
   }
 
-  private savedRevisions = new Map<string, number>();
-
   isModified(host: Host): boolean {
     const history = host.state.field(historyField, false);
     if (!history) return false;
-    return history.pending !== null || history.current !== (this.savedRevisions.get(host.id) ?? 0);
-  }
-
-  forgetSaved(host: Host): void {
-    this.savedRevisions.delete(host.id);
+    return history.pending !== null || history.current !== host.state.field(helixField).savedRevision;
   }
 
   markSaved(host: Host): void {
-    const history = host.state.field(historyField, false);
-    if (history) this.savedRevisions.set(host.id, history.current);
+    if (!host.state.field(historyField, false)) return;
+    commitHistoryNow(host);
+    patchHelix(host, { savedRevision: host.state.field(historyField).current });
   }
 
   focusedHost(host: Host): Host {

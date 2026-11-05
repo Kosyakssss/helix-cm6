@@ -1312,7 +1312,8 @@ var helixField2 = StateField2.define({
     return {
       mode: "normal",
       selection: fromNative2(state.selection, "normal", null, state.doc).ensureInvariants(state.doc),
-      restoreCursor: false
+      restoreCursor: false,
+      savedRevision: 0
     };
   },
   update(value, tr) {
@@ -1434,6 +1435,9 @@ function setMode2(host, mode, sel, extra = {}) {
     annotations: helixOwned2.of(true),
     scrollIntoView: true
   });
+}
+function patchHelix(host, patch) {
+  host.dispatch({ effects: setHelix2.of(patch), annotations: helixOwned2.of(true) });
 }
 
 // src/movement.ts
@@ -11469,20 +11473,17 @@ class HelixEditor2 {
   languageName(host) {
     return this.languageConfig(host)?.languageId ?? null;
   }
-  savedRevisions = new Map;
   isModified(host) {
     const history = host.state.field(historyField2, false);
     if (!history)
       return false;
-    return history.pending !== null || history.current !== (this.savedRevisions.get(host.id) ?? 0);
-  }
-  forgetSaved(host) {
-    this.savedRevisions.delete(host.id);
+    return history.pending !== null || history.current !== host.state.field(helixField2).savedRevision;
   }
   markSaved(host) {
-    const history = host.state.field(historyField2, false);
-    if (history)
-      this.savedRevisions.set(host.id, history.current);
+    if (!host.state.field(historyField2, false))
+      return;
+    commitHistoryNow2(host);
+    patchHelix(host, { savedRevision: host.state.field(historyField2).current });
   }
   focusedHost(host) {
     return hooksOf(host).focused?.(host) ?? host;
@@ -16125,7 +16126,6 @@ function helix2(options = {}) {
       views.delete(view);
       sessions?.close(view);
       editor.indentStyles.delete(hostFor(view).id);
-      editor.forgetSaved(hostFor(view));
       if (active === view)
         active = null;
     }

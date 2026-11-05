@@ -35,8 +35,8 @@ import {
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-kzyg0hjp.js";
-__chunks(import.meta.url,["n0pw2fkp","kzyg0hjp","28qqb8e8"],[["./index.js",1],["./chunk-kzyg0hjp.js"],["./languages.js"]],0);
+} from "./chunk-ra1ccm8x.js";
+__chunks(import.meta.url,["32vpw7w8","ra1ccm8x","28qqb8e8"],[["./index.js",1],["./chunk-ra1ccm8x.js"],["./languages.js"]],0);
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {

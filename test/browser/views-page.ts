@@ -293,9 +293,19 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("a new state in the same view starts fresh", [helixStatus(view).modified, helixSelection(view).primary.cursor], [false, 0]);
   helixType(view, "<C-o>");
   check("a jump to another document goes to the app", jumps.at(-1)?.path, "a.md");
+  helixEdit(view, { from: 0, insert: "q" });
+  helixMarkSaved(view);
+  const clean = view.state;
+  helixEdit(view, { from: 0, insert: "q" });
+  const dirty = view.state;
+  const away = EditorState.create({ doc: "away\n", extensions: [extension, helixDocument.of({ path: "c.md" })] });
+  view.setState(away);
+  view.setState(clean);
+  check("a saved document stays saved after a switch", helixStatus(view).modified, false);
+  view.setState(away);
+  view.setState(dirty);
+  check("an unsaved document stays unsaved after a switch", helixStatus(view).modified, true);
 
-  const shared = view.state;
-  check("the state stays usable", shared.doc.toString(), "other\n");
   view.destroy();
   check("the app layout is plain data", typeof (helixAppKeys.normal?.space as { name?: string }).name, "string");
   check("the app layout reads like the config", (helixAppKeys.normal?.space as Record<string, unknown>).f, "file_picker");

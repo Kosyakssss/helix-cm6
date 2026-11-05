@@ -312,7 +312,6 @@ export function helix(options: HelixOptions = {}): Extension {
       views.delete(view);
       sessions?.close(view);
       editor.indentStyles.delete(hostFor(view).id);
-      editor.forgetSaved(hostFor(view));
       if (active === view) active = null;
     },
   });
