@@ -1,5 +1,6 @@
 import {
   hostHooks2,
+  keySequenceFormat,
   Range2,
   Selection2,
   helixField2,
@@ -14,7 +15,6 @@ import {
   insertSnippet,
   commandContext,
   APP_COMMANDS2,
-  isAppCommandName,
   rainbowSpans,
   highlightSpans,
   DEFAULT_SCOPES,
@@ -34,7 +34,7 @@ import {
   helixDocument2,
   selectionInfo,
   helix2
-} from "./chunk-jx1cbdtr.js";
+} from "./chunk-f4bgt4r0.js";
 // src/api.ts
 import { Facet } from "@codemirror/state";
 function parts(view) {
@@ -174,12 +174,49 @@ function helixSetChanges(view, changes) {
   parts(view);
   view.dispatch({ effects: setChanges2.of(changes) });
 }
-function helixCommandList() {
-  const names = new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS2)]);
-  return [...names].sort().map((name) => ({ name, doc: COMMAND_DOCS[name] ?? name, app: isAppCommandName(name) }));
+function collectKeys(node, prefix, out) {
+  for (const [key, trie] of node.map) {
+    const keys = prefix + keySequenceFormat(key);
+    if (trie.kind === "node") {
+      collectKeys(trie, keys, out);
+      continue;
+    }
+    if (trie.kind !== "command")
+      continue;
+    const command = trie.command;
+    const name = command.kind === "static" ? command.name : command.kind === "typable" && command.args === "" ? `:${TYPABLE_MAP.get(command.name)?.name ?? command.name}` : null;
+    if (name === null)
+      continue;
+    const list = out.get(name);
+    if (list)
+      list.push(keys);
+    else
+      out.set(name, [keys]);
+  }
 }
-function helixTypedCommandList() {
-  return TYPABLE.map((c) => ({ name: c.name, aliases: c.aliases, doc: c.doc, app: c.app ?? null }));
+function helixCommands(view) {
+  const { editor } = parts(view);
+  const keys = new Map;
+  collectKeys(editor.keymaps.map[view.state.field(helixField2).mode], "", keys);
+  const out = new Map;
+  for (const name of new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS2)])) {
+    out.set(name, { name, doc: COMMAND_DOCS[name] ?? name, aliases: [], keys: keys.get(name) ?? [], available: editor.hasCommand(name) });
+  }
+  for (const command of TYPABLE) {
+    const name = `:${command.name}`;
+    out.set(name, { name, doc: editor.app?.command(command.name) ? editor.commandDoc(command.name) : command.doc, aliases: command.aliases.map((alias) => `:${alias}`), keys: keys.get(name) ?? [], available: !command.app || editor.appCommand(command.app) !== null });
+  }
+  for (const name of editor.app?.commandNames?.() ?? []) {
+    if (out.has(name) || out.has(`:${name}`)) {
+      const held = out.get(name) ?? out.get(`:${name}`);
+      const doc = editor.commandDoc(name);
+      if (doc !== name && !COMMAND_DOCS[name])
+        held.doc = doc;
+      continue;
+    }
+    out.set(name, { name, doc: editor.commandDoc(name), aliases: [], keys: [...keys.get(name) ?? [], ...keys.get(`:${name}`) ?? []], available: true });
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 function helixHighlights(view, from, to, scopes = DEFAULT_SCOPES) {
   const { editor, host } = parts(view);
@@ -268,7 +305,7 @@ export {
   helix2 as helix,
   helixAppKeys2 as helixAppKeys,
   helixChanges,
-  helixCommandList,
+  helixCommands,
   helixConfig,
   helixConfigWarnings,
   helixConfigure,
@@ -293,6 +330,5 @@ export {
   helixSnippet,
   helixStatus,
   helixTabstops,
-  helixType,
-  helixTypedCommandList
+  helixType
 };

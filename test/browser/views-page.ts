@@ -4,6 +4,7 @@ import {
   helix,
   helixAppKeys,
   helixChanges,
+  helixCommands,
   helixConfig,
   helixConfigure,
   helixConfigWarnings,
@@ -180,10 +181,20 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("options are data", helixConfig(view).scrolloff, 9);
   check("reload returns warnings", helixConfigure(view, { config: '[editor]\nscrolloff = 3\ncolor-modes = true\n[keys.normal]\nQ = "file_picker"\n', keys: helixAppKeys }), []);
   check("reload changes options", helixConfig(view).scrolloff, 3);
+  check("reload changes keys", helixCommands(view).find((c) => c.name === "file_picker")?.keys.includes("Q"), true);
   helixMessage(view, null);
   check("a message clears", helixStatus(view).message, null);
   helixConfigure(view, { config: null, keys: [helixAppKeys, { normal: { space: { t: { name: "Tabs", c: "tabs:close" } }, "C-s": ":write" } }] });
   check("a null config resets options", helixConfig(view).scrolloff, 5);
+
+  const list = helixCommands(view);
+  const entry = (name: string) => list.find((c) => c.name === name);
+  check("the list has core commands", entry("move_char_left")?.available, true);
+  check("the list has their keys", entry("move_char_left")?.keys.includes("h"), true);
+  check("the list has app commands with keys", [entry("file_picker")?.available, entry("file_picker")?.keys], [true, ["<space>f"]]);
+  check("the list marks what nobody provides", entry("buffer_picker")?.available, false);
+  check("the list has typed commands", [entry(":write")?.doc, entry(":write")?.keys, entry(":write")?.aliases], ["Save it", ["<C-s>"], [":w"]]);
+  check("the list has the app's own commands", [entry("tabs:close")?.doc, entry("tabs:close")?.keys], ["Close a tab", ["<space>tc"]]);
 
   helixType(view, "gd");
   check("a jump selects a position", [helixSelection(view).primary.cursor, helixStatus(view).line], [10, 1]);

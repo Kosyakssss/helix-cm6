@@ -1,7 +1,7 @@
 export { helix, helixDocument, type HelixCommands, type HelixConfiguration, type HelixDocument, type HelixGrammars, type HelixJump, type HelixOptions, type HelixRange, type HelixSelection } from "./codemirror";
 export {
   helixChanges,
-  helixCommandList,
+  helixCommands,
   helixConfig,
   helixConfigure,
   helixConfigWarnings,
@@ -26,9 +26,7 @@ export {
   helixStatus,
   helixTabstops,
   helixType,
-  helixTypedCommandList,
   type HelixCommandInfo,
-  type HelixTypedCommandInfo,
   type HelixGutterLine,
   type HelixHighlight,
   type HelixHooks,

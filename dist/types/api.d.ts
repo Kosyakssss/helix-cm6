@@ -60,16 +60,11 @@ export declare function helixSetChanges(view: EditorView, changes: Changes): voi
 export interface HelixCommandInfo {
     name: string;
     doc: string;
-    app: boolean;
-}
-export interface HelixTypedCommandInfo {
-    name: string;
     aliases: readonly string[];
-    doc: string;
-    app: string | null;
+    keys: readonly string[];
+    available: boolean;
 }
-export declare function helixCommandList(): HelixCommandInfo[];
-export declare function helixTypedCommandList(): HelixTypedCommandInfo[];
+export declare function helixCommands(view: EditorView): HelixCommandInfo[];
 export interface HelixHighlight {
     from: number;
     to: number;

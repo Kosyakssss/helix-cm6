@@ -1,6 +1,6 @@
 import { Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { APP_COMMANDS, isAppCommandName } from "./commands/app";
+import { APP_COMMANDS } from "./commands/app";
 import { commandContext, type HelixCommandContext } from "./commands/app";
 import { COMMAND_DOCS } from "./commands/docs";
 import type { HelixRunnable } from "./commands/names";
@@ -17,6 +17,8 @@ import type { Host } from "./core/host";
 import { changesOf, setChanges, type Changes } from "./changes";
 import { diagnosticsOf, setDiagnostics, severityRank, type Diagnostic, type Severity } from "./diagnostics";
 import { hostHooks, type EdgeDirection, type HelixEdge, type HostHooks, type MotionRange } from "./hooks";
+import type { TrieNode } from "./keymap/trie";
+import { keySequenceFormat } from "./keys";
 import { Range, Selection } from "./selection";
 import { helixField } from "./state";
 import { DEFAULT_SCOPES, highlightSpans, rainbowSpans } from "./syntax/highlight";
@@ -201,23 +203,50 @@ export function helixSetChanges(view: EditorView, changes: Changes): void {
 export interface HelixCommandInfo {
   name: string;
   doc: string;
-  app: boolean;
-}
-
-export interface HelixTypedCommandInfo {
-  name: string;
   aliases: readonly string[];
-  doc: string;
-  app: string | null;
+  keys: readonly string[];
+  available: boolean;
 }
 
-export function helixCommandList(): HelixCommandInfo[] {
-  const names = new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS)]);
-  return [...names].sort().map((name) => ({ name, doc: COMMAND_DOCS[name] ?? name, app: isAppCommandName(name) }));
+function collectKeys(node: TrieNode, prefix: string, out: Map<string, string[]>): void {
+  for (const [key, trie] of node.map) {
+    const keys = prefix + keySequenceFormat(key);
+    if (trie.kind === "node") {
+      collectKeys(trie, keys, out);
+      continue;
+    }
+    if (trie.kind !== "command") continue;
+    const command = trie.command;
+    const name = command.kind === "static" ? command.name : command.kind === "typable" && command.args === "" ? `:${TYPABLE_MAP.get(command.name)?.name ?? command.name}` : null;
+    if (name === null) continue;
+    const list = out.get(name);
+    if (list) list.push(keys);
+    else out.set(name, [keys]);
+  }
 }
 
-export function helixTypedCommandList(): HelixTypedCommandInfo[] {
-  return TYPABLE.map((c) => ({ name: c.name, aliases: c.aliases, doc: c.doc, app: c.app ?? null }));
+export function helixCommands(view: EditorView): HelixCommandInfo[] {
+  const { editor } = parts(view);
+  const keys = new Map<string, string[]>();
+  collectKeys(editor.keymaps.map[view.state.field(helixField).mode], "", keys);
+  const out = new Map<string, HelixCommandInfo>();
+  for (const name of new Set([...Object.keys(STATIC_COMMANDS), ...Object.keys(APP_COMMANDS)])) {
+    out.set(name, { name, doc: COMMAND_DOCS[name] ?? name, aliases: [], keys: keys.get(name) ?? [], available: editor.hasCommand(name) });
+  }
+  for (const command of TYPABLE) {
+    const name = `:${command.name}`;
+    out.set(name, { name, doc: editor.app?.command(command.name) ? editor.commandDoc(command.name) : command.doc, aliases: command.aliases.map((alias) => `:${alias}`), keys: keys.get(name) ?? [], available: !command.app || editor.appCommand(command.app) !== null });
+  }
+  for (const name of editor.app?.commandNames?.() ?? []) {
+    if (out.has(name) || out.has(`:${name}`)) {
+      const held = out.get(name) ?? out.get(`:${name}`)!;
+      const doc = editor.commandDoc(name);
+      if (doc !== name && !COMMAND_DOCS[name]) held.doc = doc;
+      continue;
+    }
+    out.set(name, { name, doc: editor.commandDoc(name), aliases: [], keys: [...(keys.get(name) ?? []), ...(keys.get(`:${name}`) ?? [])], available: true });
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export interface HelixHighlight {

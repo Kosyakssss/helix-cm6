@@ -65,7 +65,7 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-jx1cbdtr.js";
+} from "./chunk-f4bgt4r0.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
