@@ -21,7 +21,7 @@ import {
 } from "helix-cm6";
 import { LspClient, toEdit, toOffset, toPosition, type LspRange, type LspTextEdit } from "./lsp";
 import { picker, type PickerItem } from "./picker";
-import { lineNumbers, popup, syntaxColours } from "./ui";
+import { lineNumbers, popup, syntaxColors } from "./ui";
 
 const api = async <T>(path: string, init?: RequestInit) => (await (await fetch(`/api/${path}`, init)).json()) as T;
 const { root } = await api<{ root: string }>("root");
@@ -294,7 +294,7 @@ const sync = EditorView.updateListener.of((update) => {
 });
 
 function extensionsFor(path: string) {
-  return [extension, helixDocument.of({ path }), hooks, sync, syntaxColours, lineNumbers];
+  return [extension, helixDocument.of({ path }), hooks, sync, syntaxColors, lineNumbers];
 }
 
 async function addPane(path: string): Promise<Pane> {

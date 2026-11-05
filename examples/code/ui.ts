@@ -4,7 +4,7 @@ import { helixDiagnostics, helixGutter, helixHighlights, helixSyntaxChanged, typ
 
 const scopeClass = (scope: string) => `tok-${scope.split(".")[0]}`;
 
-export const syntaxColours = ViewPlugin.fromClass(
+export const syntaxColors = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet = Decoration.none;
     stale = false;
