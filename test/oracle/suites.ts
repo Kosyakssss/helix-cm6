@@ -313,6 +313,30 @@ const FENCED = [
   "",
 ].join("\n");
 
+export function snippetSuite(): Case[] {
+  const snippets: [string, string, string][] = [
+    ["#[|]#", "foo(${1:bar}, ${2:baz})$0", ""],
+    ["#[|]#\n", "foo(${1:bar}, ${2:baz})$0", "i<tab>"],
+    ["#[|]#\n", "foo(${1:bar}, ${2:baz})$0", "i<tab>x<tab>y<esc>"],
+    ["#[|]#\n", "foo(${1:bar}, ${2:baz})$0", "iZZ<tab>YY<tab>end<esc>"],
+    ["#[|]#\n", "foo($1, $2)", "iA<tab>B<tab>C<esc>"],
+    ["#[|]#\n", "$1 and $1", "iab<tab>cd<esc>"],
+    ["#[|]#\n", "${1:one ${2:two}} $0", "i<tab>x<esc>"],
+    ["  #[|]#\n", "if x {\n\t$1\n}$0", "ia<tab>b<esc>"],
+    ["#[|]#\n", "if x {\n\t$1\n}$0", "ia<tab>b<esc>"],
+    ["#[a|]#\n#(b|)#\n", "<${1:t}>$0", "i<tab>x<esc>"],
+    ["#[|]#\n", "${1|one,two|}-$2", "ix<tab>y<esc>"],
+    ["#[|]#\n", "$TM_FILENAME-${TM_FILENAME:def}-$1", "ix<esc>"],
+    ["#[|]#\n", "a\\$b \\} $ c", ""],
+    ["#[|]#\n", "${0:ignored} $1", "ix<tab>y<esc>"],
+    ["#[|]#\n", "$2 then $1", "ifirst<tab>second<esc>"],
+    ["#[|]#\n", "foo(${1:bar}, ${2:baz})$0", "ij<esc>u"],
+    ["#[|]#\n", "foo(${1:bar}, ${2:baz})$0", "<esc>gg<tab>"],
+    ["xy #[|]#z\n", "[${1:in}]$0", "i<esc>;"],
+  ];
+  return snippets.map(([input, source, keys], i) => ({ id: `snippet#${i}`, in: input, keys: `<snippet>${source}</snippet>${keys}` }));
+}
+
 export function highlightSuite(scopes: readonly string[]): Case[] {
   const keys = `<highlight>${scopes.join(",")}`;
   const cases: Case[] = [];

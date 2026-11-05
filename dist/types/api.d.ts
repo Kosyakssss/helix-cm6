@@ -20,6 +20,15 @@ export declare function helixSelect(view: EditorView, ranges: readonly {
     anchor: number;
     head: number;
 }[], primary?: number): void;
+export declare function helixSnippet(view: EditorView, source: string, options?: {
+    removeBefore?: number;
+    variables?: Readonly<Record<string, string>>;
+}): boolean;
+export declare function helixTabstops(view: EditorView): {
+    from: number;
+    to: number;
+    choices: readonly string[] | null;
+}[];
 export declare function helixMessage(view: EditorView, text: string, severity?: "info" | "error"): void;
 export declare function helixPrompt(view: EditorView, request: PromptRequest): void;
 export interface HelixHighlight {

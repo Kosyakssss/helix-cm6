@@ -191,8 +191,76 @@ export function helixExtension(env: ViewEnv): Extension {
     return true;
   };
 
+  const deliverText = (view: EditorView, text: string) => {
+    const host = env.hostFor(view);
+    for (const ch of text) {
+      const key = keyFromDom({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
+      if (key !== null) editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
+    }
+  };
+
+  const imeInputs = new WeakMap<EditorView, HTMLTextAreaElement>();
+
+  const openIme = (view: EditorView) => {
+    let input = imeInputs.get(view);
+    const win = windowOf(view);
+    let timer: number | undefined;
+    const close = () => {
+      if (timer !== undefined) win?.clearTimeout(timer);
+      timer = undefined;
+      input!.classList.remove("hx-ime-on");
+      input!.value = "";
+      view.focus();
+    };
+    if (!input) {
+      input = make(view.dom.ownerDocument, "textarea", "hx-ime");
+      input.setAttribute("aria-hidden", "true");
+      input.tabIndex = -1;
+      view.dom.appendChild(input);
+      imeInputs.set(view, input);
+      input.addEventListener("compositionstart", () => {
+        if (timer !== undefined) win?.clearTimeout(timer);
+        timer = undefined;
+        input!.classList.add("hx-ime-on");
+      });
+      input.addEventListener("compositionend", (event) => {
+        const text = event.data;
+        close();
+        if (text) deliverText(view, text);
+      });
+      input.addEventListener("input", (event) => {
+        if (event.isComposing || input!.classList.contains("hx-ime-on")) return;
+        const text = input!.value;
+        close();
+        if (text) deliverText(view, text);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !event.isComposing) close();
+      });
+    }
+    const value = view.state.field(helixField, false);
+    const rect = view.dom.getBoundingClientRect();
+    const coords = value ? view.coordsAtPos(value.selection.primary().cursor(view.state.doc)) : null;
+    const panel = editor.activePrompt ? view.dom.querySelector(".hx-prompt:not(.hx-hidden)")?.getBoundingClientRect() : null;
+    setProps(input, { "--hx-ime-left": `${(panel?.left ?? coords?.left ?? rect.left) - rect.left}px`, "--hx-ime-top": `${(panel?.top ?? coords?.top ?? rect.top) - rect.top}px` });
+    input.focus({ preventScroll: true });
+    timer = win?.setTimeout(close, 400);
+  };
+
   const keyHandler = Prec.highest(
     EditorView.domEventHandlers({
+      mousedown(event, view) {
+        if (!editor.config.mouse) {
+          event.preventDefault();
+          view.focus();
+          return true;
+        }
+        if (event.button === 1 && !editor.config.middleClickPaste) {
+          event.preventDefault();
+          return true;
+        }
+        return false;
+      },
       compositionstart(_event, view) {
         const value = view.state.field(helixField, false);
         if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
@@ -207,10 +275,12 @@ export function helixExtension(env: ViewEnv): Extension {
       },
       keydown(event, view) {
         lastKeydown = null;
-        if (event.isComposing || event.key === "Process") {
+        if (event.isComposing || event.key === "Process" || (event.key === "Dead" && !event.altKey)) {
           const value = view.state.field(helixField, false);
           if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
-          endComposition(view);
+          if (view.composing) endComposition(view);
+          openIme(view);
+          return true;
         }
         return onKey(event, view);
       },
@@ -301,6 +371,7 @@ export function helixExtension(env: ViewEnv): Extension {
           this.decorations = buildDecorations(update.view, env);
         }
         if (update.focusChanged && update.view.hasFocus) env.onFocusChange(update.view);
+        if (update.focusChanged && !update.view.hasFocus && !update.view.dom.contains(update.view.dom.ownerDocument.activeElement)) editor.snippets.delete(env.hostFor(update.view).id);
         if (update.transactions.length > 0 || update.focusChanged) env.onRender(update.view);
       }
       destroy() {
@@ -401,7 +472,7 @@ function renderPanel(view: EditorView, env: ViewEnv, dom: HTMLElement, info: HTM
   }
   const guest = env.panelGuest?.(view) ?? null;
   const source = guest?.hasFocus ? guest : view;
-  const focused = source.hasFocus;
+  const focused = source.hasFocus || source.dom.contains(source.dom.ownerDocument.activeElement);
   const host = env.hostFor(source);
   const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
   prompt.replaceChildren();

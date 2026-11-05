@@ -113,7 +113,10 @@ export function smartTab(cx: Context): void {
       const start = lineToChar(doc, lineIndex(doc, cursor));
       return [...doc.sliceString(start, cursor)].every((c) => isWhitespace(c));
     });
-    if (!afterWhitespace) return;
+    if (!afterWhitespace) {
+      if (cx.editor.snippets.has(cx.host.id)) cx.editor.runStatic(cx, "goto_next_tabstop");
+      return;
+    }
   }
   insertTabImpl(cx, 1);
 }

@@ -2,7 +2,7 @@
 
 The goal is all of Helix that makes sense in CodeMirror 6, ported from Helix's source, with a public API that apps can build on. `docs/parity.md` lists every Helix command, option and UI part and its state. Nothing goes to npm until the maintainer has checked the result.
 
-The engine became an editing core after Phase 5: the UI components from Phase 3 and the reference app from Phase 4 are gone, and apps supply them. `docs/api.md` says how. What is left in the core: snippets with their tabstops, `mouse = false`, and IME input in normal mode and prompts. Phase 6 is the maintainer's check before npm.
+The engine became an editing core after Phase 5: the UI components from Phase 3 and the reference app from Phase 4 are gone, and apps supply them. `docs/api.md` says how. Phase 6 is the maintainer's check before npm.
 
 The engine work lands on `main` here. The Obsidian work lands on helix-motions' `on-helix-cm6` branch, which pins a commit of this repo. Each phase ends with all tests green in Chromium, Firefox and WebKit, a report, and a push.
 

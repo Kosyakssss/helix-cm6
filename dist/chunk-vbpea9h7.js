@@ -4779,8 +4779,11 @@ function smartTab(cx) {
       const start = lineToChar(doc, lineIndex(doc, cursor));
       return [...doc.sliceString(start, cursor)].every((c) => isWhitespace(c));
     });
-    if (!afterWhitespace)
+    if (!afterWhitespace) {
+      if (cx.editor.snippets.has(cx.host.id))
+        cx.editor.runStatic(cx, "goto_next_tabstop");
       return;
+    }
   }
   insertTabImpl(cx, 1);
 }
@@ -7224,7 +7227,7 @@ var miscCommands = {
   toggle_line_comments: (cx) => cx.editor.runComments(cx, "line"),
   toggle_block_comments: (cx) => cx.editor.runComments(cx, "block")
 };
-var UNSUPPORTED = ["goto_next_tabstop", "goto_prev_tabstop"];
+var UNSUPPORTED = [];
 
 // src/commands/command-line.ts
 function split(line) {
@@ -8022,6 +8025,728 @@ var gotoCommands = {
   goto_prev_change: (cx) => gotoChange(cx, "prev"),
   goto_first_change: (cx) => gotoChange(cx, "first"),
   goto_last_change: (cx) => gotoChange(cx, "last")
+};
+
+// src/snippets.ts
+var LAST_TABSTOP = Number.MAX_SAFE_INTEGER;
+var TEXT_ESCAPES = ["\\", "}", "$"];
+var CHOICE_ESCAPES = ["\\", "|", ","];
+function text(escapes, terms) {
+  return (input) => {
+    let out = "";
+    for (let i = 0;i < input.length; ) {
+      const c = String.fromCodePoint(input.codePointAt(i));
+      if (c === "\\") {
+        const next = input[i + 1];
+        if (next !== undefined && escapes.includes(next)) {
+          out += next;
+          i += 2;
+          continue;
+        }
+        out += "\\";
+        i += 1;
+        continue;
+      }
+      if (terms.includes(c))
+        return [input.slice(i), out];
+      out += c;
+      i += c.length;
+    }
+    return ["", out];
+  };
+}
+function lit(input, value) {
+  return input.startsWith(value) ? input.slice(value.length) : null;
+}
+function digit(input) {
+  const match = /^[0-9]+/.exec(input);
+  return match ? [input.slice(match[0].length), Number(match[0])] : null;
+}
+function name(input) {
+  const match = /^[_a-zA-Z][_a-zA-Z0-9]*/.exec(input);
+  return match ? [input.slice(match[0].length), match[0]] : null;
+}
+function first2(input, parsers) {
+  for (const parser of parsers) {
+    const result = parser(input);
+    if (result)
+      return result;
+  }
+  return null;
+}
+function many(parser, input) {
+  const out = [];
+  let rest = input;
+  for (;; ) {
+    const result = parser(rest);
+    if (!result || result[0].length === rest.length)
+      return [rest, out];
+    rest = result[0];
+    out.push(result[1]);
+  }
+}
+function format2(input) {
+  return first2(input, [
+    (s) => {
+      const r = lit(s, "$");
+      const d = r === null ? null : digit(r);
+      return d && [d[0], { kind: "capture", group: d[1] }];
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const d = r === null ? null : digit(r);
+      const e = d && lit(d[0], "}");
+      return d && e !== null && e !== undefined ? [e, { kind: "capture", group: d[1] }] : null;
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const d = r === null ? null : digit(r);
+      const c = d && lit(d[0], ":/");
+      if (!d || c === null || c === undefined)
+        return null;
+      for (const change of ["upcase", "downcase", "capitalize", "pascalcase", "camelcase"]) {
+        const after = lit(c, change);
+        const e = after === null ? null : lit(after, "}");
+        if (e !== null)
+          return [e, { kind: "case", group: d[1], change }];
+      }
+      return null;
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const d = r === null ? null : digit(r);
+      const c = d && lit(d[0], ":+");
+      if (!d || c === null || c === undefined)
+        return null;
+      const [after, value] = text(TEXT_ESCAPES, ["}"])(c);
+      const e = lit(after, "}");
+      return e === null ? null : [e, { kind: "conditional", group: d[1], ifSet: value, ifUnset: "" }];
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const d = r === null ? null : digit(r);
+      const c = d && lit(d[0], ":?");
+      if (!d || c === null || c === undefined)
+        return null;
+      const [after, ifSet] = text(TEXT_ESCAPES, [":"])(c);
+      const colon = lit(after, ":");
+      if (colon === null)
+        return null;
+      const [end, ifUnset] = text(TEXT_ESCAPES, ["}"])(colon);
+      const e = lit(end, "}");
+      return e === null ? null : [e, { kind: "conditional", group: d[1], ifSet, ifUnset }];
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const d = r === null ? null : digit(r);
+      const c = d && lit(d[0], ":");
+      if (!d || c === null || c === undefined)
+        return null;
+      const [after, value] = text(TEXT_ESCAPES, ["}"])(lit(c, "-") ?? c);
+      const e = lit(after, "}");
+      return e === null ? null : [e, { kind: "conditional", group: d[1], ifSet: "", ifUnset: value }];
+    }
+  ]);
+}
+function regex(input) {
+  const open = lit(input, "/");
+  if (open === null)
+    return null;
+  const [afterRegex, value] = text(["/"], ["/"])(open);
+  const middle = lit(afterRegex, "/");
+  if (middle === null)
+    return null;
+  const [afterFormat, replacement] = many((s) => first2(s, [
+    format2,
+    (t) => {
+      const r = lit(t, "$");
+      return r === null ? null : [r, { kind: "text", text: "$" }];
+    },
+    (t) => {
+      const [r, v] = text(["\\", "/"], ["/", "$"])(t);
+      return [r, { kind: "text", text: v }];
+    }
+  ]), middle);
+  const close = lit(afterFormat, "/");
+  if (close === null)
+    return null;
+  const [rest, options] = text([], ["}"])(close);
+  return [rest, { regex: value, replacement, options }];
+}
+function tabstop(input) {
+  const plain = lit(input, "$");
+  const d = plain === null ? null : digit(plain);
+  if (d)
+    return [d[0], { kind: "tabstop", tabstop: d[1], transform: null }];
+  const open = lit(input, "${");
+  const n = open === null ? null : digit(open);
+  if (!n)
+    return null;
+  const transform = regex(n[0]);
+  const close = lit(transform ? transform[0] : n[0], "}");
+  return close === null ? null : [close, { kind: "tabstop", tabstop: n[1], transform: transform ? transform[1] : null }];
+}
+function placeholder(input) {
+  const open = lit(input, "${");
+  const n = open === null ? null : digit(open);
+  const colon = n && lit(n[0], ":");
+  if (!n || colon === null || colon === undefined)
+    return null;
+  const [rest, value] = many(anything(TEXT_ESCAPES, true), colon);
+  const close = lit(rest, "}");
+  return close === null ? null : [close, { kind: "placeholder", tabstop: n[1], value }];
+}
+function choice(input) {
+  const open = lit(input, "${");
+  const n = open === null ? null : digit(open);
+  const bar = n && lit(n[0], "|");
+  if (!n || bar === null || bar === undefined)
+    return null;
+  const part = text(CHOICE_ESCAPES, ["|", ","]);
+  const choices = [];
+  let [rest, value] = part(bar);
+  choices.push(value);
+  for (;; ) {
+    const next = lit(rest, ",");
+    if (next === null)
+      break;
+    [rest, value] = part(next);
+    choices.push(value);
+  }
+  const close = lit(rest, "|}");
+  return close === null ? null : [close, { kind: "choice", tabstop: n[1], choices }];
+}
+function variable(input) {
+  return first2(input, [
+    (s) => {
+      const r = lit(s, "$");
+      const v = r === null ? null : name(r);
+      return v && [v[0], { kind: "variable", name: v[1], fallback: null, transform: null }];
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const v = r === null ? null : name(r);
+      const e = v && lit(v[0], "}");
+      return v && e !== null && e !== undefined ? [e, { kind: "variable", name: v[1], fallback: null, transform: null }] : null;
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const v = r === null ? null : name(r);
+      const c = v && lit(v[0], ":");
+      if (!v || c === null || c === undefined)
+        return null;
+      const [rest, fallback] = many(anything(TEXT_ESCAPES, true), c);
+      const e = lit(rest, "}");
+      return e === null ? null : [e, { kind: "variable", name: v[1], fallback, transform: null }];
+    },
+    (s) => {
+      const r = lit(s, "${");
+      const v = r === null ? null : name(r);
+      const t = v && regex(v[0]);
+      const e = t && lit(t[0], "}");
+      return v && t && e !== null && e !== undefined ? [e, { kind: "variable", name: v[1], fallback: null, transform: t[1] }] : null;
+    }
+  ]);
+}
+function anything(escapes, endAtBrace) {
+  const terms = endAtBrace ? ["$", "}"] : ["$"];
+  return (input) => first2(input, [
+    tabstop,
+    placeholder,
+    choice,
+    variable,
+    (s) => {
+      const r = lit(s, "$");
+      return r === null ? null : [r, { kind: "text", text: "$" }];
+    },
+    (s) => {
+      const [r, v] = text(escapes, terms)(s);
+      return [r, { kind: "text", text: v }];
+    }
+  ]);
+}
+function parse2(source) {
+  const [rest, elements] = many(anything(TEXT_ESCAPES, false), source);
+  return rest === "" && elements.length > 0 ? elements : null;
+}
+function casePart(value, change) {
+  switch (change) {
+    case "upcase":
+      return value.toUpperCase();
+    case "downcase":
+      return value.toLowerCase();
+    case "capitalize": {
+      const [head, ...tail] = [...value];
+      return `${(head ?? "").toUpperCase()}${tail.join("")}`;
+    }
+    case "pascalcase":
+    case "camelcase": {
+      const pascal = change === "pascalcase";
+      let out = "";
+      let start = pascal;
+      let isFirst = true;
+      for (const c of value) {
+        if (!/[\p{Alphabetic}\p{N}]/u.test(c)) {
+          start = true;
+          continue;
+        }
+        if (!pascal && isFirst)
+          out += c.toLowerCase();
+        else
+          out += start ? c.toUpperCase() : c;
+        isFirst = false;
+        start = false;
+      }
+      return out;
+    }
+  }
+}
+
+class Transform {
+  regex;
+  global;
+  replacement;
+  constructor(regex, global, replacement) {
+    this.regex = regex;
+    this.global = global;
+    this.replacement = replacement;
+  }
+  static create(parsed) {
+    const flags = [...parsed.options].filter((c) => c === "i" || c === "m").join("");
+    try {
+      return new Transform(new RegExp(parsed.regex, `${flags}gu`), parsed.options.includes("g"), parsed.replacement);
+    } catch {
+      return null;
+    }
+  }
+  apply(value) {
+    let out = "";
+    let last = 0;
+    this.regex.lastIndex = 0;
+    for (const match of value.matchAll(this.regex)) {
+      out += value.slice(last, match.index);
+      last = match.index + match[0].length;
+      for (const item of this.replacement) {
+        if (item.kind === "text")
+          out += item.text;
+        else if (item.kind === "capture")
+          out += match[item.group] ?? "";
+        else if (item.kind === "case") {
+          const group = match[item.group];
+          if (group)
+            out += casePart(group, item.change);
+        } else
+          out += match[item.group] ? item.ifSet : item.ifUnset;
+      }
+      if (!this.global)
+        break;
+    }
+    return out + value.slice(last);
+  }
+}
+
+class Snippet {
+  elements;
+  tabstops = [];
+  static parse(source) {
+    const parsed = parse2(source);
+    return parsed ? new Snippet(parsed) : null;
+  }
+  constructor(parsed) {
+    this.elements = this.elaborate(parsed, null);
+    this.fixup();
+    const last = this.tabstops[this.tabstops.length - 1];
+    if (!last || last.idx !== LAST_TABSTOP) {
+      this.tabstops.push({ idx: LAST_TABSTOP, parent: null, kind: { kind: "empty" } });
+      this.elements.push({ kind: "tabstop", idx: LAST_TABSTOP });
+    }
+    this.renumber();
+  }
+  place(idx) {
+    return idx === 0 ? LAST_TABSTOP : idx - 1;
+  }
+  elaborate(parsed, parent) {
+    return parsed.map((element) => {
+      switch (element.kind) {
+        case "tabstop": {
+          const idx = this.place(element.tabstop);
+          if (!element.transform) {
+            this.tabstops.push({ idx, parent, kind: { kind: "placeholder", fallback: [] } });
+          } else {
+            const transform = Transform.create(element.transform);
+            this.tabstops.push({ idx, parent, kind: transform ? { kind: "transform", transform } : { kind: "empty" } });
+          }
+          return { kind: "tabstop", idx };
+        }
+        case "placeholder": {
+          const idx = this.place(element.tabstop);
+          const fallback = this.elaborate(idx === LAST_TABSTOP ? [] : element.value, idx);
+          this.tabstops.push({ idx, parent, kind: { kind: "placeholder", fallback } });
+          return { kind: "tabstop", idx };
+        }
+        case "choice": {
+          const idx = this.place(element.tabstop);
+          this.tabstops.push({ idx, parent, kind: { kind: "choice", choices: element.choices } });
+          return { kind: "tabstop", idx };
+        }
+        case "variable":
+          return {
+            kind: "variable",
+            name: element.name,
+            fallback: element.fallback ? this.elaborate(element.fallback, parent) : null,
+            transform: element.transform ? Transform.create(element.transform) : null
+          };
+        case "text":
+          return { kind: "text", text: element.text };
+      }
+    });
+  }
+  fixup() {
+    const sorted = this.tabstops.map((tabstop, i) => [tabstop, i]).sort((a, b) => a[0].idx - b[0].idx || a[1] - b[1]);
+    this.tabstops.length = 0;
+    for (const [tabstop] of sorted) {
+      const previous = this.tabstops[this.tabstops.length - 1];
+      if (!previous || previous.idx !== tabstop.idx)
+        this.tabstops.push(tabstop);
+      else if (previous.kind.kind === "empty")
+        this.tabstops[this.tabstops.length - 1] = tabstop;
+    }
+  }
+  renumber() {
+    const index = new Map(this.tabstops.map((tabstop, i) => [tabstop.idx, i]));
+    const walk = (elements) => {
+      for (const element of elements) {
+        if (element.kind === "tabstop")
+          element.idx = index.get(element.idx);
+        else if (element.kind === "variable" && element.fallback)
+          walk(element.fallback);
+      }
+    };
+    walk(this.elements);
+    for (const tabstop of this.tabstops) {
+      if (tabstop.parent !== null)
+        tabstop.parent = index.get(tabstop.parent);
+      if (tabstop.kind.kind === "placeholder")
+        walk(tabstop.kind.fallback);
+    }
+  }
+}
+function tabstopSelection(tabstop, backward, primary, snippetRanges) {
+  return new Selection2(tabstop.ranges.map((span) => backward ? new Range2(span.end, span.start) : new Range2(span.start, span.end)), primary * Math.floor(tabstop.ranges.length / snippetRanges));
+}
+function normalizeIndentation(prefix, line, style, tabWidth) {
+  let off = 0;
+  for (const c of prefix)
+    off += c === "\t" ? tabWidth - off % tabWidth : 1;
+  let width = 0;
+  let original = 0;
+  for (const c of line) {
+    if (c === "\t")
+      width += tabWidth - (width + off) % tabWidth;
+    else if (c === " ")
+      width += 1;
+    else
+      break;
+    original++;
+  }
+  if (style.kind === "tabs")
+    return ["\t".repeat(Math.floor(width / tabWidth)) + " ".repeat(width % tabWidth), original];
+  return [" ".repeat(width), original];
+}
+
+class Renderer {
+  context;
+  source;
+  target;
+  indent;
+  off;
+  atNewline;
+  text = "";
+  constructor(context, source, target, indent, off, atNewline) {
+    this.context = context;
+    this.source = source;
+    this.target = target;
+    this.indent = indent;
+    this.off = off;
+    this.atNewline = atNewline;
+  }
+  elements(elements) {
+    for (const element of elements) {
+      if (element.kind === "tabstop")
+        this.tabstop(element.idx);
+      else if (element.kind === "text")
+        this.multiline(element.text);
+      else {
+        const value = this.context.variable(element.name);
+        if (value !== null)
+          this.multiline(element.transform ? element.transform.apply(value) : value);
+        else if (element.fallback)
+          this.elements(element.fallback);
+      }
+    }
+  }
+  multiline(text) {
+    const lines = text.split(`
+`).map((line) => line.endsWith("\r") ? line.slice(0, -1) : line);
+    this.push(lines[0], this.atNewline);
+    for (const line of lines.slice(1)) {
+      this.off += 1 + this.indent.length;
+      this.text += `
+${this.indent}`;
+      this.push(line, true);
+    }
+  }
+  push(text, atNewline) {
+    let rest = text;
+    if (atNewline) {
+      const [indent, used] = normalizeIndentation(this.indent, rest, this.context.indentStyle, this.context.tabWidth);
+      this.text += indent;
+      this.off += indent.length;
+      rest = rest.slice(used);
+      if (rest === "") {
+        this.atNewline = true;
+        return;
+      }
+    }
+    this.text += rest;
+    this.off += rest.length;
+  }
+  tabstop(index) {
+    const start = this.off;
+    const kind = this.source.tabstops[index].kind;
+    let end = start;
+    if (kind.kind === "placeholder" && kind.fallback.length > 0) {
+      this.elements(kind.fallback);
+      this.target.tabstops[index].placeholder = true;
+      end = this.off;
+    }
+    this.target.tabstops[index].ranges.push({ start, end });
+  }
+}
+function prepareRender(snippet) {
+  return {
+    ranges: [],
+    tabstops: snippet.tabstops.map((tabstop) => ({
+      ranges: [],
+      parent: tabstop.parent,
+      placeholder: tabstop.kind.kind === "choice",
+      choices: tabstop.kind.kind === "choice" ? tabstop.kind.choices : null
+    }))
+  };
+}
+function renderSnippet(snippet, doc, selection, changeRange, context) {
+  const rendered = prepareRender(snippet);
+  const changes = [];
+  let off = 0;
+  let lastEnd = 0;
+  let primary = 0;
+  selection.ranges.forEach((range, i) => {
+    const [from, to] = changeRange(range);
+    if (changes.length > 0 && from < lastEnd) {
+      if (i === selection.primaryIndex)
+        primary = changes.length - 1;
+      return;
+    }
+    lastEnd = to;
+    if (i === selection.primaryIndex)
+      primary = changes.length;
+    const line = doc.lineAt(from);
+    const prefix = doc.sliceString(line.from, from);
+    const indentLength = prefix.length - prefix.trimStart().length;
+    const indent = prefix.slice(0, indentLength);
+    const position = from + off;
+    const renderer = new Renderer(context, snippet, rendered, indent, position, indentLength === from - line.from);
+    renderer.elements(snippet.elements);
+    rendered.ranges.push({ start: position, end: renderer.off });
+    off += from - to + (renderer.off - position);
+    changes.push([from, to, renderer.text]);
+  });
+  return { changes, rendered, primary };
+}
+function firstSelection(rendered, backward, primary) {
+  return tabstopSelection(rendered.tabstops[0], backward, primary, rendered.ranges.length);
+}
+
+class ActiveSnippet {
+  ranges;
+  tabstops;
+  active = new Set;
+  current = 0;
+  constructor(ranges, tabstops) {
+    this.ranges = ranges;
+    this.tabstops = tabstops;
+  }
+  static create(rendered) {
+    return rendered.tabstops.length === 1 ? null : new ActiveSnippet(rendered.ranges, rendered.tabstops);
+  }
+  isValid(selection) {
+    let index = 0;
+    for (const range of selection.ranges) {
+      const from = range.from();
+      const to = range.to();
+      for (;; ) {
+        const outer = this.ranges[index];
+        if (!outer)
+          return false;
+        if (outer.end <= from) {
+          index++;
+          continue;
+        }
+        if (outer.start <= from && to <= outer.end)
+          break;
+        return false;
+      }
+    }
+    return true;
+  }
+  allTabstops() {
+    return this.tabstops;
+  }
+  deletePlaceholder() {
+    return this.tabstops[this.current].ranges.map((span) => [span.start, span.end, ""]);
+  }
+  map(changes) {
+    for (const range of this.ranges) {
+      range.start = changes.mapPos(range.start, 1);
+      range.end = changes.mapPos(range.end, 1);
+    }
+    this.tabstops.forEach((tabstop, i) => {
+      const live = this.active.has(i);
+      for (const range of tabstop.ranges) {
+        const empty = range.start === range.end;
+        range.start = changes.mapPos(range.start, 1);
+        range.end = changes.mapPos(range.end, live || empty ? 1 : -1);
+      }
+      const perSnippet = Math.floor(tabstop.ranges.length / this.ranges.length);
+      let snippet = 0;
+      let inSnippet = 0;
+      let previous = { start: 0, end: 0 };
+      tabstop.ranges = tabstop.ranges.filter((range) => {
+        if (inSnippet === perSnippet) {
+          snippet++;
+          inSnippet = 0;
+        }
+        inSnippet++;
+        const outer = this.ranges[snippet];
+        const keep = outer.start <= outer.end;
+        if (keep) {
+          if (previous.end > range.start) {
+            range.start = previous.end;
+            range.end = Math.max(range.end, range.start);
+          }
+          previous = range;
+        }
+        return keep;
+      });
+    });
+    return this.ranges.every((range) => range.end <= range.start);
+  }
+  next(selection) {
+    const primary = this.primaryIndex(selection);
+    while (this.current + 1 < this.tabstops.length) {
+      this.current++;
+      if (this.activate())
+        return [this.selection(primary), this.current + 1 === this.tabstops.length];
+    }
+    return [this.selection(primary), true];
+  }
+  previous(selection) {
+    const primary = this.primaryIndex(selection);
+    while (this.current !== 0) {
+      this.current--;
+      if (this.activate())
+        return this.selection(primary);
+    }
+    return null;
+  }
+  insertSubsnippet(rendered) {
+    const fits = rendered.ranges.length % this.ranges.length === 0 && this.ranges.every((outer) => rendered.ranges.some((inner) => outer.start <= inner.start && inner.end <= outer.end));
+    if (!fits)
+      return ActiveSnippet.create(rendered);
+    const parent = this.tabstops[this.current].parent;
+    const tabstops = rendered.tabstops.map((tabstop) => ({ ...tabstop, parent: tabstop.parent !== null ? tabstop.parent + this.current : parent }));
+    this.tabstops.splice(this.current, 1, ...tabstops);
+    this.activate();
+    return this;
+  }
+  selection(primary) {
+    return tabstopSelection(this.tabstops[this.current], false, primary, this.ranges.length);
+  }
+  primaryIndex(selection) {
+    const primary = selection.primary();
+    return Math.max(this.ranges.findIndex((range) => range.start <= primary.from() && primary.to() <= range.end + 1), 0);
+  }
+  activate() {
+    if (this.current === this.tabstops.length - 1)
+      return false;
+    this.active.clear();
+    this.active.add(this.current);
+    let parent = this.tabstops[this.current].parent;
+    while (parent !== null) {
+      this.active.add(parent);
+      parent = this.tabstops[parent].parent;
+    }
+    return true;
+  }
+}
+
+// src/commands/snippet.ts
+function snippetContext(cx, variables = {}) {
+  const { style, tabWidth } = cx.editor.indent(cx.host);
+  return { variable: (name) => variables[name] ?? null, tabWidth, indentStyle: style };
+}
+function insertSnippet(cx, source, options = {}) {
+  const snippet = Snippet.parse(source);
+  if (!snippet) {
+    cx.editor.setError("could not parse the snippet");
+    return false;
+  }
+  const doc = docOf2(cx);
+  const sel = selOf2(cx);
+  const remove = options.removeBefore ?? 0;
+  const { changes, rendered, primary } = renderSnippet(snippet, doc, sel, (range) => {
+    const cursor = range.cursor(doc);
+    return [Math.max(cursor - remove, 0), cursor];
+  }, snippetContext(cx, options.variables));
+  const backward = sel.primary().anchor > sel.primary().head;
+  apply(cx, changeSetOf(doc, changes), firstSelection(rendered, backward, primary));
+  const active = cx.editor.snippets.get(cx.host.id);
+  const next = active ? active.insertSubsnippet(rendered) : ActiveSnippet.create(rendered);
+  if (next)
+    cx.editor.snippets.set(cx.host.id, next);
+  else
+    cx.editor.snippets.delete(cx.host.id);
+  return true;
+}
+function gotoTabstop(cx, forward) {
+  const snippet = cx.editor.snippets.get(cx.host.id);
+  if (!snippet) {
+    cx.editor.setError("no snippet is currently active");
+    return;
+  }
+  cx.editor.snippets.delete(cx.host.id);
+  const selection = selOf2(cx);
+  const [target, last] = forward ? snippet.next(selection) : [snippet.previous(selection), false];
+  if (!target)
+    return;
+  setSel2(cx, target);
+  if (!last)
+    cx.editor.snippets.set(cx.host.id, snippet);
+  if (modeOf(cx) === "insert") {
+    cx.onNextKey((inner, key) => {
+      const ch = inner.editor.keyChar(key);
+      if (ch === null)
+        return;
+      const active = inner.editor.snippets.get(inner.host.id);
+      if (active)
+        apply(inner, changeSetOf(docOf2(inner), active.deletePlaceholder()));
+      insertChar(inner, ch);
+    }, "fallback");
+  }
+}
+var snippetCommands = {
+  goto_next_tabstop: (cx) => gotoTabstop(cx, true),
+  goto_prev_tabstop: (cx) => gotoTabstop(cx, false)
 };
 
 // src/commands/app.ts
@@ -9862,7 +10587,8 @@ var STATIC_COMMANDS = {
   ...miscCommands,
   ...syntaxCommands,
   ...shellCommands,
-  ...gotoCommands
+  ...gotoCommands,
+  ...snippetCommands
 };
 function isKnownCommand(name) {
   return name in STATIC_COMMANDS || UNSUPPORTED.includes(name) || isAppCommandName(name);
@@ -10506,6 +11232,7 @@ class HelixEditor2 {
   autoinfo = null;
   ui = {};
   app = null;
+  snippets = new Map;
   viewOps = null;
   activePrompt = null;
   visualLines = false;
@@ -10582,6 +11309,13 @@ class HelixEditor2 {
   docChanged(host, changes) {
     for (const list of this.jumplists.values())
       list.map(host.id, changes);
+    if (this.snippets.get(host.id)?.map(changes))
+      this.snippets.delete(host.id);
+  }
+  checkSnippet(host) {
+    const snippet = this.snippets.get(host.id);
+    if (snippet && !snippet.isValid(host.state.field(helixField2).selection))
+      this.snippets.delete(host.id);
   }
   resetJumplists() {
     this.jumplists.clear();
@@ -10782,6 +11516,8 @@ class HelixEditor2 {
     for (const callback of cx.callbacks)
       callback();
     if (alive)
+      this.checkSnippet(host);
+    if (alive)
       this.ui.render?.(host);
     else
       this.ui.render?.(this.focusedHost(host));
@@ -10923,7 +11659,7 @@ class HelixEditor2 {
 }
 
 // src/config-loader.ts
-import { parse as parse2 } from "smol-toml";
+import { parse as parse3 } from "smol-toml";
 
 // src/keymap/trie.ts
 function parseCommand(input) {
@@ -11464,7 +12200,7 @@ function loadConfig2(source, base = defaultConfig2(), known = () => false) {
     return { config, keys, warnings };
   let doc;
   try {
-    doc = parse2(source);
+    doc = parse3(source);
   } catch (err) {
     warnings.push(`config.toml: ${err.message}`);
     return { config, keys, warnings };
@@ -12019,7 +12755,7 @@ class SystemClipboard2 {
 }
 
 // src/syntax/config.ts
-import { parse as parse3 } from "smol-toml";
+import { parse as parse4 } from "smol-toml";
 function isTable(v) {
   return typeof v === "object" && v !== null && !Array.isArray(v) && !(v instanceof Date);
 }
@@ -12186,7 +12922,7 @@ function grammarConfig(v) {
 function parseLanguagesToml2(...sources) {
   let merged = {};
   sources.forEach((source, i) => {
-    const value = parse3(source);
+    const value = parse4(source);
     merged = i === 0 ? value : mergeTomlValues(merged, value, 3);
   });
   const table = merged;
@@ -13879,6 +14615,25 @@ var helixTheme = EditorView.baseTheme({
     whiteSpace: "pre",
     color: `var(--hx-cursor-primary-fg, ${bg})`
   },
+  ".hx-ime": {
+    position: "absolute",
+    left: "var(--hx-ime-left, 0)",
+    top: "var(--hx-ime-top, 0)",
+    width: "16em",
+    height: "1.5em",
+    zIndex: "10",
+    padding: "0",
+    border: "none",
+    outline: "none",
+    resize: "none",
+    overflow: "hidden",
+    opacity: "0",
+    pointerEvents: "none",
+    font: "inherit",
+    color: fg,
+    backgroundColor: panel
+  },
+  ".hx-ime.hx-ime-on": { opacity: "1" },
   "&.hx .hx-jump-label": { color: error, whiteSpace: "pre" },
   "&.hx .hx-cursorline": { backgroundColor: "var(--hx-cursorline, var(--hx-hover, color-mix(in srgb, CanvasText 8%, transparent)))" },
   ".hx-panel": {
@@ -14581,7 +15336,79 @@ function helixExtension2(env) {
     event.stopPropagation();
     return true;
   };
+  const deliverText = (view, text) => {
+    const host = env.hostFor(view);
+    for (const ch of text) {
+      const key = keyFromDom2({ key: ch, code: "", ctrlKey: false, altKey: false, shiftKey: false, metaKey: false }, true, false);
+      if (key !== null)
+        editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
+    }
+  };
+  const imeInputs = new WeakMap;
+  const openIme = (view) => {
+    let input = imeInputs.get(view);
+    const win = windowOf(view);
+    let timer;
+    const close = () => {
+      if (timer !== undefined)
+        win?.clearTimeout(timer);
+      timer = undefined;
+      input.classList.remove("hx-ime-on");
+      input.value = "";
+      view.focus();
+    };
+    if (!input) {
+      input = make(view.dom.ownerDocument, "textarea", "hx-ime");
+      input.setAttribute("aria-hidden", "true");
+      input.tabIndex = -1;
+      view.dom.appendChild(input);
+      imeInputs.set(view, input);
+      input.addEventListener("compositionstart", () => {
+        if (timer !== undefined)
+          win?.clearTimeout(timer);
+        timer = undefined;
+        input.classList.add("hx-ime-on");
+      });
+      input.addEventListener("compositionend", (event) => {
+        const text = event.data;
+        close();
+        if (text)
+          deliverText(view, text);
+      });
+      input.addEventListener("input", (event) => {
+        if (event.isComposing || input.classList.contains("hx-ime-on"))
+          return;
+        const text = input.value;
+        close();
+        if (text)
+          deliverText(view, text);
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !event.isComposing)
+          close();
+      });
+    }
+    const value = view.state.field(helixField2, false);
+    const rect = view.dom.getBoundingClientRect();
+    const coords = value ? view.coordsAtPos(value.selection.primary().cursor(view.state.doc)) : null;
+    const panel = editor.activePrompt ? view.dom.querySelector(".hx-prompt:not(.hx-hidden)")?.getBoundingClientRect() : null;
+    setProps(input, { "--hx-ime-left": `${(panel?.left ?? coords?.left ?? rect.left) - rect.left}px`, "--hx-ime-top": `${(panel?.top ?? coords?.top ?? rect.top) - rect.top}px` });
+    input.focus({ preventScroll: true });
+    timer = win?.setTimeout(close, 400);
+  };
   const keyHandler = Prec.highest(EditorView2.domEventHandlers({
+    mousedown(event, view) {
+      if (!editor.config.mouse) {
+        event.preventDefault();
+        view.focus();
+        return true;
+      }
+      if (event.button === 1 && !editor.config.middleClickPaste) {
+        event.preventDefault();
+        return true;
+      }
+      return false;
+    },
     compositionstart(_event, view) {
       const value = view.state.field(helixField2, false);
       if (!value || value.mode === "insert" && !editor.activePrompt)
@@ -14598,11 +15425,14 @@ function helixExtension2(env) {
     },
     keydown(event, view) {
       lastKeydown = null;
-      if (event.isComposing || event.key === "Process") {
+      if (event.isComposing || event.key === "Process" || event.key === "Dead" && !event.altKey) {
         const value = view.state.field(helixField2, false);
         if (!value || value.mode === "insert" && !editor.activePrompt)
           return false;
-        endComposition(view);
+        if (view.composing)
+          endComposition(view);
+        openIme(view);
+        return true;
       }
       return onKey(event, view);
     }
@@ -14699,6 +15529,8 @@ function helixExtension2(env) {
       }
       if (update.focusChanged && update.view.hasFocus)
         env.onFocusChange(update.view);
+      if (update.focusChanged && !update.view.hasFocus && !update.view.dom.contains(update.view.dom.ownerDocument.activeElement))
+        editor.snippets.delete(env.hostFor(update.view).id);
       if (update.transactions.length > 0 || update.focusChanged)
         env.onRender(update.view);
     }
@@ -14789,7 +15621,7 @@ function renderPanel(view, env, dom, info, prompt, message) {
   }
   const guest = env.panelGuest?.(view) ?? null;
   const source = guest?.hasFocus ? guest : view;
-  const focused = source.hasFocus;
+  const focused = source.hasFocus || source.dom.contains(source.dom.ownerDocument.activeElement);
   const host = env.hostFor(source);
   const active = editor.activePrompt && editor.activePrompt.host.id === host.id && focused ? editor.activePrompt : null;
   prompt.replaceChildren();
@@ -15212,6 +16044,17 @@ function helixSelect2(view, ranges, primary = 0) {
     return;
   setSel2(cx, new Selection2(ranges.map((r) => new Range2(r.anchor, r.head)), primary).ensureInvariants(view.state.doc));
 }
+function helixSnippet2(view, source, options = {}) {
+  const cx = context(view);
+  return cx ? insertSnippet(cx, source, options) : false;
+}
+function helixTabstops2(view) {
+  const found = parts(view);
+  const snippet = found?.editor.snippets.get(found.host.id);
+  if (!snippet)
+    return [];
+  return snippet.allTabstops().flatMap((tabstop) => tabstop.ranges.map((span) => ({ from: span.start, to: span.end, choices: tabstop.choices })));
+}
 function helixMessage2(view, text, severity = "info") {
   const found = parts(view);
   if (!found)
@@ -15282,4 +16125,4 @@ function helixGutter2(view, fromLine, toLine) {
   return out;
 }
 
-export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };
+export { helixHooks2, parseKey2, formatKey2, parseMacro2, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, applyTextEdits2, APP_COMMANDS2, Context2, HelixEditor2, loadConfig2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, onHelixStatus2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixStatus2, helixRun2, helixKeys2, helixEditor2, helixDocument2, helix2, helixCommandList2, helixTypedCommandList2, helixEdit2, helixSelect2, helixSnippet2, helixTabstops2, helixMessage2, helixPrompt2, helixHighlights2, helixRainbow2, helixGutter2 };

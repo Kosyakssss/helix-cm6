@@ -1,7 +1,7 @@
 export { helix, helixDocument, helixEditor, helixKeys, helixRun, helixStatus, type GrammarSource, type HelixDocument, type HelixOptions } from "./codemirror";
 export { helixHooks, type EdgeDirection, type HelixEdge, type HelixHooks, type MotionRange } from "./hooks";
 export { onHelixStatus, type HelixInfo, type HelixInfoRow, type HelixPromptStatus, type HelixStatus } from "./view/status";
-export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";
+export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixSnippet, helixTabstops, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";
 export { helixAppKeys, type KeyLayer, type ModeName } from "./keymap";
 export type { KeyNode } from "./keymap/trie";
 export type { AppCommand, AppCommandInfo } from "./commands/app";

@@ -8,6 +8,7 @@ import { miscCommands, UNSUPPORTED } from "./misc";
 import { shellCommands } from "./shell";
 import { syntaxCommands } from "./syntax";
 import { gotoCommands } from "./goto";
+import { snippetCommands } from "./snippet";
 import { isAppCommandName } from "./app";
 import { executeCommandLine } from "./typed";
 import { hooksOf } from "../hooks";
@@ -21,6 +22,7 @@ export const STATIC_COMMANDS: Record<string, CommandFn> = {
   ...syntaxCommands,
   ...shellCommands,
   ...gotoCommands,
+  ...snippetCommands,
 };
 
 export function isKnownCommand(name: string): boolean {

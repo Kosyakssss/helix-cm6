@@ -95,6 +95,10 @@ mod test {
         if let (Some(scopes), Some(lang)) = (keys.strip_prefix("<highlight>"), lang) {
             return highlight_case(input, lang, scopes.split(',').map(str::to_string).collect());
         }
+        let (snippet_source, keys) = match keys.strip_prefix("<snippet>").and_then(|rest| rest.split_once("</snippet>")) {
+            Some((source, rest)) => (Some(source), rest),
+            None => (None, keys),
+        };
         let (text, selection) = test::print(input);
         let builder = match lang {
             Some(name) => AppBuilder::new().with_lang_loader(lang_loader(name)),
@@ -122,6 +126,29 @@ mod test {
                     return json!({ "error": "no syntax" });
                 }
             }
+        }
+        if let Some(source) = snippet_source {
+            let (view, doc) = current!(app.editor);
+            let snippet = match helix_core::snippets::Snippet::parse(source) {
+                Ok(snippet) => snippet,
+                Err(err) => return json!({ "error": err.to_string() }),
+            };
+            let sel = doc.selection(view.id).clone();
+            let text = doc.text().clone();
+            let mut ctx = doc.snippet_ctx();
+            let (transaction, mapped, rendered) = snippet.render(
+                &text,
+                &sel,
+                |range| {
+                    let cursor = range.cursor(text.slice(..));
+                    (cursor, cursor)
+                },
+                &mut ctx,
+            );
+            let transaction = transaction.with_selection(rendered.first_selection(sel.primary().direction(), mapped.primary_index()));
+            doc.apply(&transaction, view.id);
+            doc.append_changes_to_history(view);
+            doc.active_snippet = helix_core::snippets::ActiveSnippet::new(rendered);
         }
         let captured = std::cell::RefCell::new(Value::Null);
         let outcome = test_key_sequence(

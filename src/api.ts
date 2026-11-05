@@ -2,6 +2,7 @@ import type { EditorView } from "@codemirror/view";
 import { APP_COMMANDS, isAppCommandName } from "./commands/app";
 import { COMMAND_DOCS } from "./commands/docs";
 import { applyTextEdits, type TextEdit } from "./commands/goto";
+import { insertSnippet } from "./commands/snippet";
 import { STATIC_COMMANDS } from "./commands";
 import { TYPABLE } from "./commands/typed";
 import { setSel } from "./commands/util";
@@ -56,6 +57,18 @@ export function helixSelect(view: EditorView, ranges: readonly { anchor: number;
   const cx = context(view);
   if (!cx || ranges.length === 0) return;
   setSel(cx, new Selection(ranges.map((r) => new Range(r.anchor, r.head)), primary).ensureInvariants(view.state.doc));
+}
+
+export function helixSnippet(view: EditorView, source: string, options: { removeBefore?: number; variables?: Readonly<Record<string, string>> } = {}): boolean {
+  const cx = context(view);
+  return cx ? insertSnippet(cx, source, options) : false;
+}
+
+export function helixTabstops(view: EditorView): { from: number; to: number; choices: readonly string[] | null }[] {
+  const found = parts(view);
+  const snippet = found?.editor.snippets.get(found.host.id);
+  if (!snippet) return [];
+  return snippet.allTabstops().flatMap((tabstop) => tabstop.ranges.map((span) => ({ from: span.start, to: span.end, choices: tabstop.choices })));
 }
 
 export function helixMessage(view: EditorView, text: string, severity: "info" | "error" = "info"): void {

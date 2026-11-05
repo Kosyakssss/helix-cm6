@@ -13,14 +13,11 @@ States:
 
 ## Partial
 
-- `mouse`, `middle-click-paste`: parsed. The mouse follows CodeMirror's handling.
-- Inline diagnostics draw each message under its line. Helix fits them to the free columns; a browser wraps them.
 - `:line-ending crlf` says so instead of changing the document: CodeMirror keeps line feeds, and the app writes the ending it wants.
-- Tabstops (`goto_next_tabstop`, `goto_prev_tabstop`) need LSP snippets, which are not ported.
 
 ## Open bugs
 
-- An IME composition in normal or select mode, or in a prompt, is cancelled, so composed text (for example Japanese in a search) cannot be typed there. Text input without a composition, such as the emoji picker or dictation, works.
+None.
 
 ## Helix bugs the port fixes
 
@@ -166,7 +163,7 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `goto_next_function` | ported |
 | `goto_next_paragraph` | ported |
 | `goto_next_parameter` | ported |
-| `goto_next_tabstop` | missing |
+| `goto_next_tabstop` | ported |
 | `goto_next_test` | ported |
 | `goto_next_xml_element` | ported |
 | `goto_prev_change` | app |
@@ -177,7 +174,7 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `goto_prev_function` | ported |
 | `goto_prev_paragraph` | ported |
 | `goto_prev_parameter` | ported |
-| `goto_prev_tabstop` | missing |
+| `goto_prev_tabstop` | ported |
 | `goto_prev_test` | ported |
 | `goto_prev_xml_element` | ported |
 | `goto_previous_buffer` | app |
@@ -459,14 +456,14 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | --- | --- |
 | `scrolloff` | ported |
 | `scroll-lines` | ported |
-| `mouse` | partial |
+| `mouse` | ported |
 | `mouse-yank-register` | ported |
 | `shell` | ported |
 | `line-number` | data |
 | `cursorline` | ported |
 | `cursorcolumn` | data |
 | `gutters` | data |
-| `middle-click-paste` | partial |
+| `middle-click-paste` | ported |
 | `auto-pairs` | ported |
 | `auto-completion` | data |
 | `path-completion` | data |

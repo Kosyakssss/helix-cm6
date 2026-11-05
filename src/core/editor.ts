@@ -19,6 +19,7 @@ import type { LanguageLoader } from "../syntax/loader";
 import { autoDetectIndentStyle, indentStyleFromStr, type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
+import type { ActiveSnippet } from "../snippets";
 import { COMMAND_DOCS } from "../commands/docs";
 import { APP_COMMANDS, appFallback, type AppCommand, type HelixApp } from "../commands/app";
 import { helixField, historyField } from "../state";
@@ -104,6 +105,7 @@ export class HelixEditor {
   autoinfo: TrieNode | { title: string; body: [string, string][] } | null = null;
   ui: UiHooks = {};
   app: HelixApp | null = null;
+  snippets = new Map<string, ActiveSnippet>();
   viewOps: ViewOps | null = null;
   activePrompt: Prompt | null = null;
   visualLines = false;
@@ -189,6 +191,12 @@ export class HelixEditor {
 
   docChanged(host: Host, changes: import("@codemirror/state").ChangeDesc): void {
     for (const list of this.jumplists.values()) list.map(host.id, changes);
+    if (this.snippets.get(host.id)?.map(changes)) this.snippets.delete(host.id);
+  }
+
+  checkSnippet(host: Host): void {
+    const snippet = this.snippets.get(host.id);
+    if (snippet && !snippet.isValid(host.state.field(helixField).selection)) this.snippets.delete(host.id);
   }
 
   resetJumplists(): void {
@@ -402,6 +410,7 @@ export class HelixEditor {
     const alive = host.state.field(helixField, false) !== undefined;
     if (alive && mode(host) !== "insert") commitHistoryNow(host);
     for (const callback of cx.callbacks) callback();
+    if (alive) this.checkSnippet(host);
     if (alive) this.ui.render?.(host);
     else this.ui.render?.(this.focusedHost(host));
     return consumed;

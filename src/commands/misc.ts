@@ -256,4 +256,4 @@ export const miscCommands: Record<string, CommandFn> = {
   toggle_block_comments: (cx) => cx.editor.runComments(cx, "block"),
 };
 
-export const UNSUPPORTED = ["goto_next_tabstop", "goto_prev_tabstop"];
+export const UNSUPPORTED: string[] = [];

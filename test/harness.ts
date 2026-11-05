@@ -1,7 +1,8 @@
 import { Text } from "@codemirror/state";
 import { commitHistoryNow } from "../src/commands/jumps";
 import { HeadlessHost } from "../src/core/host";
-import { HelixEditor } from "../src/core/editor";
+import { Context, HelixEditor } from "../src/core/editor";
+import { insertSnippet } from "../src/commands/snippet";
 import { buildKeymaps, helixAppKeys } from "../src/keymap";
 import { helixField, historyField, setHelix, syncNativeSelection, toNative, helixOwned } from "../src/state";
 import { defaultConfig, type Config } from "../src/config";
@@ -136,7 +137,12 @@ export function run(markup: string, keys: string, editor = makeEditor(), lang?: 
     editor.docChanged(host, changes);
   };
   try {
-    editor.feedKeys(host, keys);
+    const snippet = /^<snippet>([\s\S]*?)<\/snippet>/.exec(keys);
+    if (snippet) {
+      insertSnippet(new Context(editor, host, null, null), snippet[1]!);
+      commitHistoryNow(host);
+    }
+    editor.feedKeys(host, snippet ? keys.slice(snippet[0].length) : keys);
   } catch (err) {
     return { out: "", mode: "", register: null, error: String((err as Error).stack ?? err) };
   }

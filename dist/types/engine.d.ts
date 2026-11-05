@@ -36,4 +36,4 @@ export type { Syntax } from "./syntax/syntax";
 export { setDiagnostics, diagnosticsField, type Diagnostic, type Severity } from "./diagnostics";
 export { setChanges, changesField, changesOf, type Changes, type Hunk } from "./changes";
 export { helixEnv } from "./view/view";
-export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";
+export { helixCommandList, helixEdit, helixGutter, helixHighlights, helixMessage, helixPrompt, helixRainbow, helixSelect, helixSnippet, helixTabstops, helixTypedCommandList, type HelixCommandInfo, type HelixGutterLine, type HelixHighlight, type HelixTypedCommandInfo } from "./api";

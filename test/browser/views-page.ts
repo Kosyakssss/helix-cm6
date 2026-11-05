@@ -3,7 +3,7 @@ import { helix, helixDocument, helixEditor, helixKeys, helixRun, helixStatus } f
 import { setDiagnostics } from "../../src/diagnostics";
 import { setChanges } from "../../src/changes";
 import { helixAppKeys } from "../../src/keymap";
-import { helixGutter, helixHighlights } from "../../src/api";
+import { helixGutter, helixHighlights, helixSnippet, helixTabstops } from "../../src/api";
 import { helixField } from "../../src/state";
 import { helixHooks, type HelixEdge } from "../../src/hooks";
 
@@ -84,8 +84,11 @@ const bareView = new EditorView({
 });
 bareView.dispatch({ effects: setDiagnostics.of([{ from: 9, to: 13, severity: "error", message: "a problem" }]) });
 bareView.dispatch({ effects: setChanges.of({ base: "# Title\n\ntext\nold\nend\n", hunks: [{ beforeStart: 3, beforeEnd: 4, afterStart: 3, afterEnd: 4 }] }) });
+const snippetView = new EditorView({ parent: place("snippet"), doc: "\n", extensions: [helix({ syntax: false })] });
+helixSnippet(snippetView, "foo(${1:bar}, ${2:baz})$0");
+const mouseView = new EditorView({ parent: place("mouse"), doc: "some words in this line\n", extensions: [helix({ syntax: false, config: "[editor]\nmouse = false\n" })] });
 const noPanelView = new EditorView({ parent: place("nopanel"), doc: "abc\n", extensions: [helix({ syntax: false, panel: false })] });
-const extra = { app: appView, bare: bareView, nopanel: noPanelView, edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4") };
+const extra = { snippet: snippetView, mouse: mouseView, app: appView, bare: bareView, nopanel: noPanelView, edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4") };
 
 function panel(name: "a" | "b") {
   const dom = views[name].dom;
@@ -114,6 +117,7 @@ Object.assign(window, {
   helixStatusOf: (name: keyof typeof extra) => helixStatus(extra[name]),
   helixHighlightsOf: () => helixHighlights(bareView, 0, bareText.length).map((h) => [bareView.state.sliceDoc(h.from, h.to), h.scopes.join(" ")]),
   helixGutterOf: () => helixGutter(bareView, 1, 5),
+  helixTabstopsOf: () => helixTabstops(snippetView),
   helixPanelCount: () => noPanelView.dom.querySelectorAll(".hx-panel").length,
   helixRunIn: (name: keyof typeof extra, command: string) => helixRun(extra[name], command),
   helixDoc: (name: "a" | "b") => views[name].state.doc.toString(),

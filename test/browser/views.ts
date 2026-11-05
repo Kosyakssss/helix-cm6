@@ -128,6 +128,30 @@ async function run(type: BrowserType): Promise<string[]> {
     if (!pasted.includes("from another app")) fails.push(`space p pastes text copied outside the editor: got ${JSON.stringify(pasted)}`);
   }
 
+  if (type === chromium) {
+    const cdp = await context.newCDPSession(page);
+    const compose = async (text: string) => {
+      await cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", key: "Process", code: "KeyA", windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 });
+      await page.waitForTimeout(30);
+      await cdp.send("Input.imeSetComposition", { text: text.slice(0, 1), selectionStart: 1, selectionEnd: 1 });
+      await page.waitForTimeout(30);
+      await cdp.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Process", code: "KeyA", windowsVirtualKeyCode: 229, nativeVirtualKeyCode: 229 });
+      await cdp.send("Input.insertText", { text });
+      await page.waitForTimeout(60);
+    };
+    await focus("a");
+    await page.keyboard.type("/");
+    await compose("日本");
+    await expect("composed text in a prompt", "a", { prompt: "search: 日本".replace("search: ", "search:") });
+    await page.keyboard.press("Escape");
+    await focus("b");
+    const beforeIme = await doc();
+    await compose("x");
+    if ((await doc()) !== beforeIme) fails.push("composed text in normal mode changed the note");
+    const focused = await page.evaluate(() => (window as unknown as { helixPanel(n: string): { focused: boolean } }).helixPanel("b").focused);
+    if (!focused) fails.push("the editor lost focus after a composition");
+  }
+
   type Extra = { doc: string; head: number; anchor: number; edges: { direction: string; count: number; extend: boolean }[]; entered: string[]; status: string | null };
   const extra = (name: string, keys: string) => page.evaluate(([n, k]) => (window as unknown as { helixExtra(a: string, b: string): Extra }).helixExtra(n!, k!), [name, keys]);
   const check = (what: string, got: unknown, want: unknown) => {
@@ -192,6 +216,14 @@ async function run(type: BrowserType): Promise<string[]> {
   await page.waitForFunction(() => (window as unknown as { helixHighlightsOf(): unknown[] }).helixHighlightsOf().length > 0);
   check("highlights are data", (await call<[string, string][]>("helixHighlightsOf")).some(([text, scopes]) => text.includes("Title") && scopes.includes("markup.heading")), true);
   check("panel: false leaves out the command line", await call<number>("helixPanelCount"), 0);
+  const snippetDoc = await extra("snippet", "");
+  check("a snippet selects its first tabstop", snippetDoc.doc.startsWith("foo(bar, baz)"), true);
+  check("the first tabstop is selected", [snippetDoc.anchor, snippetDoc.head], [4, 6]);
+  const tabstops = await call<{ from: number; to: number }[]>("helixTabstopsOf");
+  check("tabstops are data", tabstops[0], { from: 4, to: 7, choices: null });
+  const mouseHead = (await extra("mouse", "")).head;
+  await page.click("#mouse .cm-content", { position: { x: 60, y: 6 } });
+  check("mouse = false ignores clicks", (await extra("mouse", "")).head, mouseHead);
 
   await browser.close();
   if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));

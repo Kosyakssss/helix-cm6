@@ -65,6 +65,7 @@ From a command, or from anywhere else:
 | `helixEdit(view, edits)` | Applies text edits as one undo step. |
 | `helixSelect(view, ranges, primary?)` | Sets the selections. |
 | `helixPrompt(view, request)` | Opens the command line with a label, and calls back on each change and on accept. |
+| `helixSnippet(view, text, { removeBefore?, variables? })` | Inserts an LSP-style snippet at each cursor and selects its first tabstop. `removeBefore` removes that many characters before each cursor first, such as the prefix a completion replaces. `Tab` in insert mode, `goto_next_tabstop` and `goto_prev_tabstop` move between tabstops. |
 | `helixMessage(view, text, severity?)` | Shows a message. |
 | `helixKeys(view, "ggdd")` | Types keys. |
 | `helixRun(view, name)` | Runs a command, `":sort"` a typed command, `"@ggdd"` a macro. |
@@ -78,6 +79,7 @@ From a command, or from anywhere else:
 | Command line | `status.prompt`: label, input, cursor, completions, selected completion. |
 | Gutters | `helixGutter(view, fromLine, toLine)`: per line, the number to show (relative if set), whether a cursor is on it, the worst diagnostic, and the change. |
 | Syntax colours | `helixHighlights(view, from, to, scopes?)`: spans with their Helix scopes. `helixRainbow(view, from, to, levels?)`: bracket levels. Checked against real Helix. |
+| Tabstops | `helixTabstops(view)`: the ranges of the active snippet, with the choices of a choice tabstop. |
 | Options | `view.state.facet(helixEditor).config`: every `[editor]` option from the config, including those only an app draws, such as `rulers` and `statusline`. |
 
 ## Data from the app
@@ -95,7 +97,7 @@ The core does not talk to a language server. It has no client and no UI for one.
 | --- | --- |
 | Diagnostics | `setDiagnostics` |
 | `goto_definition` and the rest | An app command. One result: `helixSelect` in this document. More: the app's picker. |
-| `hover`, `signature_help`, `code_action`, `completion` | App commands that draw the result. `helixEdit` applies edits. |
+| `hover`, `signature_help`, `code_action`, `completion` | App commands that draw the result. `helixEdit` applies edits, and `helixSnippet` inserts a snippet from a completion. |
 | `rename_symbol` | An app command: `helixPrompt`, then `helixEdit`. |
 | `format_selections`, `:format` | App commands: `helixEdit`. |
 | `select_references_to_symbol_under_cursor` | An app command: `helixSelect`. |

@@ -74,12 +74,14 @@ import {
   helixTypedCommandList2,
   helixEdit2,
   helixSelect2,
+  helixSnippet2,
+  helixTabstops2,
   helixMessage2,
   helixPrompt2,
   helixHighlights2,
   helixRainbow2,
   helixGutter2
-} from "./chunk-zycjphe9.js";
+} from "./chunk-vbpea9h7.js";
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -213,7 +215,9 @@ export {
   helixRainbow2 as helixRainbow,
   helixRun2 as helixRun,
   helixSelect2 as helixSelect,
+  helixSnippet2 as helixSnippet,
   helixStatus2 as helixStatus,
+  helixTabstops2 as helixTabstops,
   helixTypedCommandList2 as helixTypedCommandList,
   historyField2 as historyField,
   infoOf2 as infoOf,

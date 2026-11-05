@@ -8,7 +8,7 @@ import { highlightSuite } from "./oracle/suites";
 import { highlightLoader, loadLayers } from "./harness";
 import { expect, test } from "bun:test";
 import { compare } from "./oracle/diff";
-import { codeSuite, handSuite, markdownSuite } from "./oracle/suites";
+import { codeSuite, handSuite, markdownSuite, snippetSuite } from "./oracle/suites";
 import { fuzzSuite, markdownFuzzSuite } from "./oracle/fuzz";
 import { oracleGraphemes } from "./oracle/oracle";
 import { segmentGraphemes } from "../src/graphemes";
@@ -36,6 +36,12 @@ test("markdown suite matches Helix with the markdown syntax tree", async () => {
 
 test("code suite matches Helix with each language's grammar and queries", async () => {
   const { failures } = await compare(codeSuite());
+  expect(failures.map(describe)).toEqual([]);
+}, 1_800_000);
+
+test("snippets match Helix", async () => {
+  const { failures, skipped } = await compare(snippetSuite());
+  expect(skipped).toBe(0);
   expect(failures.map(describe)).toEqual([]);
 }, 1_800_000);
 

@@ -16,12 +16,14 @@ import {
   helixTypedCommandList2,
   helixEdit2,
   helixSelect2,
+  helixSnippet2,
+  helixTabstops2,
   helixMessage2,
   helixPrompt2,
   helixHighlights2,
   helixRainbow2,
   helixGutter2
-} from "./chunk-zycjphe9.js";
+} from "./chunk-vbpea9h7.js";
 export {
   Range2 as Range,
   Selection2 as Selection,
@@ -40,7 +42,9 @@ export {
   helixRainbow2 as helixRainbow,
   helixRun2 as helixRun,
   helixSelect2 as helixSelect,
+  helixSnippet2 as helixSnippet,
   helixStatus2 as helixStatus,
+  helixTabstops2 as helixTabstops,
   helixTypedCommandList2 as helixTypedCommandList,
   onHelixStatus2 as onHelixStatus,
   setChanges2 as setChanges,

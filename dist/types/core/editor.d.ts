@@ -13,6 +13,7 @@ import type { LanguageLoader } from "../syntax/loader";
 import { type IndentStyle } from "../syntax/indent";
 import type { Selection } from "../selection";
 import type { RustRegexEngine } from "./rx";
+import type { ActiveSnippet } from "../snippets";
 import { type AppCommand, type HelixApp } from "../commands/app";
 export type OnKeyCallback = (cx: Context, key: string) => void;
 export type OnKeyKind = "pseudoPending" | "fallback";
@@ -92,6 +93,7 @@ export declare class HelixEditor {
     } | null;
     ui: UiHooks;
     app: HelixApp | null;
+    snippets: Map<string, ActiveSnippet>;
     viewOps: ViewOps | null;
     activePrompt: Prompt | null;
     visualLines: boolean;
@@ -128,6 +130,7 @@ export declare class HelixEditor {
     objectSelections(host: Host): Selection[];
     jumplist(host: Host): JumpList;
     docChanged(host: Host, changes: import("@codemirror/state").ChangeDesc): void;
+    checkSnippet(host: Host): void;
     resetJumplists(): void;
     allJumplists(): Iterable<JumpList>;
     jumpTo(cx: Context, jump: Jump): void;
