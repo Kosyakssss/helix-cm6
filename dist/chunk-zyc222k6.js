@@ -16086,7 +16086,11 @@ function helix2(options = {}) {
         refresh(hostFor(active));
     }),
     render: refresh,
-    promptChanged: refresh,
+    promptChanged: (host, prompt) => {
+      if (prompt && host.view && !host.view.hasFocus)
+        host.view.focus();
+      refresh(host);
+    },
     jumpLabels: refresh
   };
   const clipboardReader = EditorView4.domEventObservers({

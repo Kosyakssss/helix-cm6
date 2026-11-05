@@ -262,7 +262,10 @@ export function helix(options: HelixOptions = {}): Extension {
         if (active?.dom.isConnected) refresh(hostFor(active));
       }),
     render: refresh,
-    promptChanged: refresh,
+    promptChanged: (host, prompt) => {
+      if (prompt && host.view && !host.view.hasFocus) host.view.focus();
+      refresh(host);
+    },
     jumpLabels: refresh,
   };
 

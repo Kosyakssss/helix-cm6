@@ -280,6 +280,11 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   check("a replaced prompt resolves with null", await displaced, null);
   helixType(view, "<esc>");
   await second;
+  view.contentDOM.blur();
+  const unfocused = helixPrompt(view, { label: "name: " });
+  check("a prompt takes the focus", document.activeElement === view.contentDOM, true);
+  helixType(view, "<esc>");
+  await unfocused;
 
   helixType(view, ":tabs:close t");
   check("an app command completes its arguments", helixStatus(view).prompt?.completions, ["two"]);
