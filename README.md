@@ -11,6 +11,10 @@ Not on npm or any other registry yet. If you want it published, [open an issue](
 
 The port follows Helix master at commit `ba40e54742`.
 
+![Eight cursors from one regex select in a plain CodeMirror editor](docs/screenshots/1-multiple-cursors.png)
+
+More in [docs/screenshots](docs/screenshots), each in dark, light and both: the key help, a selection grown by the syntax tree, the command line and jump labels. These show `bun run play`, a bare editor. An app adds its own colours, gutters and status line.
+
 ## Status
 
 This is the engine from [helix-motions](https://github.com/Kosyakssss/helix-motions), the Obsidian plugin, split out so that other CodeMirror 6 apps can use it. The plugin is built on it. There is no npm release yet, and the API can change.

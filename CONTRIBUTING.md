@@ -26,4 +26,4 @@ See `docs/testing.md` for details.
 
 ## Pull requests
 
-Add a case to `test/oracle/suites.ts` for engine changes. Run `bun run build` and commit `dist/` with the change. Keep `bun run check`, `bun run lint`, `bun test`, `bun run browser` and `bun run views` passing.
+Add a case to `test/oracle/suites.ts` for engine changes. After adding a command, run `bun run names`, which updates the command name types. Run `bun run build` and commit `dist/` with the change. Keep `bun run check`, `bun run lint`, `bun test`, `bun run browser` and `bun run views` passing.
