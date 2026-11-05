@@ -66,8 +66,8 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-mjnb04x6.js";
-__chunks(import.meta.url,["96akf27e","mjnb04x6","28qqb8e8"],[["./engine.js",1],["./chunk-mjnb04x6.js"],["./languages.js"]],0);
+} from "./chunk-kzyg0hjp.js";
+__chunks(import.meta.url,["wc3y5h1k","kzyg0hjp","28qqb8e8"],[["./engine.js",1],["./chunk-kzyg0hjp.js"],["./languages.js"]],0);
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);

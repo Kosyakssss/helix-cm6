@@ -14656,7 +14656,7 @@ function statusOf2(editor, host, focused) {
 import { EditorView } from "@codemirror/view";
 var fg = "var(--hx-fg, CanvasText)";
 var bg = "var(--hx-bg, Canvas)";
-var selection2 = "var(--hx-selection, Highlight)";
+var selection2 = "var(--hx-selection, color-mix(in srgb, Highlight 45%, Canvas))";
 var error = "var(--hx-error, #d32f2f)";
 var muted = "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))";
 var panel = "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))";

@@ -2,7 +2,7 @@ import { EditorView } from "@codemirror/view";
 
 const fg = "var(--hx-fg, CanvasText)";
 const bg = "var(--hx-bg, Canvas)";
-const selection = "var(--hx-selection, Highlight)";
+const selection = "var(--hx-selection, color-mix(in srgb, Highlight 45%, Canvas))";
 const error = "var(--hx-error, #d32f2f)";
 const muted = "var(--hx-muted, color-mix(in srgb, CanvasText 60%, transparent))";
 const panel = "var(--hx-panel, color-mix(in srgb, CanvasText 5%, Canvas))";
