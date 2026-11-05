@@ -13,7 +13,7 @@ The port follows Helix master at commit `ba40e54742`.
 
 ![Eight cursors from one regex select in a plain CodeMirror editor](docs/screenshots/1-multiple-cursors.png)
 
-More in [docs/screenshots](docs/screenshots), each in dark, light and both: the key help, a selection grown by the syntax tree, the command line and jump labels. These show `bun run play`, a bare editor. An app adds its own colours, gutters and status line.
+More in [docs/screenshots](docs/screenshots), each in dark, light and both: the key help, a selection grown by the syntax tree, the command line, jump labels and a code editor. These show `bun run play`, a bare editor. An app adds its own colours, gutters and status line, as `examples/code` does in the last one: a code editor with a real language server.
 
 ## Status
 
@@ -43,7 +43,7 @@ new EditorView({
 
 This is an editing core: the text, the keys and the command line. An editor is an application, and the application brings the rest. It supplies commands such as `file_picker` and their keys, and draws pickers, gutters, colours and a status bar from the data the core gives. Helix's own key layout for those commands is available as plain data, `helixAppKeys`.
 
-[docs/api.md](docs/api.md) has the whole API.
+[docs/api.md](docs/api.md) has the whole API, and [examples](examples) has three apps, from one line to a code editor with a language server.
 
 Languages other than markdown come as wasm modules. Build them and pass the URL where you serve them:
 

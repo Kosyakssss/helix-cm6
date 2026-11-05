@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>code</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --tok-keyword: light-dark(#8250df, #c792ea);
+    --tok-string: light-dark(#0a7d33, #a5d6a7);
+    --tok-comment: light-dark(#6e7781, #8b949e);
+    --tok-function: light-dark(#0550ae, #82aaff);
+    --tok-type: light-dark(#953800, #ffcb6b);
+    --tok-constant: light-dark(#b35900, #f78c6c);
+  }
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; }
+  main { flex: 1; display: flex; min-height: 0; }
+  section { flex: 1; min-width: 0; border-right: 1px solid color-mix(in srgb, CanvasText 20%, transparent); }
+  .cm-editor { height: 100%; }
+  .cm-editor.cm-focused { outline: none; }
+  .cm-gutters { background: transparent !important; border: 0 !important; color: inherit !important; }
+  .cm-scroller { font-family: ui-monospace, monospace; }
+  footer { font: 12px ui-monospace, monospace; padding: 2px 6px; background: color-mix(in srgb, CanvasText 8%, Canvas); white-space: pre; }
+  .tok-keyword { color: var(--tok-keyword); }
+  .tok-string { color: var(--tok-string); }
+  .tok-comment { color: var(--tok-comment); }
+  .tok-function { color: var(--tok-function); }
+  .tok-type { color: var(--tok-type); }
+  .tok-constant { color: var(--tok-constant); }
+  .diagnostic-error { text-decoration: underline wavy red; }
+  .diagnostic-warning { text-decoration: underline wavy orange; }
+  .line-numbers span { color: color-mix(in srgb, CanvasText 50%, transparent); padding: 0 8px; }
+  .line-numbers .gutter-selected { color: CanvasText; }
+  .line-numbers .gutter-error { color: red; }
+  .picker { position: fixed; top: 10%; left: 20%; right: 20%; background: Canvas; border: 1px solid color-mix(in srgb, CanvasText 30%, transparent); font: 13px ui-monospace, monospace; z-index: 10; }
+  .picker input { width: 100%; box-sizing: border-box; border: 0; padding: 6px; font: inherit; outline: none; }
+  .picker ul { list-style: none; margin: 0; padding: 0; }
+  .picker li { padding: 2px 6px; }
+  .picker .selected, .menu .selected { background: Highlight; color: HighlightText; }
+  .popup, .menu { position: fixed; margin: 0; padding: 4px 6px; max-width: 60ch; max-height: 40vh; overflow: auto; background: Canvas; border: 1px solid color-mix(in srgb, CanvasText 30%, transparent); font: 12px ui-monospace, monospace; z-index: 10; white-space: pre-wrap; }
+</style>
+<main></main>
+<footer></footer>
+<script type="module" src="/app.js"></script>

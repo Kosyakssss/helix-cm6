@@ -55,7 +55,8 @@
     "play": "bun play/server.ts",
     "lint": "eslint src",
     "grammars": "bun languages/build.ts",
-    "names": "bun scripts/command-names.ts"
+    "names": "bun scripts/command-names.ts",
+    "example": "bun examples/serve.ts"
   },
   "dependencies": {
     "smol-toml": "1.9.1"

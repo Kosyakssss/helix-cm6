@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "types": ["bun"]
+    "types": ["bun"],
+    "paths": { "helix-cm6": ["./src/index.ts"], "helix-cm6/languages": ["./src/languages.ts"] }
   },
-  "include": ["src", "test", "play", "build.ts"]
+  "include": ["src", "test", "play", "examples", "build.ts"]
 }
