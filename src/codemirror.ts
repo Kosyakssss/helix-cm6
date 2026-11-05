@@ -281,6 +281,15 @@ export function helix(options: HelixOptions = {}): Extension {
     },
   });
 
+  const tellStatus = (view: EditorView) => {
+    if (!options.onStatus) return;
+    const status = statusOf(editor, hostFor(view), view === active);
+    const key = JSON.stringify(status);
+    if (!status || lastStatus.get(view) === key) return;
+    lastStatus.set(view, key);
+    options.onStatus(status, view);
+  };
+
   const extension = helixExtension({
     editor,
     hostFor,
@@ -293,12 +302,7 @@ export function helix(options: HelixOptions = {}): Extension {
     },
     onRender: (view) => {
       if (view.hasFocus) active = view;
-      if (!options.onStatus) return;
-      const status = statusOf(editor, hostFor(view), view === active);
-      const key = JSON.stringify(status);
-      if (!status || lastStatus.get(view) === key) return;
-      lastStatus.set(view, key);
-      options.onStatus(status, view);
+      tellStatus(view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -307,6 +311,9 @@ export function helix(options: HelixOptions = {}): Extension {
       start(view);
       if (sessions) sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
       editor.detectIndent(hostFor(view));
+      queueMicrotask(() => {
+        if (view.dom.isConnected) tellStatus(view);
+      });
     },
     onViewClose: (view) => {
       views.delete(view);

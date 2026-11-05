@@ -302,6 +302,8 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   view.setState(away);
   view.setState(clean);
   check("a saved document stays saved after a switch", helixStatus(view).modified, false);
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  check("a new document reaches the status listener", [statuses.at(-1)?.path, statuses.at(-1)?.name], ["b.md", "b.md"]);
   view.setState(away);
   view.setState(dirty);
   check("an unsaved document stays unsaved after a switch", helixStatus(view).modified, true);

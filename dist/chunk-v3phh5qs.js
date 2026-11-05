@@ -14629,6 +14629,8 @@ function statusOf2(editor, host, focused) {
     diagnostics[d.severity ?? "warning"]++;
   const prompt = focused ? editor.activePrompt : null;
   return {
+    name: host.name,
+    path: host.path ?? null,
     modified: editor.isModified(host),
     diagnostics,
     prompt: prompt && {
@@ -16091,6 +16093,16 @@ function helix2(options = {}) {
       return true;
     }
   });
+  const tellStatus = (view) => {
+    if (!options.onStatus)
+      return;
+    const status = statusOf2(editor, hostFor(view), view === active);
+    const key = JSON.stringify(status);
+    if (!status || lastStatus.get(view) === key)
+      return;
+    lastStatus.set(view, key);
+    options.onStatus(status, view);
+  };
   const extension = helixExtension2({
     editor,
     hostFor,
@@ -16104,14 +16116,7 @@ function helix2(options = {}) {
     onRender: (view) => {
       if (view.hasFocus)
         active = view;
-      if (!options.onStatus)
-        return;
-      const status = statusOf2(editor, hostFor(view), view === active);
-      const key = JSON.stringify(status);
-      if (!status || lastStatus.get(view) === key)
-        return;
-      lastStatus.set(view, key);
-      options.onStatus(status, view);
+      tellStatus(view);
     },
     onChanges: (view, changes) => editor.docChanged(hostFor(view), changes),
     onDocTransaction: (view, tr) => sessions?.change(view, tr.startState.doc, tr.changes, tr.newDoc),
@@ -16121,6 +16126,10 @@ function helix2(options = {}) {
       if (sessions)
         sessions.open(view, view.state.doc, detectLanguage(sessions.loader, view));
       editor.detectIndent(hostFor(view));
+      queueMicrotask(() => {
+        if (view.dom.isConnected)
+          tellStatus(view);
+      });
     },
     onViewClose: (view) => {
       views.delete(view);

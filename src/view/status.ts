@@ -12,6 +12,8 @@ export interface HelixMessage {
 
 export interface HelixStatus {
   mode: Mode;
+  name: string;
+  path: string | null;
   pending: string;
   count: number | null;
   register: string | null;
@@ -81,6 +83,8 @@ export function statusOf(editor: HelixEditor, host: Host, focused: boolean): Hel
   for (const d of diagnosticsOf(host.state)) diagnostics[d.severity ?? "warning"]++;
   const prompt = focused ? editor.activePrompt : null;
   return {
+    name: host.name,
+    path: host.path ?? null,
     modified: editor.isModified(host),
     diagnostics,
     prompt: prompt && {

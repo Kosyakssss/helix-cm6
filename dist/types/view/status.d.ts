@@ -8,6 +8,8 @@ export interface HelixMessage {
 }
 export interface HelixStatus {
     mode: Mode;
+    name: string;
+    path: string | null;
     pending: string;
     count: number | null;
     register: string | null;
