@@ -1,5 +1,7 @@
 # helix-cm6
 
+Not on npm or any other registry yet. If you want it published, [open an issue](https://github.com/Kosyakssss/helix-cm6/issues) and I'll get on it.
+
 [Helix](https://helix-editor.com) for [CodeMirror 6](https://codemirror.net): a port of Helix's editing, made from Helix's source and checked against real Helix.
 
 - **Helix's editing commands.** The keymap, selections and multiple cursors, registers, macros, the undo tree, text objects, surround, jump labels and typed commands.
