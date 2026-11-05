@@ -5,7 +5,8 @@ Helix commit `ba40e547`, the oracle's pin. This list is the backlog of `docs/roa
 States:
 
 - **ported**: in the engine, from Helix's source.
-- **app**: the engine draws the result, and the data comes from the app's `Workspace`: buffers, files, search, or the `language` features (an LSP client, for example). `docs/api.md` lists them. Without them, the command says it is not available.
+- **app**: the app supplies it as a command. Without one, the key is left out and the command says it is not available.
+- **data**: the core reads the option and gives the data. The app draws it.
 - **partial**: ported, with the gap named in the row.
 - **missing**: not in the engine yet.
 - **out of scope**: see `docs/roadmap.md`.
@@ -51,7 +52,7 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `command_mode` | ported |
 | `command_palette` | app |
 | `commit_undo_checkpoint` | ported |
-| `completion` | ported |
+| `completion` | app |
 | `copy_between_registers` | ported |
 | `copy_selection_on_next_line` | ported |
 | `copy_selection_on_prev_line` | ported |
@@ -384,7 +385,7 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `:quit-all!` | app |
 | `:cquit` | app |
 | `:cquit!` | app |
-| `:theme` | ported |
+| `:theme` | app |
 | `:yank-join` | ported |
 | `:clipboard-yank` | ported |
 | `:clipboard-yank-join` | ported |
@@ -461,41 +462,41 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `mouse` | partial |
 | `mouse-yank-register` | ported |
 | `shell` | ported |
-| `line-number` | ported |
+| `line-number` | data |
 | `cursorline` | ported |
-| `cursorcolumn` | ported |
-| `gutters` | ported |
+| `cursorcolumn` | data |
+| `gutters` | data |
 | `middle-click-paste` | partial |
 | `auto-pairs` | ported |
-| `auto-completion` | ported |
-| `path-completion` | ported |
-| `word-completion` | ported |
+| `auto-completion` | data |
+| `path-completion` | data |
+| `word-completion` | data |
 | `auto-format` | app |
 | `default-yank-register` | ported |
 | `auto-save` | app |
 | `text-width` | ported |
 | `idle-timeout` | ported |
-| `completion-timeout` | ported |
-| `preview-completion-insert` | ported |
-| `completion-trigger-len` | ported |
-| `completion-replace` | ported |
+| `completion-timeout` | data |
+| `preview-completion-insert` | data |
+| `completion-trigger-len` | data |
+| `completion-replace` | data |
 | `continue-comments` | ported |
 | `auto-info` | ported |
 | `file-picker` | app |
 | `file-explorer` | app |
-| `statusline` | ported |
+| `statusline` | data |
 | `cursor-shape` | ported |
 | `true-color` | out of scope |
 | `undercurl` | out of scope |
 | `search` | ported |
 | `lsp` | app |
 | `terminal` | out of scope |
-| `rulers` | ported |
-| `whitespace` | ported |
-| `bufferline` | ported |
-| `indent-guides` | ported |
+| `rulers` | data |
+| `whitespace` | data |
+| `bufferline` | data |
+| `indent-guides` | data |
 | `color-modes` | ported |
-| `soft-wrap` | ported |
+| `soft-wrap` | data |
 | `workspace-lsp-roots` | out of scope |
 | `default-line-ending` | ported |
 | `insert-final-newline` | ported |
@@ -503,50 +504,38 @@ Static: ported 231, app 63, out of scope 17, missing 2. Typed: app 49, ported 40
 | `trim-final-newlines` | ported |
 | `trim-trailing-whitespace` | ported |
 | `smart-tab` | ported |
-| `popup-border` | ported |
+| `popup-border` | data |
 | `indent-heuristic` | ported |
 | `jump-label-alphabet` | ported |
-| `inline-diagnostics` | ported |
-| `end-of-line-diagnostics` | ported |
+| `inline-diagnostics` | data |
+| `end-of-line-diagnostics` | data |
 | `clipboard-provider` | out of scope |
 | `editor-config` | app |
-| `rainbow-brackets` | ported |
+| `rainbow-brackets` | data |
 | `kitty-keyboard-protocol` | out of scope |
-| `buffer-picker` | ported |
+| `buffer-picker` | data |
 | `workspace-trust` | out of scope |
 
 ## Statusline elements
 
-`helixStatusline()` draws all 24 elements, each with its theme scope. `spinner`, `version-control`, `current-working-directory` and `workspace-diagnostics` take their data from the `Workspace`.
-
-`mode`, `spinner`, `file-base-name`, `file-name`, `file-absolute-path`, `file-modification-indicator`, `read-only-indicator`, `file-encoding`, `file-line-ending`, `file-indent-style`, `file-type`, `diagnostics`, `workspace-diagnostics`, `selections`, `primary-selection-length`, `position`, `separator`, `position-percentage`, `total-line-numbers`, `spacer`, `version-control`, `register`, `current-working-directory`, `code-action-hint`
+Not drawn. `helixStatus` gives the data. See `docs/api.md`.
 
 ## Gutters
 
-`helixGutters()` draws `diagnostics`, `line-numbers` (absolute, relative, `min-width`, and `~` on the empty last line), `spacer` and `diff`. `code-action-hint` is not drawn.
+Not drawn. `helixGutter` gives line numbers, diagnostics and changes. See `docs/api.md`.
 
 ## UI components
 
-From Helix's `helix-term/src/ui`. Each is optional. `helixUi()` adds them all.
+The core draws these:
 
 | Component | State |
 | --- | --- |
 | prompt with history, completion and registers | ported |
-| infobox (`auto-info`) | ported |
+| infobox (`auto-info`) | ported, also as data |
 | jump labels | ported |
 | cursors, selections, cursorline, color modes | ported |
-| statusline | ported |
-| gutters | ported |
-| syntax highlighting, rainbow brackets | ported, checked against Helix |
-| Helix themes with `inherits` and palettes, `:theme` with preview | ported |
-| picker with query syntax, preview and streaming | ported, matching with `nucleo` |
-| completion menu with word completion | ported |
-| popup, hover, signature help, code actions | ported |
-| diagnostics: gutter, underline, inline, end of line | ported, see Partial |
-| diff gutter and change navigation | ported, with `imara-diff` |
-| bufferline | ported |
-| whitespace, indent guides, rulers, cursor column, soft-wrap indicators | ported |
-| inlay hints | not ported |
+
+Everything else in Helix's `helix-term/src/ui` belongs to the app: picker, completion menu, popups, statusline, gutters, bufferline, themes, whitespace, indent guides, rulers, soft-wrap indicators, inlay hints, diagnostics drawing and the diff gutter. Syntax highlighting is ported and checked against Helix, and given as data by `helixHighlights`.
 
 ## Languages
 

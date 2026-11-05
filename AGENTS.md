@@ -7,7 +7,8 @@ Helix for CodeMirror 6, ported from Helix's source. Read `CONTRIBUTING.md` and `
 - Helix is the spec. Behaviour follows the pinned Helix master commit in `CONTRIBUTING.md`, and the oracle decides. If Helix does not have a command, object or option, we do not have it.
 - Helix master only. Helix forks fork this repo and point the oracle at their own commit.
 - Port, do not invent. Find the Rust code in Helix and port it close to line by line, so later Helix changes are easy to port too.
-- App-specific behaviour (pickers, files, buffers, a status bar, workarounds for one editor) goes behind an interface or a hook that the app supplies. Not into the engine.
+- This is an editing core, not an editor. UI belongs to the app: pickers, menus, popups, gutters, colours, a status bar. The core gives their data and takes the app's commands. Files, buffers, language servers, a shell and workarounds for one editor go behind a command or a hook that the app supplies.
+- An app may add commands that Helix does not have. The core itself has none.
 - Think of a 20,000-line document. Measure with `test/perf.ts`.
 
 ## Architecture

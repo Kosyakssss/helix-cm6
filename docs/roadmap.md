@@ -2,7 +2,7 @@
 
 The goal is all of Helix that makes sense in CodeMirror 6, ported from Helix's source, with a public API that apps can build on. `docs/parity.md` lists every Helix command, option and UI part and its state. Nothing goes to npm until the maintainer has checked the result.
 
-Phases 0 to 5 are done. `docs/parity.md` lists what is still not ported: LSP snippets with their tabstops, inlay hints and the `code-action-hint` gutter. Phase 6 is the maintainer's check before npm.
+The engine became an editing core after Phase 5: the UI components from Phase 3 and the reference app from Phase 4 are gone, and apps supply them. `docs/api.md` says how. What is left in the core: snippets with their tabstops, `mouse = false`, and IME input in normal mode and prompts. Phase 6 is the maintainer's check before npm.
 
 The engine work lands on `main` here. The Obsidian work lands on helix-motions' `on-helix-cm6` branch, which pins a commit of this repo. Each phase ends with all tests green in Chromium, Firefox and WebKit, a report, and a push.
 
@@ -26,19 +26,6 @@ The engine work lands on `main` here. The Obsidian work lands on helix-motions' 
 - A public state API: mode, pending keys, count, register, selections and messages, with events.
 - Hooks for apps: a motion that reaches the edge of a range hands off to the app; ranges that motions skip or treat as one row; per-editor command overrides; macros and `.` that follow focus.
 - A stable public API, separate from internals, with API docs.
-
-## Phase 3: view components
-
-Each is optional and takes its colours from Helix theme scopes, with the app's colours as fallback:
-
-- statusline with every Helix element, gutters (line numbers, relative numbers, diagnostics, diff), whitespace, indent guides, rulers and soft-wrap options;
-- syntax highlighting and Helix themes;
-- picker with preview, completion menu, popups, hover, signature help and infobox, ported from Helix's `ui/`;
-- the fuzzy matcher (`nucleo`) and the diff (`imara-diff`) as our own wasm builds, like regex.
-
-## Phase 4: playground
-
-The playground becomes a reference app: real buffers, every component, samples in many languages. It is the manual test bed before each push.
 
 ## Phase 5: Obsidian
 
