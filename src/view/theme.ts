@@ -15,10 +15,10 @@ export const nativeSelectionTheme = EditorView.baseTheme({
 });
 
 export const helixTheme = EditorView.baseTheme({
-  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
-  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer":
+  "&.hx .cm-content.hx-no-caret": { caretColor: "transparent" },
+  "&.hx.hx-normal > .cm-scroller > .cm-cursorLayer, &.hx.hx-select > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-block > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden > .cm-scroller > .cm-cursorLayer":
     { display: "none" },
-  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
+  "&.hx.hx-insert > .cm-scroller > .cm-cursorLayer .cm-cursor-secondary": { display: "none" },
   "&.hx .cm-selectionLayer": { display: "none" },
   "& ::highlight(hx-sel)": { backgroundColor: selection },
   ".cm-layer .hx-cell": {

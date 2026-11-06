@@ -14682,9 +14682,9 @@ var nativeSelectionTheme = EditorView.baseTheme({
   "&.hx .cm-line::selection, &.hx .cm-line ::selection, &.hx .cm-content::selection": { backgroundColor: `${selection2} !important` }
 });
 var helixTheme = EditorView.baseTheme({
-  "&.hx.hx-normal .cm-content, &.hx.hx-select .cm-content": { caretColor: "transparent" },
-  "&.hx.hx-normal .cm-cursorLayer, &.hx.hx-select .cm-cursorLayer, &.hx.hx-insert.hx-shape-block .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden .cm-cursorLayer": { display: "none" },
-  "&.hx.hx-insert .cm-cursor-secondary": { display: "none" },
+  "&.hx .cm-content.hx-no-caret": { caretColor: "transparent" },
+  "&.hx.hx-normal > .cm-scroller > .cm-cursorLayer, &.hx.hx-select > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-block > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-underline > .cm-scroller > .cm-cursorLayer, &.hx.hx-insert.hx-shape-hidden > .cm-scroller > .cm-cursorLayer": { display: "none" },
+  "&.hx.hx-insert > .cm-scroller > .cm-cursorLayer .cm-cursor-secondary": { display: "none" },
   "&.hx .cm-selectionLayer": { display: "none" },
   "& ::highlight(hx-sel)": { backgroundColor: selection2 },
   ".cm-layer .hx-cell": {
@@ -15682,6 +15682,7 @@ function helixExtension2(env) {
     const mode = value?.mode ?? "normal";
     return { class: `hx hx-${mode} hx-shape-${editor.config.cursorShape[mode]}` };
   });
+  const contentAttributes = EditorView2.contentAttributes.compute([helixField2], (state) => state.field(helixField2, false)?.mode === "insert" ? {} : { class: "hx-no-caret" });
   const scrollMargins = EditorView2.scrollMargins.of((view) => {
     const m = editor.config.scrolloff * view.defaultLineHeight;
     return { top: m, bottom: m };
@@ -15717,6 +15718,7 @@ function helixExtension2(env) {
     helixTheme,
     cursorLine,
     attributes,
+    contentAttributes,
     scrollMargins,
     env.noPanel ? [] : panel
   ];

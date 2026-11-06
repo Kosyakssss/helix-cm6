@@ -417,6 +417,8 @@ export function helixExtension(env: ViewEnv): Extension {
     return { class: `hx hx-${mode} hx-shape-${editor.config.cursorShape[mode]}` };
   });
 
+  const contentAttributes = EditorView.contentAttributes.compute([helixField], (state): Record<string, string> => (state.field(helixField, false)?.mode === "insert" ? {} : { class: "hx-no-caret" }));
+
   const scrollMargins = EditorView.scrollMargins.of((view) => {
     const m = editor.config.scrolloff * view.defaultLineHeight;
     return { top: m, bottom: m };
@@ -454,6 +456,7 @@ export function helixExtension(env: ViewEnv): Extension {
     helixTheme,
     cursorLine,
     attributes,
+    contentAttributes,
     scrollMargins,
     env.noPanel ? [] : panel,
   ];

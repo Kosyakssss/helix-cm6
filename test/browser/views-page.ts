@@ -286,6 +286,18 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   helixType(view, "<esc>");
   await unfocused;
 
+  const nested = new EditorView({ doc: "cell", parent: view.scrollDOM, extensions: [helix({ syntax: false, config: '[editor.cursor-shape]\ninsert = "bar"\n' })] });
+  const cursorDrawn = async (editor: EditorView) => {
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    return (editor.dom.querySelector(".cm-cursorLayer .cm-cursor-primary")?.getBoundingClientRect().height ?? 0) > 0;
+  };
+  nested.focus();
+  helixType(nested, "i");
+  check("an editor in insert mode draws its cursor inside an editor in normal mode", await cursorDrawn(nested), true);
+  helixType(nested, "<esc>");
+  check("an inner editor in normal mode draws only the block cursor", await cursorDrawn(nested), false);
+  nested.destroy();
+
   helixType(view, ":tabs:close t");
   check("an app command completes its arguments", helixStatus(view).prompt?.completions, ["two"]);
   helixType(view, "<esc>");
