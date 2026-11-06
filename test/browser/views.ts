@@ -88,6 +88,11 @@ async function run(type: BrowserType): Promise<string[]> {
   const moved = await page.evaluate(() => (window as unknown as { helixMoveToLineEnd(n: string): number[] | null }).helixMoveToLineEnd("a"));
   if (!moved || moved[1] !== moved[2]) fails.push(`programmatic cursor move to the line end: got ${JSON.stringify(moved)}`);
 
+  await page.keyboard.press("x");
+  const line = await page.evaluate(() => (window as unknown as { helixNativeSelection(n: string): number[] }).helixNativeSelection("a"));
+  if (line[0] !== 0 || line[1] !== line[2]) fails.push(`x leaves the next line out of the editor's selection: got ${JSON.stringify(line)}`);
+  await page.keyboard.press(";");
+
   await focus("b");
   const doc = () => page.evaluate(() => (window as unknown as { helixDoc(n: string): string }).helixDoc("b"));
   const before = await doc();

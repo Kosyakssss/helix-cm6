@@ -315,7 +315,7 @@ function model(view: EditorView, editor: HelixEditor): Model | null {
       const list = byLine.get(line.number) ?? [];
       list.push({ from: pos, to: segEnd, native });
       byLine.set(line.number, list);
-      if (to > line.to && line.to < doc.length) newlines.set(line.number, native && newlines.get(line.number) !== false);
+      if (to > line.to && line.to < doc.length) newlines.set(line.number, native && to > line.to + 1 && newlines.get(line.number) !== false);
       pos = line.to + 1;
     }
     if (drawsCell && pos >= vFrom && pos <= vTo) cells.push({ pos, end: cellEnd, primary, eol });

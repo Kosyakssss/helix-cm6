@@ -1333,7 +1333,7 @@ function derive(value, tr) {
   if (explicit)
     return next;
   let selection = next.selection.map(tr.changes);
-  if (tr.selection && !tr.annotation(helixOwned2)) {
+  if (tr.selection && !tr.annotation(helixOwned2) && (tr.docChanged || !tr.newSelection.eq(tr.startState.selection))) {
     selection = fromNative2(tr.newSelection, next.mode, selection, tr.newDoc);
   }
   selection = selection.ensureInvariants(tr.newDoc);
@@ -1358,8 +1358,9 @@ function toNative2(value, doc) {
   const ranges = value.selection.ranges.map((r) => {
     if (value.mode === "insert")
       return EditorSelection.cursor(r.cursor(doc), 0, undefined, r.goalColumn);
-    if (r.to() === r.from() + 1 && r.from() < doc.length && doc.lineAt(r.from()).to === r.from()) {
-      return EditorSelection.cursor(r.from(), 0, undefined, r.goalColumn);
+    const last = r.to() - 1;
+    if (r.to() > r.from() && doc.lineAt(last).to === last) {
+      return EditorSelection.range(Math.min(r.anchor, last), Math.min(r.head, last), r.goalColumn);
     }
     return EditorSelection.range(r.anchor, r.head, r.goalColumn);
   });
@@ -15085,7 +15086,7 @@ function model(view, editor) {
       list.push({ from: pos, to: segEnd, native });
       byLine.set(line.number, list);
       if (to > line.to && line.to < doc.length)
-        newlines.set(line.number, native && newlines.get(line.number) !== false);
+        newlines.set(line.number, native && to > line.to + 1 && newlines.get(line.number) !== false);
       pos = line.to + 1;
     }
     if (drawsCell && pos >= vFrom && pos <= vTo)

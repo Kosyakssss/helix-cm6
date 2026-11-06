@@ -361,6 +361,7 @@ Object.assign(window, {
   helixReady: () => views.a.state.facet(helixEditor)?.regex != null,
   helixPanel: panel,
   helixFocus: (name: "a" | "b") => views[name].focus(),
+  helixNativeSelection: (name: "a" | "b") => [views[name].state.selection.main.from, views[name].state.selection.main.to, views[name].state.doc.line(1).to],
   helixMoveToLineEnd: (name: "a" | "b") => {
     const view = views[name];
     view.dispatch({ selection: { anchor: view.state.doc.line(1).to } });

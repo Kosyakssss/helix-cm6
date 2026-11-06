@@ -49,7 +49,7 @@ export function derive(value: HelixState, tr: Transaction): HelixState {
   }
   if (explicit) return next;
   let selection = next.selection.map(tr.changes);
-  if (tr.selection && !tr.annotation(helixOwned)) {
+  if (tr.selection && !tr.annotation(helixOwned) && (tr.docChanged || !tr.newSelection.eq(tr.startState.selection))) {
     selection = fromNative(tr.newSelection, next.mode, selection, tr.newDoc);
   }
   selection = selection.ensureInvariants(tr.newDoc);
@@ -77,8 +77,9 @@ export function fromNative(
 export function toNative(value: HelixState, doc: Text): EditorSelection {
   const ranges = value.selection.ranges.map((r) => {
     if (value.mode === "insert") return EditorSelection.cursor(r.cursor(doc), 0, undefined, r.goalColumn);
-    if (r.to() === r.from() + 1 && r.from() < doc.length && doc.lineAt(r.from()).to === r.from()) {
-      return EditorSelection.cursor(r.from(), 0, undefined, r.goalColumn);
+    const last = r.to() - 1;
+    if (r.to() > r.from() && doc.lineAt(last).to === last) {
+      return EditorSelection.range(Math.min(r.anchor, last), Math.min(r.head, last), r.goalColumn);
     }
     return EditorSelection.range(r.anchor, r.head, r.goalColumn);
   });
