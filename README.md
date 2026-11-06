@@ -9,7 +9,7 @@ Not on npm or any other registry yet. If you want it published, [open an issue](
 ## Install
 
 ```sh
-bun add github:Kosyakssss/helix-cm6#<commit>
+bun add github:Kosyakssss/helix-cm6#0.1.0
 ```
 
 `dist/` is committed, so nothing builds on install. `@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies.
@@ -79,7 +79,7 @@ helix-cm6 follows Helix master at commit `ba40e54742`. About 44,000 key sequence
 
 Screen readers and right-to-left text are not tested yet.
 
-The API can change until the first release.
+The API can change until 1.0.
 
 ## Develop
 
