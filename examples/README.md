@@ -10,4 +10,4 @@ Three apps, from the smallest to the largest. Run one with `bun run example <nam
 
 `code` needs `rust-analyzer` and the Rust grammar: `bun run grammars --out play/languages rust`.
 
-For an Obsidian plugin, see [helix-motions](https://github.com/Kosyakssss/helix-motions/tree/on-helix-cm6). It handles tables, properties and Live Preview, so it also uses `helix-cm6/engine`.
+For an Obsidian plugin, see [helix-motions](https://github.com/Kosyakssss/helix-motions). It handles tables, properties and Live Preview, so it also uses `helix-cm6/engine`.

@@ -71,7 +71,7 @@ More in [docs/screenshots](docs/screenshots), each in dark, light and both: the 
 - [API reference](docs/api.md)
 - [How it works](docs/how-it-works.md)
 
-[`examples`](examples) has three apps, from one line to a code editor with a language server. For an Obsidian plugin, see [helix-motions](https://github.com/Kosyakssss/helix-motions/tree/on-helix-cm6).
+[`examples`](examples) has three apps, from one line to a code editor with a language server. For an Obsidian plugin, see [helix-motions](https://github.com/Kosyakssss/helix-motions).
 
 ## Compatibility
 

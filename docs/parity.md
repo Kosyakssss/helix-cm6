@@ -1,6 +1,6 @@
 # Parity with Helix
 
-Helix commit `ba40e547`, the oracle's pin. This list is the backlog of `docs/roadmap.md`. Update it with each change.
+Helix commit `ba40e547`, the oracle's pin. Update this list with each change.
 
 States:
 
@@ -9,7 +9,7 @@ States:
 - **data**: the core reads the option and gives the data. The app draws it.
 - **partial**: ported, with the gap named in the row.
 - **missing**: not in the engine yet.
-- **out of scope**: see `docs/roadmap.md`.
+- **out of scope**: see [Out of scope](#out-of-scope).
 
 ## Partial
 
@@ -537,3 +537,7 @@ Everything else in Helix's `helix-term/src/ui` belongs to the app: picker, compl
 ## Languages
 
 The registry is Helix's `languages.toml` (`helix-cm6/languages`), merged with the app's files as Helix merges a user's file. A document's language comes from its path and shebang, or from `:set-language`. Injections, textobjects, the `]f`-style motions, the syntax tree commands, comment tokens, auto-pairs, indent queries, highlights, locals, rainbows and tags follow the language at the cursor, as in Helix. The indent style is detected from the text when a document opens or changes language, else taken from the language; the tab width comes from the language. Markdown is built in; other grammars are wasm modules that `bun run grammars` builds from the revisions in `languages.toml`, with Helix's queries.
+
+## Out of scope
+
+The debugger (DAP), `suspend`, terminal drawing and key protocols, Helix's grammar fetching and building, clipboard providers, `:log-open`, LSP server management, workspace trust and `:encoding` other than UTF-8.

@@ -35,7 +35,7 @@ The code is in `src/view` and `src/codemirror.ts`.
 | `helix-cm6` | The stable API. Use this. |
 | `helix-cm6/engine` | The internals, for a custom host. It can change between versions. |
 
-[helix-motions](https://github.com/Kosyakssss/helix-motions/tree/on-helix-cm6) uses the engine, because tables, properties and Live Preview in Obsidian need more than the stable API gives.
+[helix-motions](https://github.com/Kosyakssss/helix-motions) uses the engine, because tables, properties and Live Preview in Obsidian need more than the stable API gives.
 
 ## Tests
 
