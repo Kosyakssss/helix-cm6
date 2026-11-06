@@ -1,4 +1,4 @@
-import { StateEffect, type Extension } from "@codemirror/state";
+import { StateEffect, type Extension, type Text } from "@codemirror/state";
 import { ViewPlugin, layer, type EditorView, type LayerMarker } from "@codemirror/view";
 import type { HelixEditor } from "../core/editor";
 import { nextGraphemeBoundary, prevGraphemeBoundary } from "../graphemes";
@@ -6,14 +6,14 @@ import type { Range as HelixRange } from "../selection";
 import { helixField, type HelixState } from "../state";
 import { add, make, setProps, styleOf } from "./dom";
 
-interface Box {
+export interface Box {
   left: number;
   top: number;
   right: number;
   bottom: number;
 }
 
-interface Glyph {
+export interface Glyph {
   text: string;
   top: number;
   height: number;
@@ -23,7 +23,7 @@ interface Glyph {
   variations: string;
 }
 
-interface Backdrop {
+export interface Backdrop {
   color: string;
   image: string;
 }
@@ -35,7 +35,7 @@ interface Cell {
   eol: boolean;
 }
 
-class CellMarker implements LayerMarker {
+export class CellMarker implements LayerMarker {
   constructor(
     readonly doc: Document,
     readonly cls: string,
@@ -141,17 +141,7 @@ class Measure {
     if (!start) return null;
     const known = this.backdrops.get(start);
     if (known) return known;
-    const layers: string[] = [];
-    let color = "transparent";
-    for (let e: Element | null = start; e; e = e.parentElement) {
-      const bg = styleOf(e).backgroundColor;
-      if (isOpaque(bg)) {
-        color = bg;
-        break;
-      }
-      if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg)) layers.push(`linear-gradient(${bg}, ${bg})`);
-    }
-    const result = { color, image: layers.length > 0 ? layers.join(", ") : "none" };
+    const result = backdropOf(start);
     this.backdrops.set(start, result);
     return result;
   }
@@ -203,7 +193,21 @@ class Measure {
   }
 }
 
-function cellWidth(el: Element): number {
+export function backdropOf(start: Element): Backdrop {
+  const layers: string[] = [];
+  let color = "transparent";
+  for (let e: Element | null = start; e; e = e.parentElement) {
+    const bg = styleOf(e).backgroundColor;
+    if (isOpaque(bg)) {
+      color = bg;
+      break;
+    }
+    if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg)) layers.push(`linear-gradient(${bg}, ${bg})`);
+  }
+  return { color, image: layers.length > 0 ? layers.join(", ") : "none" };
+}
+
+export function cellWidth(el: Element): number {
   return 0.6 * parseFloat(styleOf(el).fontSize);
 }
 
@@ -222,7 +226,7 @@ function spaceWidth(el: Element): number {
   return width;
 }
 
-function isOpaque(color: string): boolean {
+export function isOpaque(color: string): boolean {
   if (color === "transparent") return false;
   const alpha = /rgba\([^)]*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color);
   if (!alpha) return true;
@@ -232,6 +236,16 @@ function isOpaque(color: string): boolean {
 
 function covered(boxes: Box[], x: number, y: number): boolean {
   return boxes.some((b) => x >= b.left && x < b.right && y >= b.top && y < b.bottom);
+}
+
+export function cornerClasses(box: Box, near: Box[]): string[] {
+  const square = (x1: number, y1: number, x2: number, y2: number) => covered(near, x1, y1) || covered(near, x2, y2);
+  return [
+    square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
+    square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
+    square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
+    square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : "",
+  ].filter(Boolean);
 }
 
 interface Segment {
@@ -249,7 +263,34 @@ interface Model {
   cells: Cell[];
 }
 
-type CursorShape = HelixEditor["config"]["cursorShape"]["normal"];
+export type CursorShape = HelixEditor["config"]["cursorShape"]["normal"];
+
+export interface RangeParts {
+  from: number;
+  to: number;
+  pos: number;
+  end: number;
+  eol: boolean;
+}
+
+export function rangeParts(doc: Text, range: HelixRange, primary: boolean, insert: boolean, shape: CursorShape): RangeParts {
+  let from = range.from();
+  let to = range.to();
+  if (insert) {
+    const r = range.minWidth1(doc);
+    if (r.head > r.anchor) {
+      from = r.anchor;
+      to = prevGraphemeBoundary(doc, r.head);
+    } else {
+      const cursorEnd = nextGraphemeBoundary(doc, r.head);
+      from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
+      to = r.anchor;
+    }
+  }
+  const pos = range.cursor(doc);
+  const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
+  return { from, to, pos, end: eol ? pos : nextGraphemeBoundary(doc, pos), eol };
+}
 
 function model(view: EditorView, editor: HelixEditor): Model | null {
   const value = view.state.field(helixField, false);
@@ -265,19 +306,7 @@ function model(view: EditorView, editor: HelixEditor): Model | null {
     const primary = i === value.selection.primaryIndex;
     const native = primary && !insert;
     const drawsCell = shape !== "hidden" && !(insert && primary && shape === "bar") && !view.composing;
-    let from = range.from();
-    let to = range.to();
-    if (insert) {
-      const r = range.minWidth1(doc);
-      if (r.head > r.anchor) {
-        from = r.anchor;
-        to = prevGraphemeBoundary(doc, r.head);
-      } else {
-        const cursorEnd = nextGraphemeBoundary(doc, r.head);
-        from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
-        to = r.anchor;
-      }
-    }
+    const { from, to, pos, end: cellEnd, eol } = rangeParts(doc, range, primary, insert, shape);
     const start = Math.max(from, vFrom);
     const end = Math.min(to, vTo);
     for (let pos = start; pos < end; ) {
@@ -289,17 +318,13 @@ function model(view: EditorView, editor: HelixEditor): Model | null {
       if (to > line.to && line.to < doc.length) newlines.set(line.number, native && newlines.get(line.number) !== false);
       pos = line.to + 1;
     }
-    const pos = range.cursor(doc);
-    if (drawsCell && pos >= vFrom && pos <= vTo) {
-      const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
-      cells.push({ pos, end: eol ? pos : nextGraphemeBoundary(doc, pos), primary, eol });
-    }
+    if (drawsCell && pos >= vFrom && pos <= vTo) cells.push({ pos, end: cellEnd, primary, eol });
   });
   const eol = new Set(cells.filter((c) => c.eol).map((c) => c.pos));
   return { value, shape, byLine, newlines, eol, cells };
 }
 
-const highlights = new WeakMap<object, { highlight: RangeSet; views: Map<EditorView, Range[]> }>();
+const highlights = new WeakMap<object, { highlight: RangeSet; owners: Map<object, Range[]> }>();
 
 interface RangeSet {
   add(range: Range): unknown;
@@ -311,18 +336,18 @@ interface HighlightWindow {
   CSS: { highlights?: { set(name: string, value: RangeSet): unknown } };
 }
 
-function setHighlight(view: EditorView, ranges: Range[]): void {
-  const win = view.dom.ownerDocument.defaultView as HighlightWindow | null;
+export function setHighlight(owner: object, doc: Document, ranges: Range[]): void {
+  const win = doc.defaultView as HighlightWindow | null;
   if (!win?.Highlight || !win.CSS.highlights) return;
   let entry = highlights.get(win);
   if (!entry) {
-    entry = { highlight: new win.Highlight(), views: new Map() };
+    entry = { highlight: new win.Highlight(), owners: new Map() };
     highlights.set(win, entry);
     win.CSS.highlights.set("hx-sel", entry.highlight);
   }
-  for (const r of entry.views.get(view) ?? []) entry.highlight.delete(r);
-  if (ranges.length === 0) entry.views.delete(view);
-  else entry.views.set(view, ranges);
+  for (const r of entry.owners.get(owner) ?? []) entry.highlight.delete(r);
+  if (ranges.length === 0) entry.owners.delete(owner);
+  else entry.owners.set(owner, ranges);
   for (const r of ranges) entry.highlight.add(r);
 }
 
@@ -357,12 +382,8 @@ function opaqueParts(measure: Measure, range: Range): Range[] {
   return out;
 }
 
-function glyphAt(view: EditorView, cell: Cell, top: number, coords: { top: number; bottom: number }): Glyph | null {
-  const text = view.state.doc.sliceString(cell.pos, cell.end);
-  if (/^\s*$/.test(text)) return null;
-  const { node } = view.domAtPos(cell.pos, 1);
-  const el = node.nodeType === 1 ? (node as Element) : node.parentElement;
-  if (!el) return null;
+export function glyphFor(el: Element | null, text: string, top: number, coords: { top: number; bottom: number }): Glyph | null {
+  if (!el || /^\s*$/.test(text)) return null;
   const style = styleOf(el);
   return {
     text,
@@ -375,6 +396,11 @@ function glyphAt(view: EditorView, cell: Cell, top: number, coords: { top: numbe
   };
 }
 
+function glyphAt(view: EditorView, cell: Cell, top: number, coords: { top: number; bottom: number }): Glyph | null {
+  const { node } = view.domAtPos(cell.pos, 1);
+  return glyphFor(node.nodeType === 1 ? (node as Element) : node.parentElement, view.state.doc.sliceString(cell.pos, cell.end), top, coords);
+}
+
 function base(view: EditorView, box: Box): Box {
   const rect = view.scrollDOM.getBoundingClientRect();
   const left = rect.left - view.scrollDOM.scrollLeft * view.scaleX;
@@ -385,7 +411,7 @@ function base(view: EditorView, box: Box): Box {
 function selectionMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] {
   const m = model(view, editor);
   if (!m) {
-    setHighlight(view, []);
+    setHighlight(view, view.dom.ownerDocument, []);
     return [];
   }
   const measure = new Measure(view, m);
@@ -418,7 +444,7 @@ function selectionMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] 
       }
     }
   }
-  setHighlight(view, ranges);
+  setHighlight(view, view.dom.ownerDocument, ranges);
   return out;
 }
 
@@ -431,6 +457,7 @@ function cellMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] {
   for (const cell of m.cells) {
     const line = doc.lineAt(cell.pos);
     const el = measure.lineElement(line.from);
+    if (el && view.posAtDOM(el) !== line.from) continue;
     let left: number;
     let right: number;
     let coords: { top: number; bottom: number };
@@ -452,13 +479,7 @@ function cellMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] {
     if (!row) continue;
     const box: Box = { left, right, top: row[0], bottom: row[1] };
     const near = [...measure.boxes(line.number - 1), ...measure.boxes(line.number), ...measure.boxes(line.number + 1)];
-    const square = (x1: number, y1: number, x2: number, y2: number) => covered(near, x1, y1) || covered(near, x2, y2);
-    const corners = [
-      square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
-      square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
-      square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
-      square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : "",
-    ];
+    const corners = cornerClasses(box, near);
     const insertPrimary = m.value.mode === "insert" && cell.primary;
     const shape = insertPrimary ? m.shape : "block";
     const cls = ["hx-cell", `hx-cell-${shape}`, cell.primary ? "hx-cell-primary" : "", ...corners].filter(Boolean).join(" ");
@@ -507,7 +528,7 @@ export function cursorLayers(editor: HelixEditor): Extension {
       class: "hx-selections",
       update: () => true,
       markers: (view) => selectionMarkers(view, editor),
-      destroy: (_layer, view) => setHighlight(view, []),
+      destroy: (_layer, view) => setHighlight(view, view.dom.ownerDocument, []),
     }),
     layer({
       above: true,

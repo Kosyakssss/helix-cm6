@@ -14828,7 +14828,7 @@ function styleOf(el) {
 }
 
 // src/view/cursor.ts
-class CellMarker {
+class CellMarker2 {
   doc;
   cls;
   box;
@@ -14842,7 +14842,7 @@ class CellMarker {
     this.backdrop = backdrop;
   }
   eq(other) {
-    if (!(other instanceof CellMarker) || other.cls !== this.cls)
+    if (!(other instanceof CellMarker2) || other.cls !== this.cls)
       return false;
     if (this.backdrop?.color !== other.backdrop?.color || this.backdrop?.image !== other.backdrop?.image)
       return false;
@@ -14862,7 +14862,7 @@ class CellMarker {
     return node;
   }
   update(dom, prev) {
-    if (!(prev instanceof CellMarker))
+    if (!(prev instanceof CellMarker2))
       return false;
     this.apply(dom);
     return true;
@@ -14935,18 +14935,7 @@ class Measure {
     const known = this.backdrops.get(start);
     if (known)
       return known;
-    const layers = [];
-    let color = "transparent";
-    for (let e = start;e; e = e.parentElement) {
-      const bg = styleOf(e).backgroundColor;
-      if (isOpaque(bg)) {
-        color = bg;
-        break;
-      }
-      if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg))
-        layers.push(`linear-gradient(${bg}, ${bg})`);
-    }
-    const result = { color, image: layers.length > 0 ? layers.join(", ") : "none" };
+    const result = backdropOf2(start);
     this.backdrops.set(start, result);
     return result;
   }
@@ -14960,7 +14949,7 @@ class Measure {
         break;
       }
       chain.push(e);
-      if (isOpaque(styleOf(e).backgroundColor)) {
+      if (isOpaque2(styleOf(e).backgroundColor)) {
         result = true;
         break;
       }
@@ -15001,7 +14990,21 @@ class Measure {
     return boxes;
   }
 }
-function cellWidth(el) {
+function backdropOf2(start) {
+  const layers = [];
+  let color = "transparent";
+  for (let e = start;e; e = e.parentElement) {
+    const bg = styleOf(e).backgroundColor;
+    if (isOpaque2(bg)) {
+      color = bg;
+      break;
+    }
+    if (!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg))
+      layers.push(`linear-gradient(${bg}, ${bg})`);
+  }
+  return { color, image: layers.length > 0 ? layers.join(", ") : "none" };
+}
+function cellWidth2(el) {
   return 0.6 * parseFloat(styleOf(el).fontSize);
 }
 var spaces = new Map;
@@ -15011,14 +15014,14 @@ function spaceWidth(el) {
   if (width === undefined) {
     const canvas = make(el.ownerDocument, "canvas").getContext("2d");
     if (!canvas)
-      return cellWidth(el);
+      return cellWidth2(el);
     canvas.font = font;
     width = canvas.measureText(" ").width;
     spaces.set(font, width);
   }
   return width;
 }
-function isOpaque(color) {
+function isOpaque2(color) {
   if (color === "transparent")
     return false;
   const alpha = /rgba\([^)]*,\s*([\d.]+)\)$/.exec(color) ?? /\/\s*([\d.]+%?)\s*\)$/.exec(color);
@@ -15029,6 +15032,33 @@ function isOpaque(color) {
 }
 function covered(boxes, x, y) {
   return boxes.some((b) => x >= b.left && x < b.right && y >= b.top && y < b.bottom);
+}
+function cornerClasses2(box, near) {
+  const square = (x1, y1, x2, y2) => covered(near, x1, y1) || covered(near, x2, y2);
+  return [
+    square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
+    square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
+    square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
+    square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : ""
+  ].filter(Boolean);
+}
+function rangeParts2(doc, range, primary, insert, shape) {
+  let from = range.from();
+  let to = range.to();
+  if (insert) {
+    const r = range.minWidth1(doc);
+    if (r.head > r.anchor) {
+      from = r.anchor;
+      to = prevGraphemeBoundary2(doc, r.head);
+    } else {
+      const cursorEnd = nextGraphemeBoundary2(doc, r.head);
+      from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
+      to = r.anchor;
+    }
+  }
+  const pos = range.cursor(doc);
+  const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
+  return { from, to, pos, end: eol ? pos : nextGraphemeBoundary2(doc, pos), eol };
 }
 function model(view, editor) {
   const value = view.state.field(helixField2, false);
@@ -15045,19 +15075,7 @@ function model(view, editor) {
     const primary = i === value.selection.primaryIndex;
     const native = primary && !insert;
     const drawsCell = shape !== "hidden" && !(insert && primary && shape === "bar") && !view.composing;
-    let from = range.from();
-    let to = range.to();
-    if (insert) {
-      const r = range.minWidth1(doc);
-      if (r.head > r.anchor) {
-        from = r.anchor;
-        to = prevGraphemeBoundary2(doc, r.head);
-      } else {
-        const cursorEnd = nextGraphemeBoundary2(doc, r.head);
-        from = primary && shape !== "block" && cursorEnd !== r.anchor ? r.head : cursorEnd;
-        to = r.anchor;
-      }
-    }
+    const { from, to, pos, end: cellEnd, eol } = rangeParts2(doc, range, primary, insert, shape);
     const start = Math.max(from, vFrom);
     const end = Math.min(to, vTo);
     for (let pos = start;pos < end; ) {
@@ -15070,32 +15088,29 @@ function model(view, editor) {
         newlines.set(line.number, native && newlines.get(line.number) !== false);
       pos = line.to + 1;
     }
-    const pos = range.cursor(doc);
-    if (drawsCell && pos >= vFrom && pos <= vTo) {
-      const eol = pos >= doc.length || doc.lineAt(pos).to === pos;
-      cells.push({ pos, end: eol ? pos : nextGraphemeBoundary2(doc, pos), primary, eol });
-    }
+    if (drawsCell && pos >= vFrom && pos <= vTo)
+      cells.push({ pos, end: cellEnd, primary, eol });
   });
   const eol = new Set(cells.filter((c) => c.eol).map((c) => c.pos));
   return { value, shape, byLine, newlines, eol, cells };
 }
 var highlights = new WeakMap;
-function setHighlight(view, ranges) {
-  const win = view.dom.ownerDocument.defaultView;
+function setHighlight2(owner, doc, ranges) {
+  const win = doc.defaultView;
   if (!win?.Highlight || !win.CSS.highlights)
     return;
   let entry = highlights.get(win);
   if (!entry) {
-    entry = { highlight: new win.Highlight, views: new Map };
+    entry = { highlight: new win.Highlight, owners: new Map };
     highlights.set(win, entry);
     win.CSS.highlights.set("hx-sel", entry.highlight);
   }
-  for (const r of entry.views.get(view) ?? [])
+  for (const r of entry.owners.get(owner) ?? [])
     entry.highlight.delete(r);
   if (ranges.length === 0)
-    entry.views.delete(view);
+    entry.owners.delete(owner);
   else
-    entry.views.set(view, ranges);
+    entry.owners.set(owner, ranges);
   for (const r of ranges)
     entry.highlight.add(r);
 }
@@ -15132,13 +15147,8 @@ function opaqueParts(measure, range) {
   }
   return out;
 }
-function glyphAt(view, cell, top, coords) {
-  const text = view.state.doc.sliceString(cell.pos, cell.end);
-  if (/^\s*$/.test(text))
-    return null;
-  const { node } = view.domAtPos(cell.pos, 1);
-  const el = node.nodeType === 1 ? node : node.parentElement;
-  if (!el)
+function glyphFor2(el, text, top, coords) {
+  if (!el || /^\s*$/.test(text))
     return null;
   const style = styleOf(el);
   return {
@@ -15151,6 +15161,10 @@ function glyphAt(view, cell, top, coords) {
     variations: style.fontVariationSettings
   };
 }
+function glyphAt(view, cell, top, coords) {
+  const { node } = view.domAtPos(cell.pos, 1);
+  return glyphFor2(node.nodeType === 1 ? node : node.parentElement, view.state.doc.sliceString(cell.pos, cell.end), top, coords);
+}
 function base(view, box) {
   const rect = view.scrollDOM.getBoundingClientRect();
   const left = rect.left - view.scrollDOM.scrollLeft * view.scaleX;
@@ -15160,7 +15174,7 @@ function base(view, box) {
 function selectionMarkers(view, editor) {
   const m = model(view, editor);
   if (!m) {
-    setHighlight(view, []);
+    setHighlight2(view, view.dom.ownerDocument, []);
     return [];
   }
   const measure = new Measure(view, m);
@@ -15184,7 +15198,7 @@ function selectionMarkers(view, editor) {
       for (const rect of Array.from(r.getClientRects())) {
         const row = measure.row(el, (rect.top + rect.bottom) / 2);
         if (row && rect.width > 0) {
-          out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: rect.left, right: rect.right, top: row[0], bottom: row[1] }), null, null));
+          out.push(new CellMarker2(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: rect.left, right: rect.right, top: row[0], bottom: row[1] }), null, null));
         }
       }
     }
@@ -15192,11 +15206,11 @@ function selectionMarkers(view, editor) {
       const c = view.coordsAtPos(line.to, -1) ?? view.coordsAtPos(line.to, 1);
       const row = c && measure.row(el, (c.top + c.bottom) / 2);
       if (c && row) {
-        out.push(new CellMarker(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] }), null, null));
+        out.push(new CellMarker2(view.dom.ownerDocument, "hx-cell hx-cell-sel", base(view, { left: c.right, right: c.right + spaceWidth(el), top: row[0], bottom: row[1] }), null, null));
       }
     }
   }
-  setHighlight(view, ranges);
+  setHighlight2(view, view.dom.ownerDocument, ranges);
   return out;
 }
 function cellMarkers(view, editor) {
@@ -15209,6 +15223,8 @@ function cellMarkers(view, editor) {
   for (const cell of m.cells) {
     const line = doc.lineAt(cell.pos);
     const el = measure.lineElement(line.from);
+    if (el && view.posAtDOM(el) !== line.from)
+      continue;
     let left;
     let right;
     let coords;
@@ -15217,7 +15233,7 @@ function cellMarkers(view, editor) {
       if (!c || !el)
         continue;
       left = c.right;
-      right = c.right + cellWidth(el);
+      right = c.right + cellWidth2(el);
       coords = c;
     } else {
       const a = view.coordsAtPos(cell.pos, 1);
@@ -15233,19 +15249,13 @@ function cellMarkers(view, editor) {
       continue;
     const box = { left, right, top: row[0], bottom: row[1] };
     const near = [...measure.boxes(line.number - 1), ...measure.boxes(line.number), ...measure.boxes(line.number + 1)];
-    const square = (x1, y1, x2, y2) => covered(near, x1, y1) || covered(near, x2, y2);
-    const corners = [
-      square(box.left - 1, box.top + 1, box.left + 1, box.top - 1) ? "hx-cell-sq-tl" : "",
-      square(box.right + 1, box.top + 1, box.right - 1, box.top - 1) ? "hx-cell-sq-tr" : "",
-      square(box.left - 1, box.bottom - 1, box.left + 1, box.bottom + 1) ? "hx-cell-sq-bl" : "",
-      square(box.right + 1, box.bottom - 1, box.right - 1, box.bottom + 1) ? "hx-cell-sq-br" : ""
-    ];
+    const corners = cornerClasses2(box, near);
     const insertPrimary = m.value.mode === "insert" && cell.primary;
     const shape = insertPrimary ? m.shape : "block";
     const cls = ["hx-cell", `hx-cell-${shape}`, cell.primary ? "hx-cell-primary" : "", ...corners].filter(Boolean).join(" ");
     const glyph = shape === "block" && !cell.eol ? glyphAt(view, cell, row[0], coords) : null;
     const backdrop = shape === "block" ? measure.backdrop(cell.pos) : null;
-    out.push(new CellMarker(view.dom.ownerDocument, cls, base(view, box), glyph, backdrop));
+    out.push(new CellMarker2(view.dom.ownerDocument, cls, base(view, box), glyph, backdrop));
   }
   return out;
 }
@@ -15286,7 +15296,7 @@ function cursorLayers(editor) {
       class: "hx-selections",
       update: () => true,
       markers: (view) => selectionMarkers(view, editor),
-      destroy: (_layer, view) => setHighlight(view, [])
+      destroy: (_layer, view) => setHighlight2(view, view.dom.ownerDocument, [])
     }),
     layer2({
       above: true,
@@ -15458,6 +15468,7 @@ function helixExtension2(env) {
         editor.handleKey(host, key, { nativeInsert: true, passThrough: () => false });
     }
   };
+  const typesNatively = (view, mode) => mode === "insert" && !editor.activePrompt && !env.composeAside?.(view);
   const imeInputs = new WeakMap;
   const openIme = (view) => {
     let input = imeInputs.get(view);
@@ -15525,7 +15536,7 @@ function helixExtension2(env) {
     },
     compositionstart(_event, view) {
       const value = view.state.field(helixField2, false);
-      if (!value || value.mode === "insert" && !editor.activePrompt)
+      if (!value || typesNatively(view, value.mode))
         return false;
       windowOf(view)?.setTimeout(() => {
         if (view.compositionStarted)
@@ -15541,7 +15552,7 @@ function helixExtension2(env) {
       lastKeydown = null;
       if (event.isComposing || event.key === "Process" || event.key === "Dead" && !event.altKey) {
         const value = view.state.field(helixField2, false);
-        if (!value || value.mode === "insert" && !editor.activePrompt)
+        if (!value || typesNatively(view, value.mode))
           return false;
         if (view.composing)
           endComposition(view);
@@ -15562,7 +15573,7 @@ function helixExtension2(env) {
       if (!view.composing)
         return;
       const value = view.state.field(helixField2, false);
-      if (!value || value.mode === "insert" && !editor.activePrompt)
+      if (!value || typesNatively(view, value.mode))
         return;
       endComposition(view);
       onKey(event, view);
@@ -15577,7 +15588,7 @@ function helixExtension2(env) {
       return true;
     }
     const value = view.state.field(helixField2, false);
-    if (!value || value.mode === "insert" && !editor.activePrompt)
+    if (!value || typesNatively(view, value.mode))
       return false;
     if (view.compositionStarted) {
       windowOf(view)?.setTimeout(() => endComposition(view), 0);
@@ -16180,4 +16191,4 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, syntaxLoaded, helixDocument2, selectionInfo, helix2 };
+export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, CellMarker2, backdropOf2, cellWidth2, isOpaque2, cornerClasses2, rangeParts2, setHighlight2, glyphFor2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, syntaxLoaded, helixDocument2, selectionInfo, helix2 };

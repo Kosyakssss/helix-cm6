@@ -59,6 +59,14 @@ import {
   loadSyntax2,
   infoOf2,
   statusOf2,
+  CellMarker2,
+  backdropOf2,
+  cellWidth2,
+  isOpaque2,
+  cornerClasses2,
+  rangeParts2,
+  setHighlight2,
+  glyphFor2,
   helixEnv2,
   helixExtension2,
   uiRefresher2,
@@ -66,8 +74,8 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-trsk2g7n.js";
-__chunks(import.meta.url,["f20md2ym","trsk2g7n","28qqb8e8"],[["./engine.js",1],["./chunk-trsk2g7n.js"],["./languages.js"]],0);
+} from "./chunk-3hdcrqdf.js";
+__chunks(import.meta.url,["bvbzczcv","3hdcrqdf","28qqb8e8"],[["./engine.js",1],["./chunk-3hdcrqdf.js"],["./languages.js"]],0);
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -153,6 +161,7 @@ function plain(text, selection) {
 }
 export {
   APP_COMMANDS2 as APP_COMMANDS,
+  CellMarker2 as CellMarker,
   Context2 as Context,
   HeadlessHost2 as HeadlessHost,
   HelixEditor2 as HelixEditor,
@@ -167,13 +176,16 @@ export {
   SystemClipboard2 as SystemClipboard,
   appKeyLayer2 as appKeyLayer,
   applyTextEdits2 as applyTextEdits,
+  backdropOf2 as backdropOf,
   buildKeymaps2 as buildKeymaps,
+  cellWidth2 as cellWidth,
   changesField2 as changesField,
   changesOf2 as changesOf,
   charAt2 as charAt,
   charBefore2 as charBefore,
   commitHistoryNow2 as commitHistoryNow,
   compilePattern2 as compilePattern,
+  cornerClasses2 as cornerClasses,
   createLoader2 as createLoader,
   defaultConfig2 as defaultConfig,
   diagnosticsField2 as diagnosticsField,
@@ -182,6 +194,7 @@ export {
   escapeRegex2 as escapeRegex,
   formatKey2 as formatKey,
   fromNative2 as fromNative,
+  glyphFor2 as glyphFor,
   gotoLineWithoutJumplist2 as gotoLineWithoutJumplist,
   helixEditor2 as helixEditor,
   helixEnv2 as helixEnv,
@@ -192,6 +205,7 @@ export {
   historyField2 as historyField,
   hostHooks2 as hostHooks,
   infoOf2 as infoOf,
+  isOpaque2 as isOpaque,
   jumplistFor2 as jumplistFor,
   keyFromDom2 as keyFromDom,
   loadConfig2 as loadConfig,
@@ -207,10 +221,12 @@ export {
   prevGraphemeBoundary2 as prevGraphemeBoundary,
   print,
   pushJump2 as pushJump,
+  rangeParts2 as rangeParts,
   selOf2 as selOf,
   setChanges2 as setChanges,
   setDiagnostics2 as setDiagnostics,
   setHelix2 as setHelix,
+  setHighlight2 as setHighlight,
   setMode2 as setMode,
   setSel2 as setSel,
   statusOf2 as statusOf,

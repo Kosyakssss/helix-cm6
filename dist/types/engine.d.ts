@@ -36,3 +36,4 @@ export type { Syntax } from "./syntax/syntax";
 export { setDiagnostics, diagnosticsField, type Diagnostic, type Severity } from "./diagnostics";
 export { setChanges, changesField, changesOf, type Changes, type Hunk } from "./changes";
 export { helixEnv } from "./view/view";
+export { CellMarker, backdropOf, cellWidth, cornerClasses, glyphFor, isOpaque, rangeParts, setHighlight, type Box, type CursorShape, type RangeParts } from "./view/cursor";

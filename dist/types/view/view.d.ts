@@ -19,6 +19,7 @@ export interface ViewEnv {
     panelOwner?(view: EditorView): EditorView | null;
     panelGuest?(view: EditorView): EditorView | null;
     noPanel?: boolean;
+    composeAside?(view: EditorView): boolean;
 }
 export declare const helixEnv: Facet<ViewEnv, ViewEnv | null>;
 export declare function helixExtension(env: ViewEnv): Extension;

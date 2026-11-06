@@ -45,6 +45,7 @@ export interface ViewEnv {
   panelOwner?(view: EditorView): EditorView | null;
   panelGuest?(view: EditorView): EditorView | null;
   noPanel?: boolean;
+  composeAside?(view: EditorView): boolean;
 }
 
 export const helixEnv = Facet.define<ViewEnv, ViewEnv | null>({ combine: (values) => values[0] ?? null });
@@ -199,6 +200,8 @@ export function helixExtension(env: ViewEnv): Extension {
     }
   };
 
+  const typesNatively = (view: EditorView, mode: string) => mode === "insert" && !editor.activePrompt && !env.composeAside?.(view);
+
   const imeInputs = new WeakMap<EditorView, HTMLTextAreaElement>();
 
   const openIme = (view: EditorView) => {
@@ -263,7 +266,7 @@ export function helixExtension(env: ViewEnv): Extension {
       },
       compositionstart(_event, view) {
         const value = view.state.field(helixField, false);
-        if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
+        if (!value || typesNatively(view, value.mode)) return false;
         windowOf(view)?.setTimeout(() => {
           if (view.compositionStarted) endComposition(view);
         }, 0);
@@ -277,7 +280,7 @@ export function helixExtension(env: ViewEnv): Extension {
         lastKeydown = null;
         if (event.isComposing || event.key === "Process" || (event.key === "Dead" && !event.altKey)) {
           const value = view.state.field(helixField, false);
-          if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
+          if (!value || typesNatively(view, value.mode)) return false;
           if (view.composing) endComposition(view);
           openIme(view);
           return true;
@@ -296,7 +299,7 @@ export function helixExtension(env: ViewEnv): Extension {
         const view = this.view;
         if (!view.composing) return;
         const value = view.state.field(helixField, false);
-        if (!value || (value.mode === "insert" && !editor.activePrompt)) return;
+        if (!value || typesNatively(view, value.mode)) return;
         endComposition(view);
         onKey(event, view);
       };
@@ -313,7 +316,7 @@ export function helixExtension(env: ViewEnv): Extension {
         return true;
       }
       const value = view.state.field(helixField, false);
-      if (!value || (value.mode === "insert" && !editor.activePrompt)) return false;
+      if (!value || typesNatively(view, value.mode)) return false;
       if (view.compositionStarted) {
         windowOf(view)?.setTimeout(() => endComposition(view), 0);
         return true;
