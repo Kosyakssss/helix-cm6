@@ -1,6 +1,6 @@
 {
   "name": "helix-cm6",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Helix editing for CodeMirror 6, ported from Helix's source and tested against real Helix.",
   "license": "MPL-2.0",
