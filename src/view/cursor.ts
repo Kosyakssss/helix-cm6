@@ -483,7 +483,7 @@ function cellMarkers(view: EditorView, editor: HelixEditor): LayerMarker[] {
     const insertPrimary = m.value.mode === "insert" && cell.primary;
     const shape = insertPrimary ? m.shape : "block";
     const cls = ["hx-cell", `hx-cell-${shape}`, cell.primary ? "hx-cell-primary" : "", ...corners].filter(Boolean).join(" ");
-    const glyph = shape === "block" && !cell.eol ? glyphAt(view, cell, row[0], coords) : null;
+    const glyph = shape === "block" && !cell.eol && right > left ? glyphAt(view, cell, row[0], coords) : null;
     const backdrop = shape === "block" ? measure.backdrop(cell.pos) : null;
     out.push(new CellMarker(view.dom.ownerDocument, cls, base(view, box), glyph, backdrop));
   }
