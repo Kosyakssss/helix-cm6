@@ -9,7 +9,7 @@ Not on npm or any other registry yet. If you want it published, [open an issue](
 ## Install
 
 ```sh
-bun add github:Kosyakssss/helix-cm6#0.1.1
+bun add github:Kosyakssss/helix-cm6#0.1.2
 ```
 
 `dist/` is committed, so nothing builds on install. `@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies.
