@@ -5,10 +5,10 @@
   "license": "MPL-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kosyakssss/helix-cm6.git"
+    "url": "git+https://tangled.org/kote-pdj.bsky.social/helix-cm6"
   },
-  "homepage": "https://github.com/Kosyakssss/helix-cm6#readme",
-  "bugs": "https://github.com/Kosyakssss/helix-cm6/issues",
+  "homepage": "https://tangled.org/kote-pdj.bsky.social/helix-cm6",
+  "bugs": "https://tangled.org/kote-pdj.bsky.social/helix-cm6/issues",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
