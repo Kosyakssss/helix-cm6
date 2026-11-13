@@ -1,9 +1,14 @@
 {
   "name": "helix-cm6",
   "version": "0.1.2",
-  "private": true,
   "description": "Helix editing for CodeMirror 6, ported from Helix's source and tested against real Helix.",
   "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kosyakssss/helix-cm6.git"
+  },
+  "homepage": "https://github.com/Kosyakssss/helix-cm6#readme",
+  "bugs": "https://github.com/Kosyakssss/helix-cm6/issues",
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.js",
@@ -43,6 +48,9 @@
     "tree-sitter/binding.c",
     "test/harness.ts",
     "test/oracle",
+    "!test/oracle/cache-*.json",
+    "!test/oracle/languages",
+    "tsconfig.json",
     "LICENSE"
   ],
   "scripts": {

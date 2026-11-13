@@ -4,15 +4,13 @@ helix-cm6 adds [Helix](https://helix-editor.com) editing to [CodeMirror 6](https
 
 ![Eight cursors from one regex select in a plain CodeMirror editor](docs/screenshots/1-multiple-cursors.png)
 
-Not on npm or any other registry yet. If you want it published, [open an issue](https://github.com/Kosyakssss/helix-cm6/issues) and I'll get on it.
-
 ## Install
 
 ```sh
-bun add github:Kosyakssss/helix-cm6#0.1.2
+npm install helix-cm6 @codemirror/state @codemirror/view @codemirror/commands
 ```
 
-`dist/` is committed, so nothing builds on install. `@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies.
+`@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies. To install from GitHub instead, use `github:Kosyakssss/helix-cm6#0.1.2`. `dist/` is committed, so nothing builds on install.
 
 ## Use
 
