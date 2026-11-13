@@ -1126,7 +1126,7 @@ function rootRevision(doc) {
   };
 }
 function createHistory(doc) {
-  return { revisions: [rootRevision(doc)], current: 0, pending: null };
+  return { id: {}, revisions: [rootRevision(doc)], current: 0, pending: null };
 }
 function makeHistoryField(selectionOf) {
   return StateField.define({
@@ -1170,7 +1170,7 @@ function commit(value, selection, timestamp) {
     selectionBefore: pending.oldSelection,
     timestamp
   });
-  return { revisions, current: index, pending: null };
+  return { ...value, revisions, current: index, pending: null };
 }
 function undoStep(value) {
   if (value.current === 0)
@@ -1206,6 +1206,20 @@ function pathUp(value, n, a) {
     n = value.revisions[n].parent;
   }
   return path;
+}
+function changesSince(value, revision) {
+  if (revision === value.current)
+    return null;
+  const lca = lowestCommonAncestor(value, revision, value.current);
+  let changes = null;
+  const add = (next) => {
+    changes = changes ? changes.compose(next) : next;
+  };
+  for (const n of pathUp(value, revision, lca))
+    add(value.revisions[n].inversion);
+  for (const n of pathUp(value, value.current, lca).reverse())
+    add(value.revisions[n].changes);
+  return changes;
 }
 function jumpTo(value, to) {
   const lca = lowestCommonAncestor(value, value.current, to);
@@ -2040,6 +2054,28 @@ function fragments(doc, sel) {
 }
 
 // src/commands/jumps.ts
+function sameJump(a, b) {
+  return a.docId === b.docId && a.revision === b.revision && a.history === b.history && a.selection.eq(b.selection);
+}
+function makeJump2(host, selection) {
+  commitHistoryNow2(host);
+  const history = host.state.field(historyField2);
+  return { docId: host.id, selection, revision: history.current, history: history.id };
+}
+function jumpSelection2(jump, host) {
+  if (jump.docId !== host.id)
+    return jump.selection;
+  const history = host.state.field(historyField2);
+  let selection = jump.selection;
+  if (jump.history === history.id && jump.revision < history.revisions.length) {
+    const committed = changesSince(history, jump.revision);
+    if (committed)
+      selection = selection.map(committed);
+    if (history.pending)
+      selection = selection.map(history.pending.changes);
+  }
+  return selection.ensureInvariants(host.state.doc);
+}
 var CAPACITY = 30;
 
 class JumpList {
@@ -2052,7 +2088,7 @@ class JumpList {
     let removed = 0;
     this.jumps.length = Math.min(this.jumps.length, this.current);
     const back = this.jumps[this.jumps.length - 1];
-    if (!back || back.docId !== jump.docId || !back.selection.eq(jump.selection)) {
+    if (!back || !sameJump(back, jump)) {
       while (this.jumps.length >= CAPACITY) {
         this.jumps.shift();
         removed++;
@@ -2072,19 +2108,20 @@ class JumpList {
     }
     return null;
   }
-  backward(here, count) {
+  backward(host, count) {
     let current = this.current - count;
     if (current < 0)
       return null;
+    const here = host.state.field(helixField2).selection;
     if (this.current === this.jumps.length) {
-      const removed = this.pushImpl(here);
+      const removed = this.pushImpl(makeJump2(host, here));
       current = Math.max(0, current - removed);
     }
     this.current = current;
     const entry = this.jumps[this.current];
     if (!entry)
       return null;
-    if (entry.docId === here.docId && entry.selection.eq(here.selection)) {
+    if (entry.docId === host.id && here.eq(jumpSelection2(entry, host))) {
       if (this.current === 0)
         return null;
       this.current -= 1;
@@ -2095,12 +2132,6 @@ class JumpList {
     const before = this.jumps.slice(0, this.current).filter((j) => j.docId === docId).length;
     this.jumps = this.jumps.filter((j) => j.docId !== docId);
     this.current = Math.min(Math.max(0, this.current - before), this.jumps.length);
-  }
-  map(docId, changes) {
-    for (const jump of this.jumps) {
-      if (jump.docId === docId)
-        jump.selection = jump.selection.map(changes);
-    }
   }
 }
 function commitHistoryNow2(host) {
@@ -2115,8 +2146,7 @@ function jumplistFor2(cx) {
   return cx.editor.jumplist(cx.host);
 }
 function pushJump2(cx) {
-  commitHistoryNow2(cx.host);
-  jumplistFor2(cx).push({ docId: cx.host.id, selection: cx.host.state.field(helixField2).selection });
+  jumplistFor2(cx).push(makeJump2(cx.host, cx.host.state.field(helixField2).selection));
 }
 
 // src/commands/motion.ts
@@ -2854,7 +2884,7 @@ function regexPrompt(cx, label, register, onEvent) {
         editor.setError(re.message);
         return;
       }
-      jumplistFor2(pcx).push({ docId: host.id, selection: snapshot });
+      jumplistFor2(pcx).push(makeJump2(host, snapshot));
       onEvent(pcx, re, "validate");
     },
     onCancel: () => setSel2(fresh(), snapshot)
@@ -3680,6 +3710,9 @@ class Node {
   get isMissing() {
     return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_missing(p)) !== 0;
   }
+  get isExtra() {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_extra(p)) !== 0;
+  }
   get isVisible() {
     return this.isMissing || this.isNamed && this.rt.nodeValue(this, (p) => this.rt.x.hm_node_symbol_type(p)) <= 1;
   }
@@ -4498,8 +4531,12 @@ function queryIndents(query, root, text, range, newLineBytePos) {
   }
   return { indentCaptures, extendCaptures, opaqueRanges };
 }
+function isTrivia(node) {
+  return node.isExtra && node.kind !== "ERROR";
+}
 function extendNodes(node, deepestPreceding, extendCaptures, text, line, tabWidth, indentWidth) {
   let stopExtend = false;
+  const contentEndLine = text.byteToLine(deepestPreceding.endByte);
   let deepest = deepestPreceding;
   while (deepest && !deepest.equals(node.value)) {
     let extendNode = false;
@@ -4511,7 +4548,7 @@ function extendNodes(node, deepestPreceding, extendCaptures, text, line, tabWidt
           stopExtend = true;
         else {
           nodeCaptured = true;
-          if (text.byteToLine(deepest.endByte) === line)
+          if (contentEndLine === line)
             extendNode = true;
           else {
             const cursorIndent = indentLevelForLine(text.line(line), tabWidth, indentWidth);
@@ -4526,10 +4563,11 @@ function extendNodes(node, deepestPreceding, extendCaptures, text, line, tabWidt
       stopExtend = false;
     else if (extendNode && !stopExtend) {
       node.value = deepest;
-      break;
+      return true;
     }
     deepest = deepest.parent;
   }
+  return false;
 }
 function candidateBodyForNewLine(deepestPreceding, bytePos) {
   let node = deepestPreceding;
@@ -4542,6 +4580,8 @@ function candidateBodyForNewLine(deepestPreceding, bytePos) {
         for (;; ) {
           if (cursor.currentNode.id === node.id) {
             if (cursor.gotoNextSibling()) {
+              while (isTrivia(cursor.currentNode) && cursor.currentNode.endByte <= bytePos && cursor.gotoNextSibling())
+                ;
               const child = cursor.currentNode;
               if (child.startByte >= bytePos)
                 return child;
@@ -4564,16 +4604,9 @@ function initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos
   if (!start)
     return null;
   const node = { value: start };
-  let deepestPreceding = null;
-  for (const child of start.children)
-    if (child.endByte <= bytePos)
-      deepestPreceding = child;
-  if (deepestPreceding) {
-    let prec = deepestPreceding;
-    while (prec.childCount > 0)
-      prec = prec.child(prec.childCount - 1);
-    deepestPreceding = prec;
-  }
+  let deepestPreceding = start.children.filter((child) => child.endByte <= bytePos && !isTrivia(child)).at(-1) ?? null;
+  for (let last = deepestPreceding?.children.filter((c) => !isTrivia(c)).at(-1);last; last = last.children.filter((c) => !isTrivia(c)).at(-1))
+    deepestPreceding = last;
   const candidateBody = newLineBytePos !== null && deepestPreceding ? candidateBodyForNewLine(deepestPreceding, bytePos) : null;
   const upper = candidateBody ? candidateBody.endByte : bytePos + 1;
   const range = deepestPreceding ? [deepestPreceding.endByte - 1, upper] : [bytePos, upper];
@@ -4583,9 +4616,13 @@ function initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos
     node.value = candidateBody;
     descended = true;
   }
+  let extended = false;
   if (deepestPreceding && !descended)
-    extendNodes(node, deepestPreceding, result.extendCaptures, text, line, tabWidth, indentWidth);
-  return [node.value, result.indentCaptures, result.opaqueRanges];
+    extended = extendNodes(node, deepestPreceding, result.extendCaptures, text, line, tabWidth, indentWidth);
+  const children = node.value.children.filter((child) => !isTrivia(child));
+  const delimited = children.length > 1 && !children[0].isNamed && !children.at(-1).isNamed;
+  const openEnded = extended && !delimited;
+  return [node.value, result.indentCaptures, result.opaqueRanges, openEnded];
 }
 function opaqueHit(start, end, bytePos, text) {
   return start <= bytePos && bytePos < end && text.byteToLine(start) < text.byteToLine(bytePos);
@@ -4595,7 +4632,7 @@ function containmentAccounting(query, root, text, tabWidth, indentWidth, line, b
   const init = initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos, newLineBytePos);
   if (!init)
     return null;
-  const [startNode, captures, opaqueRanges] = init;
+  const [startNode, captures, opaqueRanges, openEnded] = init;
   if (opaqueRanges.some(([s, e]) => opaqueHit(s, e, bytePos, text)))
     return [emptyIndentation(), true];
   const targetLine = line + (newLine ? 1 : 0);
@@ -4636,7 +4673,9 @@ function containmentAccounting(query, root, text, tabWidth, indentWidth, line, b
       }
     }
     const nodeStart = nodeStartLine(text, node, newLineBytePos);
-    const end = nodeEndLine(text, node, newLineBytePos);
+    let end = nodeEndLine(text, node, newLineBytePos);
+    if (openEnded && newLine)
+      end = Math.max(end, targetLine);
     const parent = headerScoped ? node.parent : null;
     const start = parent ? nodeStartLine(text, parent, newLineBytePos) : nodeStart;
     const contains = start < targetLine && targetLine <= end;
@@ -4707,6 +4746,24 @@ function treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, line,
   if (injected)
     indentation.indent += injectionBaseLevel(syntax, text, bytePos, tabWidth, indentWidth);
   return indentation;
+}
+function treesitterFormatChanges(query, syntax, style, tabWidth, doc) {
+  const indentWidth = indentStyleWidth(style, tabWidth);
+  const changes = [];
+  for (let lineIdx = 0;lineIdx < doc.lines; lineIdx++) {
+    const line = doc.line(lineIdx + 1);
+    const fnw = firstNonWhitespace(line.text);
+    if (fnw === null)
+      continue;
+    const pos = line.from + fnw;
+    const indent = treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, lineIdx, pos, false);
+    if (!indent)
+      continue;
+    const str = indentationString(indent, style, tabWidth);
+    if (line.text.slice(0, fnw) !== str)
+      changes.push([line.from, pos, str]);
+  }
+  return changes;
 }
 function indentForNewline(syntax, heuristic, style, tabWidth, doc, lineBefore, lineBeforeEndPos, currentLine) {
   const indentWidth = indentStyleWidth(style, tabWidth);
@@ -6899,8 +6956,8 @@ var editCommands = {
       cx.editor.jumpTo(cx, jump);
   },
   jump_backward: (cx) => {
-    const here = { docId: cx.host.id, selection: selOf2(cx) };
-    const jump = jumplistFor2(cx).backward(here, cx.count());
+    commitHistoryNow2(cx.host);
+    const jump = jumplistFor2(cx).backward(cx.host, cx.count());
     if (jump)
       cx.editor.jumpTo(cx, jump);
   },
@@ -8871,270 +8928,117 @@ function appFallback(name) {
   return APP_COMMANDS2[name] ?? null;
 }
 
-// src/core/textwrap.ts
+// src/core/wrap.ts
 var encoder = new TextEncoder;
-function byteLen(s) {
-  return encoder.encode(s).length;
+var WHITESPACE2 = /^\p{White_Space}$/u;
+function isWhitespace2(ch) {
+  return WHITESPACE2.test(ch);
 }
-function chWidth(ch) {
-  const cp = ch.codePointAt(0);
-  if (cp < 32 || cp === 127)
-    return 0;
-  if (cp < 127)
-    return 1;
-  let lo = 0;
-  let hi = WIDTH_RANGES.length / 3 - 1;
-  while (lo <= hi) {
-    const mid = lo + hi >> 1;
-    if (cp < WIDTH_RANGES[mid * 3])
-      hi = mid - 1;
-    else if (cp > WIDTH_RANGES[mid * 3 + 1])
-      lo = mid + 1;
-    else
-      return WIDTH_RANGES[mid * 3 + 2];
+function trimStart(s) {
+  let i = 0;
+  for (const ch of s) {
+    if (!isWhitespace2(ch))
+      break;
+    i += ch.length;
   }
-  return 1;
+  return s.slice(i);
 }
-function displayWidth(text) {
-  let w = 0;
-  for (const ch of text)
-    w += chWidth(ch);
-  return w;
+function trim(s) {
+  const start = trimStart(s);
+  const chars = [...start];
+  while (chars.length > 0 && isWhitespace2(chars.at(-1)))
+    chars.pop();
+  return chars.join("");
 }
-function wordFrom(s) {
-  const trimmed = s.replace(/ +$/, "");
-  return { word: trimmed, width: displayWidth(trimmed), whitespace: s.slice(trimmed.length) };
+function displayWidth(s, tabWidth) {
+  let col = 0;
+  for (const g of segmentGraphemes(s))
+    col += g === "\t" ? tabWidthAt(col, tabWidth) : graphemeWidth(g);
+  return col;
 }
-function findWords(line) {
+function isSeparator(line, commentTokens) {
+  const trimmed = trim(line);
+  return trimmed === "" || commentTokens.includes(trimmed);
+}
+function commentToken(line, commentTokens) {
+  const trimmed = trimStart(line);
+  let best = null;
+  for (const token of commentTokens) {
+    if (!trimmed.startsWith(token))
+      continue;
+    if (best === null || encoder.encode(token).length >= encoder.encode(best).length)
+      best = token;
+  }
+  return best;
+}
+function lineContent(text, line) {
+  return text.line(line + 1).text;
+}
+function collectWords(text, startLine, endLine, opts) {
   const words = [];
-  let start = 0;
-  let inWhitespace = false;
-  let idx = 0;
-  for (const ch of line) {
-    if (inWhitespace && ch !== " ") {
-      words.push(wordFrom(line.slice(start, idx)));
-      start = idx;
+  for (let line = startLine;line <= endLine; line++) {
+    const lineStart = text.line(line + 1).from;
+    const content = lineContent(text, line);
+    const trimmed = trimStart(content);
+    const body = content.length - trimmed.length + (commentToken(content, opts.commentTokens)?.length ?? 0);
+    let word = null;
+    const pushWord = (start, end) => {
+      words.push({ start: lineStart + start, end: lineStart + end, width: displayWidth(content.slice(start, end), opts.tabWidth) });
+    };
+    let i = 0;
+    for (const ch of content) {
+      if (i >= body && !isWhitespace2(ch))
+        word ??= i;
+      else if (word !== null) {
+        pushWord(word, i);
+        word = null;
+      }
+      i += ch.length;
     }
-    inWhitespace = ch === " ";
-    idx += ch.length;
+    if (word !== null)
+      pushWord(word, content.length);
   }
-  if (start < line.length)
-    words.push(wordFrom(line.slice(start)));
   return words;
 }
-function breakApart(word, lineWidth) {
-  const out = [];
-  let offset = 0;
-  let width = 0;
-  let idx = 0;
-  for (const ch of word.word) {
-    const w = chWidth(ch);
-    if (width > 0 && width + w > lineWidth) {
-      out.push({ word: word.word.slice(offset, idx), width, whitespace: "" });
-      offset = idx;
-      width = w;
-    } else {
-      width += w;
-    }
-    idx += ch.length;
-  }
-  if (offset < word.word.length)
-    out.push({ word: word.word.slice(offset), width, whitespace: word.whitespace });
-  return out;
-}
-function breakWords(words, lineWidth) {
-  const out = [];
-  for (const w of words) {
-    if (w.width > lineWidth)
-      out.push(...breakApart(w, lineWidth));
-    else
-      out.push(w);
-  }
-  return out;
-}
-var NLINE = 1000;
-var OVERFLOW = 2500;
-var SHORT_FRACTION = 4;
-var SHORT_PENALTY = 25;
-function wrapOptimalFit(fragments, lineWidths) {
-  const defaultWidth = lineWidths[lineWidths.length - 1] ?? 0;
-  const widths = [0];
-  let width = 0;
-  for (const f of fragments) {
-    width += f.width + f.whitespace.length;
-    widths.push(width);
-  }
-  const n = fragments.length;
-  const minima = [[0, 0]];
-  const lineNumbers = [0];
-  const lineNumber = (i) => {
-    while (lineNumbers.length < i + 1) {
-      const pos = lineNumbers.length;
-      lineNumbers.push(1 + lineNumber(minima[pos][0]));
-    }
-    return lineNumbers[i];
-  };
-  const cost = (i, j) => {
-    const ln = lineNumber(i);
-    const target = Math.max(lineWidths[ln] ?? defaultWidth, 1);
-    const lineWidth = widths[j] - widths[i] - fragments[j - 1].whitespace.length;
-    let c = minima[i][1] + NLINE;
-    if (lineWidth > target)
-      c += (lineWidth - target) * OVERFLOW;
-    else if (j < n)
-      c += (target - lineWidth) * (target - lineWidth);
-    else if (i + 1 === j && lineWidth < target / SHORT_FRACTION)
-      c += SHORT_PENALTY;
-    return c;
-  };
-  for (let j = 1;j <= n; j++) {
-    let best = 0;
-    let bestCost = Infinity;
-    for (let i = 0;i < j; i++) {
-      const c = cost(i, j);
-      if (c < bestCost) {
-        bestCost = c;
-        best = i;
-      }
-    }
-    minima.push([best, bestCost]);
-  }
-  const lines = [];
-  let pos = n;
-  for (;; ) {
-    const prev = minima[pos][0];
-    lines.push(fragments.slice(prev, pos));
-    pos = prev;
-    if (pos === 0)
-      break;
-  }
-  return lines.reverse();
-}
-function wrapSingleLine(line, options, lines) {
-  const indent = lines.length === 0 ? options.initialIndent : options.subsequentIndent;
-  if (byteLen(line) < options.width && indent === "") {
-    lines.push(line.replace(/ +$/, ""));
-    return;
-  }
-  const initialWidth = Math.max(0, options.width - displayWidth(options.initialIndent));
-  const subsequentWidth = Math.max(0, options.width - displayWidth(options.subsequentIndent));
-  const words = breakWords(findWords(line), subsequentWidth);
-  if (options.initialIndent !== "")
-    words.unshift({ word: "", width: 0, whitespace: "" });
-  const wrapped = wrapOptimalFit(words, [initialWidth, subsequentWidth]);
-  let idx = 0;
-  for (const ws of wrapped) {
-    const last = ws[ws.length - 1];
-    if (!last) {
-      lines.push("");
+function reflow(text, startLine, endLine, opts) {
+  const separator = (line) => isSeparator(lineContent(text, line), opts.commentTokens);
+  const changes = [];
+  let line = startLine;
+  while (line <= endLine) {
+    if (separator(line)) {
+      line++;
       continue;
     }
-    const len = ws.reduce((s, w) => s + w.word.length + w.whitespace.length, 0) - last.whitespace.length;
-    let result = lines.length === 0 && options.initialIndent !== "" ? options.initialIndent : lines.length > 0 && options.subsequentIndent !== "" ? options.subsequentIndent : "";
-    result += line.slice(idx, idx + len);
-    lines.push(result);
-    idx += len + last.whitespace.length;
-  }
-}
-function fill(text, options) {
-  if (byteLen(text) < options.width && !text.includes(`
-`) && options.initialIndent === "") {
-    return text.replace(/ +$/, "");
-  }
-  const lines = [];
-  for (const line of text.split(options.lineEnding))
-    wrapSingleLine(line, options, lines);
-  return lines.join(options.lineEnding);
-}
-function rustLines(text) {
-  if (text === "")
-    return [];
-  const parts = text.split(`
-`);
-  if (parts[parts.length - 1] === "")
-    parts.pop();
-  return parts.map((p) => p.endsWith("\r") ? p.slice(0, -1) : p);
-}
-function nonEmptyLines(text) {
-  const out = [];
-  let rest = text;
-  for (;; ) {
-    const lf = rest.indexOf(`
-`);
-    if (lf < 0)
-      break;
-    if (lf === 0 || lf === 1 && rest[0] === "\r") {
-      rest = rest.slice(lf + 1);
+    const paragraphStart = line;
+    while (line <= endLine && !separator(line))
+      line++;
+    const words = collectWords(text, paragraphStart, line - 1, opts);
+    const firstWord = words[0];
+    if (!firstWord)
       continue;
-    }
-    if (rest[lf - 1] === "\r")
-      out.push([rest.slice(0, lf - 1), `\r
-`]);
-    else
-      out.push([rest.slice(0, lf), `
-`]);
-    rest = rest.slice(lf + 1);
-  }
-  if (rest !== "")
-    out.push([rest, null]);
-  return out;
-}
-function unfill(text) {
-  const options = { width: 0, initialIndent: "", subsequentIndent: "", lineEnding: `
-` };
-  rustLines(text).forEach((line, idx) => {
-    options.width = Math.max(options.width, displayWidth(line));
-    const prefix = /^[ \-+*>#/]*/.exec(line)[0];
-    if (idx === 0)
-      options.initialIndent = prefix;
-    else if (idx === 1)
-      options.subsequentIndent = prefix;
-    else {
-      for (let k = 0;k < Math.min(prefix.length, options.subsequentIndent.length); k++) {
-        if (prefix[k] !== options.subsequentIndent[k]) {
-          options.subsequentIndent = prefix.slice(0, k);
-          break;
-        }
+    const firstLine = lineContent(text, paragraphStart);
+    const indent = firstLine.slice(0, firstLine.length - trimStart(firstLine).length);
+    const token = commentToken(firstLine, opts.commentTokens);
+    const prefix = token !== null ? `${indent}${token} ` : indent;
+    const prefixWidth = displayWidth(prefix, opts.tabWidth);
+    const lineBreak = `${opts.lineEnding}${prefix}`;
+    let col = prefixWidth + firstWord.width;
+    for (let i = 1;i < words.length; i++) {
+      const prev = words[i - 1];
+      const word = words[i];
+      let gap;
+      if (col + 1 + word.width > opts.textWidth) {
+        col = prefixWidth + word.width;
+        gap = lineBreak;
+      } else {
+        col += 1 + word.width;
+        gap = " ";
       }
-      if (prefix.length < options.subsequentIndent.length)
-        options.subsequentIndent = prefix;
+      if (text.sliceString(prev.end, word.start) !== gap)
+        changes.push([prev.end, word.start, gap]);
     }
-  });
-  let unfilled = "";
-  let detected = null;
-  for (const [idx, [line, ending]] of nonEmptyLines(text).entries()) {
-    if (idx === 0)
-      unfilled += line.slice(options.initialIndent.length);
-    else
-      unfilled += " " + line.slice(options.subsequentIndent.length);
-    if (detected === null && ending !== null)
-      detected = ending;
-    else if (detected === `\r
-` && ending === `
-`)
-      detected = ending;
   }
-  if (detected !== null && text.endsWith(detected))
-    unfilled += detected;
-  options.lineEnding = detected ?? `
-`;
-  return [unfilled, options];
-}
-function refill(filled, width) {
-  const [text, options] = unfill(filled);
-  const stripped = text.endsWith(options.lineEnding) ? text.slice(0, -options.lineEnding.length) : null;
-  const newOptions = {
-    width,
-    initialIndent: options.initialIndent,
-    subsequentIndent: options.subsequentIndent,
-    lineEnding: `
-`
-  };
-  let refilled = fill(stripped ?? text, newOptions);
-  if (stripped !== null)
-    refilled += `
-`;
-  return refilled;
+  return changes;
 }
 
 // src/core/options.ts
@@ -10130,7 +10034,7 @@ function gotoLineNumber(cx, args, event) {
     return;
   const last = cx.editor.gotoPreview;
   cx.editor.gotoPreview = null;
-  jumplistFor2(cx).push({ docId: cx.host.id, selection: last });
+  jumplistFor2(cx).push(makeJump2(cx.host, last));
 }
 function ws(name, extra = {}) {
   return {
@@ -10332,7 +10236,25 @@ var DEFS = [
   { name: "quit-all!", aliases: ["qa!"], doc: "Force close all views.", ...ws("quit-all") },
   { name: "cquit", aliases: ["cq"], doc: "Quit with exit code (default 1). Accepts an optional integer exit code (:cq 2).", ...ws("cquit") },
   { name: "cquit!", aliases: ["cq!"], doc: "Force quit with exit code (default 1) ignoring unsaved changes. Accepts an optional integer exit code (:cq! 2).", ...ws("cquit!") },
-  { name: "format", aliases: ["fmt"], doc: "Format the file using an external formatter or language server.", ...ws("format") },
+  {
+    name: "format",
+    aliases: ["fmt"],
+    doc: "Format the file using an external formatter or language server.",
+    fun: validateOnly((cx, args) => {
+      if (cx.editor.runApp(cx, "format", args.positional))
+        return;
+      const syntax = syntaxOf(cx);
+      const query = syntax ? indentQueryFor(syntax.loader, syntax.root.language) : null;
+      if (!syntax || !query) {
+        cx.editor.setError("A formatter isn't available, and no language server provides formatting capabilities");
+        return;
+      }
+      const { style, tabWidth } = cx.editor.indent(cx.host);
+      const doc = docOf2(cx);
+      apply(cx, changeSetOf(doc, treesitterFormatChanges(query, syntax, style, tabWidth, doc)));
+      commitHistoryNow2(cx.host);
+    })
+  },
   { name: "change-current-directory", aliases: ["cd"], doc: "Change the current working directory.", ...ws("change-current-directory") },
   { name: "show-directory-stack", aliases: [], doc: "Show the directory stack as a <space> delimited string.", ...ws("show-directory-stack") },
   { name: "push-directory", aliases: ["pushd"], doc: "Save and then change the current directory.", ...ws("push-directory") },
@@ -10432,7 +10354,18 @@ var DEFS = [
         return;
       }
       const doc = docOf2(cx);
-      apply(cx, changeSetOf(doc, selOf2(cx).ranges.map((r) => [r.from(), r.to(), refill(doc.sliceString(r.from(), r.to()), width)])));
+      const options = { textWidth: width, tabWidth: cx.editor.indent(cx.host).tabWidth, lineEnding: `
+`, commentTokens: cx.editor.languageConfig(cx.host)?.commentTokens ?? [] };
+      const changes = [];
+      const lines = selOf2(cx).ranges.map((r) => lineRange(doc, r));
+      for (let i = 0;i < lines.length; i++) {
+        const start = lines[i][0];
+        let end = lines[i][1];
+        while (i + 1 < lines.length && lines[i + 1][0] - end <= 1)
+          end = lines[++i][1];
+        changes.push(...reflow(doc, start, end, options));
+      }
+      apply(cx, changeSetOf(doc, changes));
       commitHistoryNow2(cx.host);
     })
   },
@@ -11345,14 +11278,13 @@ class HelixEditor2 {
     const key = host.paneId;
     let list = this.jumplists.get(key);
     if (!list) {
-      list = new JumpList({ docId: host.id, selection: selection(host) });
+      const history = host.state.field(historyField2);
+      list = new JumpList({ docId: host.id, selection: selection(host), revision: history.current, history: history.id });
       this.jumplists.set(key, list);
     }
     return list;
   }
   docChanged(host, changes) {
-    for (const list of this.jumplists.values())
-      list.map(host.id, changes);
     if (this.snippets.get(host.id)?.map(changes))
       this.snippets.delete(host.id);
   }
@@ -11369,7 +11301,7 @@ class HelixEditor2 {
   }
   jumpTo(cx, jump) {
     if (jump.docId === cx.host.id) {
-      setSel2(cx, jump.selection);
+      setSel2(cx, jumpSelection2(jump, cx.host));
       return;
     }
     this.app?.openJump?.(cx, jump);
@@ -16056,7 +15988,7 @@ function helix2(options = {}) {
     if (syntax === false)
       return;
     regex.catch(() => null).then(async (engine) => {
-      const languages = options.languages ?? (options.grammars ? (await (__preload("28qqb8e8"), import("./languages.js"))).languagesToml : undefined);
+      const languages = options.languages ?? (options.grammars ? (await (__preload("nxffcses"), import("./languages.js"))).languagesToml : undefined);
       return loadSyntax2(win, syntax, {
         regex: engine,
         languages: typeof languages === "string" ? [languages] : languages,
@@ -16192,4 +16124,4 @@ function helix2(options = {}) {
   return [extension, helixEditor2.of(editor), helixInstance.of(instance), drawSelection(), nativeSelectionTheme, nativeUndo, clipboardReader];
 }
 
-export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, CellMarker2, backdropOf2, cellWidth2, isOpaque2, cornerClasses2, rangeParts2, setHighlight2, glyphFor2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, syntaxLoaded, helixDocument2, selectionInfo, helix2 };
+export { __chunks, hostHooks2, parseKey2, formatKey2, parseMacro2, keySequenceFormat, keyFromDom2, MemoryClipboard2, Registers2, defaultConfig2, segmentGraphemes, nextGraphemeBoundary2, prevGraphemeBoundary2, charAt2, charBefore2, Range2, Selection2, setHelix2, helixOwned2, helixField2, fromNative2, toNative2, dropSelectionChange2, syncNativeSelection2, historyField2, HeadlessHost2, setMode2, docOf2, selOf2, setSel2, makeJump2, jumpSelection2, commitHistoryNow2, jumplistFor2, pushJump2, gotoLineWithoutJumplist2, escapeRegex2, compilePattern2, pasteImpl2, setChanges2, changesField2, changesOf2, setDiagnostics2, diagnosticsField2, severityRank, diagnosticsOf, applyTextEdits2, insertSnippet, commandContext, APP_COMMANDS2, rainbowSpans, highlightSpans, DEFAULT_SCOPES, TYPABLE, TYPABLE_MAP, splitCommandLine, STATIC_COMMANDS, executeCommand, runTypable, COMMAND_DOCS, Context2, HelixEditor2, loadConfig2, appKeyLayer2, helixAppKeys2, buildKeymaps2, SystemClipboard2, parseLanguagesToml2, LanguageLoader2, MARKDOWN_LANGUAGES2, createLoader2, SyntaxSessions2, RustRegexEngine2, wasmBytes2, loadRegex2, loadSyntax2, infoOf2, statusOf2, CellMarker2, backdropOf2, cellWidth2, isOpaque2, cornerClasses2, rangeParts2, setHighlight2, glyphFor2, helixEnv2, helixExtension2, uiRefresher2, uiSignature2, makeViewOps2, helixHost2, helixEditor2, helixInstance, syntaxLoaded, helixDocument2, selectionInfo, helix2 };

@@ -2,13 +2,14 @@ import type { Completion } from "../core/prompt";
 import type { Context } from "../core/editor";
 import { nextGraphemeBoundary } from "../graphemes";
 import { parseUndoKind } from "../history";
-import { refill } from "../core/textwrap";
+import { reflow } from "../core/wrap";
 import { OPTIONS } from "../core/options";
-import { apply, changeSetOf, docOf, selOf, setSel } from "./util";
+import { apply, changeSetOf, docOf, lineRange, selOf, setSel, syntaxOf } from "./util";
+import { indentQueryFor, treesitterFormatChanges } from "../syntax/indent";
 import { earlier, later } from "./misc";
 import { yankJoinedTo, paste, replaceSelectionsWithRegister } from "./edit";
 import { gotoLineWithoutJumplist } from "./motion";
-import { commitHistoryNow, jumplistFor } from "./jumps";
+import { commitHistoryNow, jumplistFor, makeJump } from "./jumps";
 import { shell, type ShellOutput } from "./shell";
 import { Args, SHELL_SIGNATURE, split, Tokenizer, type Flag, type Signature } from "./command-line";
 import { expand } from "./expansion";
@@ -143,7 +144,7 @@ function gotoLineNumber(cx: Context, args: Args, event: PromptEvent): void {
   if (!update()) return;
   const last = cx.editor.gotoPreview!;
   cx.editor.gotoPreview = null;
-  jumplistFor(cx).push({ docId: cx.host.id, selection: last });
+  jumplistFor(cx).push(makeJump(cx.host, last));
 }
 
 function ws(name: string, extra: Partial<TypableCommand> = {}): Pick<TypableCommand, "fun"> & Partial<TypableCommand> {
@@ -330,7 +331,24 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
   { name: "quit-all!", aliases: ["qa!"], doc: "Force close all views.", ...ws("quit-all") },
   { name: "cquit", aliases: ["cq"], doc: "Quit with exit code (default 1). Accepts an optional integer exit code (:cq 2).", ...ws("cquit") },
   { name: "cquit!", aliases: ["cq!"], doc: "Force quit with exit code (default 1) ignoring unsaved changes. Accepts an optional integer exit code (:cq! 2).", ...ws("cquit!") },
-  { name: "format", aliases: ["fmt"], doc: "Format the file using an external formatter or language server.", ...ws("format") },
+  {
+    name: "format",
+    aliases: ["fmt"],
+    doc: "Format the file using an external formatter or language server.",
+    fun: validateOnly((cx, args) => {
+      if (cx.editor.runApp(cx, "format", args.positional)) return;
+      const syntax = syntaxOf(cx);
+      const query = syntax ? indentQueryFor(syntax.loader, syntax.root.language) : null;
+      if (!syntax || !query) {
+        cx.editor.setError("A formatter isn't available, and no language server provides formatting capabilities");
+        return;
+      }
+      const { style, tabWidth } = cx.editor.indent(cx.host);
+      const doc = docOf(cx);
+      apply(cx, changeSetOf(doc, treesitterFormatChanges(query, syntax, style, tabWidth, doc)));
+      commitHistoryNow(cx.host);
+    }),
+  },
   { name: "change-current-directory", aliases: ["cd"], doc: "Change the current working directory.", ...ws("change-current-directory") },
   { name: "show-directory-stack", aliases: [], doc: "Show the directory stack as a <space> delimited string.", ...ws("show-directory-stack") },
   { name: "push-directory", aliases: ["pushd"], doc: "Save and then change the current directory.", ...ws("push-directory") },
@@ -427,7 +445,16 @@ const DEFS: Omit<TypableCommand, "signature">[] = [
         return;
       }
       const doc = docOf(cx);
-      apply(cx, changeSetOf(doc, selOf(cx).ranges.map((r) => [r.from(), r.to(), refill(doc.sliceString(r.from(), r.to()), width)])));
+      const options = { textWidth: width, tabWidth: cx.editor.indent(cx.host).tabWidth, lineEnding: "\n", commentTokens: cx.editor.languageConfig(cx.host)?.commentTokens ?? [] };
+      const changes: [number, number, string][] = [];
+      const lines = selOf(cx).ranges.map((r) => lineRange(doc, r));
+      for (let i = 0; i < lines.length; i++) {
+        const start = lines[i]![0];
+        let end = lines[i]![1];
+        while (i + 1 < lines.length && lines[i + 1]![0] - end <= 1) end = lines[++i]![1];
+        changes.push(...reflow(doc, start, end, options));
+      }
+      apply(cx, changeSetOf(doc, changes));
       commitHistoryNow(cx.host);
     }),
   },

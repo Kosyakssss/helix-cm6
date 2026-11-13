@@ -18,6 +18,7 @@ export interface Pending {
 }
 
 export interface HistoryState {
+  id: object;
   revisions: Revision[];
   current: number;
   pending: Pending | null;
@@ -41,7 +42,7 @@ function rootRevision(doc: Text): Revision {
 }
 
 export function createHistory(doc: Text): HistoryState {
-  return { revisions: [rootRevision(doc)], current: 0, pending: null };
+  return { id: {}, revisions: [rootRevision(doc)], current: 0, pending: null };
 }
 
 export function makeHistoryField(selectionOf: (state: Transaction["startState"]) => Selection) {
@@ -85,7 +86,7 @@ function commit(value: HistoryState, selection: Selection, timestamp: number): H
     selectionBefore: pending.oldSelection,
     timestamp,
   });
-  return { revisions, current: index, pending: null };
+  return { ...value, revisions, current: index, pending: null };
 }
 
 export interface Step {
@@ -126,6 +127,18 @@ function pathUp(value: HistoryState, n: number, a: number): number[] {
     n = value.revisions[n]!.parent;
   }
   return path;
+}
+
+export function changesSince(value: HistoryState, revision: number): ChangeSet | null {
+  if (revision === value.current) return null;
+  const lca = lowestCommonAncestor(value, revision, value.current);
+  let changes: ChangeSet | null = null;
+  const add = (next: ChangeSet) => {
+    changes = changes ? changes.compose(next) : next;
+  };
+  for (const n of pathUp(value, revision, lca)) add(value.revisions[n]!.inversion);
+  for (const n of pathUp(value, value.current, lca).reverse()) add(value.revisions[n]!.changes);
+  return changes;
 }
 
 export function jumpTo(value: HistoryState, to: number): Step[] {

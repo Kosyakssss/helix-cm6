@@ -65,6 +65,7 @@ EXPORT(hm_cursor_delete) void hm_cursor_delete(TSTreeCursor *cursor) {
 
 EXPORT(hm_cursor_field_name) const char *hm_cursor_field_name(const TSTreeCursor *cursor) { return ts_tree_cursor_current_field_name(cursor); }
 EXPORT(hm_node_is_missing) uint32_t hm_node_is_missing(const TSNode *node) { return ts_node_is_missing(*node); }
+EXPORT(hm_node_is_extra) uint32_t hm_node_is_extra(const TSNode *node) { return ts_node_is_extra(*node); }
 EXPORT(hm_node_symbol_type) uint32_t hm_node_symbol_type(const TSNode *node) { return ts_language_symbol_type(ts_node_language(*node), ts_node_symbol(*node)); }
 EXPORT(hm_node_kind) const char *hm_node_kind(const TSNode *node) { return ts_node_type(*node); }
 EXPORT(hm_cursor_node) void hm_cursor_node(const TSTreeCursor *cursor, TSNode *out) { *out = ts_tree_cursor_current_node(cursor); }

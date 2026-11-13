@@ -1,6 +1,6 @@
 # Parity with Helix
 
-Helix commit `ba40e547`, the oracle's pin. Update this list with each change.
+Helix commit `a714a818`, the oracle's pin. Update this list with each change.
 
 States:
 
@@ -367,7 +367,7 @@ Static: ported 232, app 64, out of scope 17, missing 0. Typed: app 49, ported 40
 | `:write-buffer-close` | app |
 | `:write-buffer-close!` | app |
 | `:new` | app |
-| `:format` | app |
+| `:format` | ported: an app formatter runs first; without one, the engine re-indents with the indent query |
 | `:indent-style` | ported |
 | `:line-ending` | ported |
 | `:earlier` | ported |

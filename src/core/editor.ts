@@ -6,7 +6,7 @@ import { defaultConfig, type Config } from "../config";
 import { doc, mode, patchHelix, selection, type Host } from "./host";
 import { executeCommand, runTypable, STATIC_COMMANDS } from "../commands";
 import { Prompt, type Completion } from "./prompt";
-import { commitHistoryNow, JumpList, type Jump } from "../commands/jumps";
+import { commitHistoryNow, JumpList, jumpSelection, type Jump } from "../commands/jumps";
 import type { ShellRunner } from "../commands/shell";
 import { completeCommandLine, executeCommandLine } from "../commands/typed";
 import { setSel } from "../commands/util";
@@ -183,14 +183,14 @@ export class HelixEditor {
     const key = host.paneId;
     let list = this.jumplists.get(key);
     if (!list) {
-      list = new JumpList({ docId: host.id, selection: selection(host) });
+      const history = host.state.field(historyField);
+      list = new JumpList({ docId: host.id, selection: selection(host), revision: history.current, history: history.id });
       this.jumplists.set(key, list);
     }
     return list;
   }
 
   docChanged(host: Host, changes: import("@codemirror/state").ChangeDesc): void {
-    for (const list of this.jumplists.values()) list.map(host.id, changes);
     if (this.snippets.get(host.id)?.map(changes)) this.snippets.delete(host.id);
   }
 
@@ -209,7 +209,7 @@ export class HelixEditor {
 
   jumpTo(cx: Context, jump: Jump): void {
     if (jump.docId === cx.host.id) {
-      setSel(cx, jump.selection);
+      setSel(cx, jumpSelection(jump, cx.host));
       return;
     }
     this.app?.openJump?.(cx, jump);

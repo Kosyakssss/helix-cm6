@@ -37,5 +37,6 @@ export interface Indentation {
 }
 export declare function indentQueryFor(loader: LanguageLoader, language: LanguageId): IndentQuery | null;
 export declare function treesitterIndentForPos(query: IndentQuery, syntax: Syntax, tabWidth: number, indentWidth: number, doc: Text, line: number, pos: number, newLine: boolean): Indentation | null;
+export declare function treesitterFormatChanges(query: IndentQuery, syntax: Syntax, style: IndentStyle, tabWidth: number, doc: Text): [number, number, string][];
 export declare function indentForNewline(syntax: Syntax | null, heuristic: IndentHeuristic, style: IndentStyle, tabWidth: number, doc: Text, lineBefore: number, lineBeforeEndPos: number, currentLine: number): string;
 export {};

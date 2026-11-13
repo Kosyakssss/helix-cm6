@@ -15,6 +15,7 @@ export interface Pending {
     oldSelection: Selection;
 }
 export interface HistoryState {
+    id: object;
     revisions: Revision[];
     current: number;
     pending: Pending | null;
@@ -39,6 +40,7 @@ export declare function redoStep(value: HistoryState): {
     current: number;
     step: Step;
 } | null;
+export declare function changesSince(value: HistoryState, revision: number): ChangeSet | null;
 export declare function jumpTo(value: HistoryState, to: number): Step[];
 export type UndoKind = {
     kind: "steps";

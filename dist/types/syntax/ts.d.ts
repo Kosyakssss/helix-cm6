@@ -22,6 +22,7 @@ interface Exports {
     hm_node_parent(node: number, out: number): void;
     hm_cursor_field_name(cursor: number): number;
     hm_node_is_missing(node: number): number;
+    hm_node_is_extra(node: number): number;
     hm_node_kind(node: number): number;
     hm_node_symbol_type(node: number): number;
     hm_node_next_sibling(node: number, out: number): void;
@@ -91,6 +92,7 @@ export declare class Node {
     get endByte(): number;
     get symbol(): number;
     get isMissing(): boolean;
+    get isExtra(): boolean;
     get isVisible(): boolean;
     get kind(): string;
     get isNamed(): boolean;

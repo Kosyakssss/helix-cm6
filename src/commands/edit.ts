@@ -818,8 +818,8 @@ export const editCommands: Record<string, CommandFn> = {
     if (jump) cx.editor.jumpTo(cx, jump);
   },
   jump_backward: (cx) => {
-    const here = { docId: cx.host.id, selection: selOf(cx) };
-    const jump = jumplistFor(cx).backward(here, cx.count());
+    commitHistoryNow(cx.host);
+    const jump = jumplistFor(cx).backward(cx.host, cx.count());
     if (jump) cx.editor.jumpTo(cx, jump);
   },
   select_register: (cx) => {

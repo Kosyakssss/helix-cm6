@@ -1,6 +1,6 @@
 import type { Text } from "@codemirror/state";
 import { Context } from "../core/editor";
-import { jumplistFor } from "./jumps";
+import { jumplistFor, makeJump } from "./jumps";
 import { ensureGraphemeBoundaryNext, ensureGraphemeBoundaryPrev, nextGraphemeBoundary, prevGraphemeBoundary } from "../graphemes";
 import { graphemeWidth, visualColumn } from "../movement";
 import { Range, Selection } from "../selection";
@@ -373,7 +373,7 @@ export function regexPrompt(
         editor.setError(re.message);
         return;
       }
-      jumplistFor(pcx).push({ docId: host.id, selection: snapshot });
+      jumplistFor(pcx).push(makeJump(host, snapshot));
       onEvent(pcx, re, "validate");
     },
     onCancel: () => setSel(fresh(), snapshot),

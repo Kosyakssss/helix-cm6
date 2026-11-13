@@ -55,7 +55,7 @@ const EDITS = [
   "/o<ret>", "/o<ret>n", "/o<ret>N", "?o<ret>", "?o<ret>n", "/zzz<ret>", "*n", "<A-*>n", "w*N", "/O<ret>", "/l+<ret>nn",
   "%s<ret>", "/<ret>", "/e<ret>/<ret>",
   ":5<ret>", ":sort<ret>", "%<A-s>:sort<ret>", "%<A-s>:sort -r<ret>", ":echo hi<ret>",
-  "x:reflow 10<ret>", "%:reflow 8<ret>", ":char<ret>", ":set-register a hi<ret>\"ap",
+  "x:reflow 10<ret>", "%:reflow 8<ret>", "%:reflow 20<ret>", "<C-s>wdu<C-o>", "wd<C-s>u<C-o><C-o>", "w<C-s>xdugg<C-o>", ":format<ret>", ":char<ret>", ":set-register a hi<ret>\"ap",
   "ifoo<esc>:earlier<ret>", "ifoo<esc>u:later<ret>", ":clear-register<ret>",
   "<C-r>", "ix<C-r>\"<esc>", "yi<C-r>\"<esc>",
   "%s\\d+<ret>", "%s\\w+<ret>", "%s[[:alpha:]]+<ret>", "%s(?x) l o<ret>", "%s(?=o)<ret>", "%s(o)\\1<ret>", "%s\\z<ret>",
@@ -265,9 +265,24 @@ const CODE_KEYS = [
   "gla<ret><esc>", "ghi<ret><esc>", "A {<ret><esc>", "A(<ret><esc>", "xc<esc>",
 ];
 
+const CODE_CASES: Omit<Case, "id">[] = [
+  { in: "#[f|]#n foo() {\nlet x = 1;\n      if x > 0 {\n   x + 1\n} else {\n            x - 1\n   }\n}\n", keys: ":format<ret>", lang: "rust" },
+  { in: "#[d|]#ef f(a):\n        if a:\n  return 1\n    return 2\n", keys: ":format<ret>", lang: "python" },
+  { in: "#[i|]#f x:  # note\n    pass\n", keys: "A<ret>y<esc>", lang: "python" },
+  { in: "#[w|]#hile x:  # note\n    pass\n", keys: "A<ret><esc>", lang: "python" },
+  { in: "#[f|]#unction f() {\n  if (x) // note\n    g();\n}\n", keys: "jA<ret>y<esc>", lang: "typescript" },
+  { in: "#[f|]#n f() { // note\n}\n", keys: "A<ret>y<esc>", lang: "rust" },
+  { in: "#[f|]#n f() {\n    let x = 1; // note\n}\n", keys: "jA<ret>y<esc>", lang: "rust" },
+  { in: "#[/|]#/ one two three four five six seven\n// eight nine\nfn main() {}\n", keys: "xX:reflow 15<ret>", lang: "rust" },
+  { in: "#[/|]#/ one two three four\n//\n// five six seven eight\n", keys: "%:reflow 12<ret>", lang: "rust" },
+  { in: "#[#|]# alpha beta gamma delta epsilon\nx = 1\n", keys: "x:reflow 14<ret>", lang: "python" },
+  { in: "    #[/|]#/ indented comment that runs long\nfn f() {}\n", keys: "x:reflow 18<ret>", lang: "rust" },
+];
+
 export function codeSuite(): Case[] {
   const cases: Case[] = [];
   let n = 0;
+  for (const c of CODE_CASES) cases.push({ id: `code#${n++}`, ...c });
   for (const [lang, text] of Object.entries(CODE_TEXTS)) {
     const starts = graphemeStarts(text);
     const picks = new Set<number>();

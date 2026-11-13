@@ -22,6 +22,7 @@ interface Exports {
   hm_node_parent(node: number, out: number): void;
   hm_cursor_field_name(cursor: number): number;
   hm_node_is_missing(node: number): number;
+  hm_node_is_extra(node: number): number;
   hm_node_kind(node: number): number;
   hm_node_symbol_type(node: number): number;
   hm_node_next_sibling(node: number, out: number): void;
@@ -253,6 +254,10 @@ export class Node {
 
   get isMissing(): boolean {
     return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_missing(p)) !== 0;
+  }
+
+  get isExtra(): boolean {
+    return this.rt.nodeValue(this, (p) => this.rt.x.hm_node_is_extra(p)) !== 0;
   }
 
   get isVisible(): boolean {

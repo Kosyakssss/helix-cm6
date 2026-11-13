@@ -22,7 +22,7 @@ export { formatKey, keyFromDom, parseKey, parseMacro, type KeyEvent } from "./ke
 export { defaultConfig, type Config } from "./config";
 export { loadConfig, type LoadedConfig } from "./config-loader";
 export { nextGraphemeBoundary, prevGraphemeBoundary } from "./graphemes";
-export { commitHistoryNow, jumplistFor, pushJump, type Jump } from "./commands/jumps";
+export { commitHistoryNow, jumplistFor, jumpSelection, makeJump, pushJump, type Jump } from "./commands/jumps";
 export { gotoLineWithoutJumplist } from "./commands/motion";
 export { docOf, selOf, setSel } from "./commands/util";
 export { pasteImpl } from "./commands/edit";

@@ -28,6 +28,8 @@ import {
   docOf2,
   selOf2,
   setSel2,
+  makeJump2,
+  jumpSelection2,
   commitHistoryNow2,
   jumplistFor2,
   pushJump2,
@@ -74,8 +76,8 @@ import {
   makeViewOps2,
   helixHost2,
   helixEditor2
-} from "./chunk-awxw17h5.js";
-__chunks(import.meta.url,["e624c8eq","awxw17h5","28qqb8e8"],[["./engine.js",1],["./chunk-awxw17h5.js"],["./languages.js"]],0);
+} from "./chunk-atk7bpj1.js";
+__chunks(import.meta.url,["wexr1yxq","atk7bpj1","nxffcses"],[["./engine.js",1],["./chunk-atk7bpj1.js"],["./languages.js"]],0);
 // src/core/markup.ts
 function print(s) {
   const gs = segmentGraphemes(s);
@@ -206,11 +208,13 @@ export {
   hostHooks2 as hostHooks,
   infoOf2 as infoOf,
   isOpaque2 as isOpaque,
+  jumpSelection2 as jumpSelection,
   jumplistFor2 as jumplistFor,
   keyFromDom2 as keyFromDom,
   loadConfig2 as loadConfig,
   loadRegex2 as loadRegex,
   loadSyntax2 as loadSyntax,
+  makeJump2 as makeJump,
   makeViewOps2 as makeViewOps,
   nextGraphemeBoundary2 as nextGraphemeBoundary,
   parseKey2 as parseKey,

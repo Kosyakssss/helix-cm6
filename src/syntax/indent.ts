@@ -372,8 +372,13 @@ function queryIndents(query: IndentQuery, root: Node, text: DocText, range: [num
   return { indentCaptures, extendCaptures, opaqueRanges };
 }
 
-function extendNodes(node: { value: Node }, deepestPreceding: Node, extendCaptures: Map<number, ExtendCapture[]>, text: DocText, line: number, tabWidth: number, indentWidth: number): void {
+function isTrivia(node: Node): boolean {
+  return node.isExtra && node.kind !== "ERROR";
+}
+
+function extendNodes(node: { value: Node }, deepestPreceding: Node, extendCaptures: Map<number, ExtendCapture[]>, text: DocText, line: number, tabWidth: number, indentWidth: number): boolean {
   let stopExtend = false;
+  const contentEndLine = text.byteToLine(deepestPreceding.endByte);
   let deepest: Node | null = deepestPreceding;
   while (deepest && !deepest.equals(node.value)) {
     let extendNode = false;
@@ -384,7 +389,7 @@ function extendNodes(node: { value: Node }, deepestPreceding: Node, extendCaptur
         if (capture === "prevent-once") stopExtend = true;
         else {
           nodeCaptured = true;
-          if (text.byteToLine(deepest.endByte) === line) extendNode = true;
+          if (contentEndLine === line) extendNode = true;
           else {
             const cursorIndent = indentLevelForLine(text.line(line), tabWidth, indentWidth);
             const nodeIndent = indentLevelForLine(text.line(text.byteToLine(deepest.startByte)), tabWidth, indentWidth);
@@ -396,10 +401,11 @@ function extendNodes(node: { value: Node }, deepestPreceding: Node, extendCaptur
     if (nodeCaptured && stopExtend) stopExtend = false;
     else if (extendNode && !stopExtend) {
       node.value = deepest;
-      break;
+      return true;
     }
     deepest = deepest.parent;
   }
+  return false;
 }
 
 function candidateBodyForNewLine(deepestPreceding: Node, bytePos: number): Node | null {
@@ -412,6 +418,7 @@ function candidateBodyForNewLine(deepestPreceding: Node, bytePos: number): Node 
         for (;;) {
           if (cursor.currentNode.id === node.id) {
             if (cursor.gotoNextSibling()) {
+              while (isTrivia(cursor.currentNode) && cursor.currentNode.endByte <= bytePos && cursor.gotoNextSibling());
               const child = cursor.currentNode;
               if (child.startByte >= bytePos) return child;
             }
@@ -437,17 +444,12 @@ function initIndentQuery(
   line: number,
   bytePos: number,
   newLineBytePos: number | null,
-): [Node, Map<number, IndentCapture[]>, [number, number][]] | null {
+): [Node, Map<number, IndentCapture[]>, [number, number][], boolean] | null {
   const start = root.descendantForByteRange(bytePos, bytePos);
   if (!start) return null;
   const node = { value: start };
-  let deepestPreceding: Node | null = null;
-  for (const child of start.children) if (child.endByte <= bytePos) deepestPreceding = child;
-  if (deepestPreceding) {
-    let prec: Node = deepestPreceding;
-    while (prec.childCount > 0) prec = prec.child(prec.childCount - 1)!;
-    deepestPreceding = prec;
-  }
+  let deepestPreceding = start.children.filter((child) => child.endByte <= bytePos && !isTrivia(child)).at(-1) ?? null;
+  for (let last = deepestPreceding?.children.filter((c) => !isTrivia(c)).at(-1); last; last = last.children.filter((c) => !isTrivia(c)).at(-1)) deepestPreceding = last;
   const candidateBody = newLineBytePos !== null && deepestPreceding ? candidateBodyForNewLine(deepestPreceding, bytePos) : null;
   const upper = candidateBody ? candidateBody.endByte : bytePos + 1;
   const range: [number, number] = deepestPreceding ? [deepestPreceding.endByte - 1, upper] : [bytePos, upper];
@@ -457,8 +459,12 @@ function initIndentQuery(
     node.value = candidateBody;
     descended = true;
   }
-  if (deepestPreceding && !descended) extendNodes(node, deepestPreceding, result.extendCaptures, text, line, tabWidth, indentWidth);
-  return [node.value, result.indentCaptures, result.opaqueRanges];
+  let extended = false;
+  if (deepestPreceding && !descended) extended = extendNodes(node, deepestPreceding, result.extendCaptures, text, line, tabWidth, indentWidth);
+  const children = node.value.children.filter((child) => !isTrivia(child));
+  const delimited = children.length > 1 && !children[0]!.isNamed && !children.at(-1)!.isNamed;
+  const openEnded = extended && !delimited;
+  return [node.value, result.indentCaptures, result.opaqueRanges, openEnded];
 }
 
 function opaqueHit(start: number, end: number, bytePos: number, text: DocText): boolean {
@@ -478,7 +484,7 @@ function containmentAccounting(
   const newLineBytePos = newLine ? bytePos : null;
   const init = initIndentQuery(query, root, text, tabWidth, indentWidth, line, bytePos, newLineBytePos);
   if (!init) return null;
-  const [startNode, captures, opaqueRanges] = init;
+  const [startNode, captures, opaqueRanges, openEnded] = init;
   if (opaqueRanges.some(([s, e]) => opaqueHit(s, e, bytePos, text))) return [emptyIndentation(), true];
   const targetLine = line + (newLine ? 1 : 0);
   let indentLevels = 0;
@@ -517,7 +523,8 @@ function containmentAccounting(
       }
     }
     const nodeStart = nodeStartLine(text, node, newLineBytePos);
-    const end = nodeEndLine(text, node, newLineBytePos);
+    let end = nodeEndLine(text, node, newLineBytePos);
+    if (openEnded && newLine) end = Math.max(end, targetLine);
     const parent = headerScoped ? node.parent : null;
     const start = parent ? nodeStartLine(text, parent, newLineBytePos) : nodeStart;
     const contains = start < targetLine && targetLine <= end;
@@ -591,6 +598,22 @@ export function treesitterIndentForPos(
   }
   if (injected) indentation.indent += injectionBaseLevel(syntax, text, bytePos, tabWidth, indentWidth);
   return indentation;
+}
+
+export function treesitterFormatChanges(query: IndentQuery, syntax: Syntax, style: IndentStyle, tabWidth: number, doc: Text): [number, number, string][] {
+  const indentWidth = indentStyleWidth(style, tabWidth);
+  const changes: [number, number, string][] = [];
+  for (let lineIdx = 0; lineIdx < doc.lines; lineIdx++) {
+    const line = doc.line(lineIdx + 1);
+    const fnw = firstNonWhitespace(line.text);
+    if (fnw === null) continue;
+    const pos = line.from + fnw;
+    const indent = treesitterIndentForPos(query, syntax, tabWidth, indentWidth, doc, lineIdx, pos, false);
+    if (!indent) continue;
+    const str = indentationString(indent, style, tabWidth);
+    if (line.text.slice(0, fnw) !== str) changes.push([line.from, pos, str]);
+  }
+  return changes;
 }
 
 export function indentForNewline(
