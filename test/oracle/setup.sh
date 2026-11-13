@@ -2,14 +2,14 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 dir=${HELIX_DIR:-$(cd "$here/../../.." && pwd)/helix}
-rev=ba40e547426b0f9896c8bdc699a4ab11f2b37dbc
+rev=a714a818a3a4f6dd5aad3b003a78692f90a1703f
 if [ ! -d "$dir/.git" ]; then
   git clone --filter=blob:none https://github.com/helix-editor/helix "$dir"
 fi
 if ! git -C "$dir" cat-file -e "$rev^{commit}" 2>/dev/null; then
   git -C "$dir" fetch --quiet https://github.com/helix-editor/helix "$rev"
 fi
-git -C "$dir" checkout --quiet "$rev"
+[ "$(git -C "$dir" rev-parse HEAD)" = "$rev" ] || git -C "$dir" checkout --quiet "$rev"
 cp "$here/oracle.rs" "$dir/helix-term/tests/oracle.rs"
 grammars="$dir/runtime/grammars"
 case "$(uname)" in Darwin) ext=dylib ;; *) ext=so ;; esac

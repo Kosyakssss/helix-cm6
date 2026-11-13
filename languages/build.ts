@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseLanguagesToml, type GrammarConfiguration } from "../src/syntax/config";
 
-const HELIX_REV = "ba40e547426b0f9896c8bdc699a4ab11f2b37dbc";
+const HELIX_REV = "a714a818a3a4f6dd5aad3b003a78692f90a1703f";
 const QUERY_FILES = ["highlights.scm", "injections.scm", "locals.scm", "textobjects.scm", "indents.scm", "rainbows.scm", "tags.scm"];
 
 const here = import.meta.dir;

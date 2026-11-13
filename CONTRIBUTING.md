@@ -2,7 +2,7 @@
 
 ## Rule
 
-This is a port. Behavior follows Helix master at commit `ba40e54742`. If Helix does not have a command or an option, this engine does not have it either.
+This is a port. Behavior follows Helix master at commit `a714a818a3`. If Helix does not have a command or an option, this engine does not have it either.
 
 ## Setup
 

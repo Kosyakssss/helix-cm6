@@ -73,7 +73,7 @@ More in [docs/screenshots](docs/screenshots), each in dark, light and both: the 
 
 ## Compatibility
 
-helix-cm6 follows Helix master at commit `ba40e54742`. About 44,000 key sequences run in real Helix and in this engine, and the text, the selections and the mode after each one must match exactly. [docs/parity.md](docs/parity.md) lists every Helix command and option.
+helix-cm6 follows Helix master at commit `a714a818a3`. About 44,000 key sequences run in real Helix and in this engine, and the text, the selections and the mode after each one must match exactly. [docs/parity.md](docs/parity.md) lists every Helix command and option.
 
 Screen readers and right-to-left text are not tested yet.
 
