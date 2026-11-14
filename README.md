@@ -10,7 +10,7 @@ helix-cm6 adds [Helix](https://helix-editor.com) editing to [CodeMirror 6](https
 npm install helix-cm6 @codemirror/state @codemirror/view @codemirror/commands
 ```
 
-`@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies. To install from GitHub instead, use `github:Kosyakssss/helix-cm6#0.1.2`. `dist/` is committed, so nothing builds on install.
+`@codemirror/state`, `@codemirror/view` and `@codemirror/commands` are peer dependencies. To install from GitHub instead, use `github:Kosyakssss/helix-cm6#0.1.3`. `dist/` is committed, so nothing builds on install.
 
 ## Use
 
