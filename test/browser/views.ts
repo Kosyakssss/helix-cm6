@@ -231,6 +231,7 @@ async function run(type: BrowserType): Promise<string[]> {
   check("mouse = false ignores clicks", (await extra("mouse", "")).head, mouseHead);
 
   for (const [what, got, want] of await page.evaluate(() => (window as unknown as { helixApiChecks(): Promise<[string, unknown, unknown][]> }).helixApiChecks())) check(`api: ${what}`, got, want);
+  for (const [what, got, want] of await page.evaluate(() => (window as unknown as { helixSearchChecks(): Promise<[string, unknown, unknown][]> }).helixSearchChecks())) check(what, got, want);
 
   await browser.close();
   if (errors.length > 0) fails.push(...errors.map((e) => `page error: ${e}`));

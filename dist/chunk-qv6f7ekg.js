@@ -2862,31 +2862,45 @@ function regexPrompt(cx, label, register, onEvent) {
   const host = cx.host;
   const snapshot = selOf2(cx);
   const fresh = () => new Context2(editor, host, null, null);
+  const update = (input, event) => {
+    if (input === "")
+      return;
+    let state = host.state;
+    const transactions = [];
+    const pcx = new Context2(editor, {
+      id: host.id,
+      name: host.name,
+      paneId: host.paneId,
+      path: host.path,
+      view: host.view,
+      get state() {
+        return state;
+      },
+      dispatch(...specs) {
+        state = state.update(...specs).state;
+        transactions.push(...specs);
+      }
+    }, null, null);
+    try {
+      const re = compile(editor, input);
+      setSel2(pcx, snapshot);
+      if (re instanceof Error) {
+        if (event === "validate")
+          editor.setError(re.message);
+        return;
+      }
+      if (event === "validate")
+        jumplistFor2(pcx).push(makeJump2(pcx.host, snapshot));
+      onEvent(pcx, re, event);
+    } finally {
+      host.dispatch(...transactions);
+    }
+  };
   editor.prompt(cx, {
     label,
     history: register,
-    onChange: (input) => {
-      if (input === "")
-        return;
-      const re = compile(editor, input);
-      const pcx = fresh();
-      setSel2(pcx, snapshot);
-      if (!(re instanceof Error))
-        onEvent(pcx, re, "update");
-    },
-    onAccept: (input) => {
-      if (input === "")
-        return;
-      const re = compile(editor, input);
-      const pcx = fresh();
-      setSel2(pcx, snapshot);
-      if (re instanceof Error) {
-        editor.setError(re.message);
-        return;
-      }
-      jumplistFor2(pcx).push(makeJump2(host, snapshot));
-      onEvent(pcx, re, "validate");
-    },
+    onChange: (input) => update(input, "update"),
+    onAccept: (input) => update(input, "validate"),
     onCancel: () => setSel2(fresh(), snapshot)
   });
 }

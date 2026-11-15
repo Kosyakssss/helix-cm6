@@ -338,7 +338,48 @@ async function apiChecks(): Promise<[string, unknown, unknown][]> {
   return out;
 }
 
+async function searchChecks(): Promise<[string, unknown, unknown][]> {
+  const text = "The morning light fell across the room while I wrote about the day. ".repeat(4000) + "quartzneedle\n";
+  const parent = place("search");
+  const selections: number[][] = [];
+  const view = new EditorView({
+    parent,
+    doc: text,
+    extensions: [
+      extension,
+      EditorView.lineWrapping,
+      EditorView.theme({ "&": { width: "720px", height: "400px" }, ".cm-scroller": { fontFamily: "serif" } }),
+      EditorView.updateListener.of((update) => {
+        if (update.selectionSet) selections.push([update.state.selection.main.from, update.state.selection.main.to]);
+      }),
+    ],
+  });
+  view.dom.scrollIntoView();
+  view.focus();
+  const key = (key: string) => view.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  for (const ch of "/quartzneedle") key(ch);
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const target = text.indexOf("quartzneedle");
+  selections.length = 0;
+  key("Enter");
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  const rect = view.coordsAtPos(target);
+  const viewport = view.scrollDOM.getBoundingClientRect();
+  const out: [string, unknown, unknown][] = [
+    ["accepting a search does not expose the original selection", selections, [[target, target + 12]]],
+    ["accepting a search preserves its result", [view.state.selection.main.from, view.state.selection.main.to], [target, target + 12]],
+    ["accepting a search preserves the document", view.state.doc.toString(), text],
+    ["accepting a search closes the prompt", helixStatus(view).prompt, null],
+    ["accepting a search keeps focus", view.hasFocus, true],
+    ["accepting a search keeps the match visible", !!rect && rect.top >= viewport.top && rect.bottom <= viewport.bottom, true],
+  ];
+  view.destroy();
+  parent.remove();
+  return out;
+}
+
 Object.assign(window, {
+  helixSearchChecks: searchChecks,
   helixApiChecks: apiChecks,
   helixExtra: (name: keyof typeof extra, keys: string) => {
     const view = extra[name];
