@@ -54,6 +54,8 @@ const EDITS = [
   "%<A-s>&", "x<A-s>_", "%s<space><ret>d", "%s\\w+<ret>", "%So<ret>", "%sl+<ret>y", "%Ko<ret>", "%<A-K>o<ret>", "%S\\n<ret>",
   "/o<ret>", "/o<ret>n", "/o<ret>N", "?o<ret>", "?o<ret>n", "/zzz<ret>", "*n", "<A-*>n", "w*N", "/O<ret>", "/l+<ret>nn",
   "%s<ret>", "/<ret>", "/e<ret>/<ret>",
+  "/o<esc>", "/o[<ret>", "/ozzz<ret>", "v/o<ret>", "/o<ret><C-o><C-o>",
+  "%s\\w+<ret><C-o>", "%S\\w+<ret>", "%Kzzz<ret>", "%<A-K>.<ret>",
   ":5<ret>", ":sort<ret>", "%<A-s>:sort<ret>", "%<A-s>:sort -r<ret>", ":echo hi<ret>",
   "x:reflow 10<ret>", "%:reflow 8<ret>", "%:reflow 20<ret>", "<C-s>wdu<C-o>", "wd<C-s>u<C-o><C-o>", "w<C-s>xdugg<C-o>", ":format<ret>", ":char<ret>", ":set-register a hi<ret>\"ap",
   "ifoo<esc>:earlier<ret>", "ifoo<esc>u:later<ret>", ":clear-register<ret>",

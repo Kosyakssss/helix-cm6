@@ -1,4 +1,4 @@
-import type { Text } from "@codemirror/state";
+import type { Text, TransactionSpec } from "@codemirror/state";
 import { Context } from "../core/editor";
 import { jumplistFor, makeJump } from "./jumps";
 import { ensureGraphemeBoundaryNext, ensureGraphemeBoundaryPrev, nextGraphemeBoundary, prevGraphemeBoundary } from "../graphemes";
@@ -354,28 +354,40 @@ export function regexPrompt(
   const host = cx.host;
   const snapshot = selOf(cx);
   const fresh = () => new Context(editor, host, null, null);
+  const update = (input: string, event: "update" | "validate") => {
+    if (input === "") return;
+    let state = host.state;
+    const transactions: TransactionSpec[] = [];
+    const pcx = new Context(editor, {
+      id: host.id,
+      name: host.name,
+      paneId: host.paneId,
+      path: host.path,
+      view: host.view,
+      get state() { return state; },
+      dispatch(...specs: TransactionSpec[]) {
+        state = state.update(...specs).state;
+        transactions.push(...specs);
+      },
+    }, null, null);
+    try {
+      const re = compile(editor, input);
+      setSel(pcx, snapshot);
+      if (re instanceof Error) {
+        if (event === "validate") editor.setError(re.message);
+        return;
+      }
+      if (event === "validate") jumplistFor(pcx).push(makeJump(pcx.host, snapshot));
+      onEvent(pcx, re, event);
+    } finally {
+      host.dispatch(...transactions);
+    }
+  };
   editor.prompt(cx, {
     label,
     history: register,
-    onChange: (input) => {
-      if (input === "") return;
-      const re = compile(editor, input);
-      const pcx = fresh();
-      setSel(pcx, snapshot);
-      if (!(re instanceof Error)) onEvent(pcx, re, "update");
-    },
-    onAccept: (input) => {
-      if (input === "") return;
-      const re = compile(editor, input);
-      const pcx = fresh();
-      setSel(pcx, snapshot);
-      if (re instanceof Error) {
-        editor.setError(re.message);
-        return;
-      }
-      jumplistFor(pcx).push(makeJump(host, snapshot));
-      onEvent(pcx, re, "validate");
-    },
+    onChange: (input) => update(input, "update"),
+    onAccept: (input) => update(input, "validate"),
     onCancel: () => setSel(fresh(), snapshot),
   });
 }
