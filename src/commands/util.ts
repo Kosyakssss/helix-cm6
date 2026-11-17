@@ -189,8 +189,8 @@ export function enterInsertMode(cx: Context): void {
   setModeOnly(cx, "insert");
 }
 
-export function fragments(doc: Text, sel: Selection): string[] {
-  return sel.ranges.map((r) => doc.sliceString(r.from(), r.to()));
+export function fragments(doc: Text, sel: Selection, lineBreak = "\n"): string[] {
+  return sel.ranges.map((r) => doc.sliceString(r.from(), r.to(), lineBreak));
 }
 
 export function mapPosAfter(changes: ChangeSet, pos: number): number {

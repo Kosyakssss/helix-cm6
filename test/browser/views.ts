@@ -182,6 +182,31 @@ async function run(type: BrowserType): Promise<string[]> {
   check("x and p on a last line without a newline pastes below as a line", (await extra("final2", "jxyp")).doc, "one\ntwo\ntwo");
   check("p of a line after a last line without a newline adds a line", (await extra("final3", "xyjp")).doc, "one\ntwo\none");
   check("e on a whole last line stays charwise", (await extra("final4", "jeyP")).doc, "one\ntwotwo");
+  const clipboard = (type: "copy" | "cut", name = "clip", outside = false) =>
+    page.evaluate((a) => (window as unknown as { helixClipboard(a: unknown): Promise<[string | null, string]> }).helixClipboard(a), [type, name, outside] as const);
+  await extra("clip", "xx");
+  check("copy of whole lines keeps their line breaks", await clipboard("copy"), ["one\ntwo\n", "one\ntwo\nthree"]);
+  check("cut of whole lines takes their line breaks", await clipboard("cut"), ["one\ntwo\n", "three"]);
+  await extra("clip", "uggx");
+  await clipboard("cut");
+  check("each cut is its own undo step", [(await clipboard("cut"))[1], (await extra("clip", "u")).doc], ["wo\nthree", "two\nthree"]);
+  await extra("clip", "ggvl");
+  await clipboard("copy");
+  check("copy leaves select mode", (await extra("clip", "l")).anchor, 2);
+  await extra("clip", "<esc>gg2");
+  await clipboard("copy");
+  await extra("clip", "x");
+  check("copy drops a pending count", (await clipboard("copy"))[0], "two\n");
+  await extra("clip", "ggx:");
+  const underPrompt = await clipboard("cut");
+  await extra("clip", "<esc>ggxf");
+  const underPending = await clipboard("cut");
+  await extra("clip", "<esc>");
+  check("cut with a prompt or a pending key open copies without deleting", [underPrompt, underPending[1]], [["two\n", "two\nthree"], "two\nthree"]);
+  await extra("clipcrlf", "xx");
+  check("copy runs output filters and keeps the document's line breaks", await clipboard("copy", "clipcrlf"), ["ONE\r\nTWO\r\n", "one\r\ntwo\r\nthree"]);
+  await extra("clipcrlf", "ggx");
+  check("cut leaves a selection that starts outside the editor alone", (await clipboard("cut", "clipcrlf", true))[1], "one\r\ntwo\r\nthree");
 
   const call = <T>(name: string, arg?: unknown) => page.evaluate(([n, a]) => (window as unknown as Record<string, (x: unknown) => T>)[n as string]!(a), [name, arg] as const);
   const status = (name: string) => call<{ info: { rows: { keys: string; doc: string; available: boolean }[] } | null; prompt: { label: string; input: string; cursor: number; completions: string[]; selected: number | null } | null; message: { text: string } | null; diagnostics: { error: number }; line: number }>("helixStatusOf", name);

@@ -25,5 +25,5 @@ export declare function lineToChar(doc: Text, line: number): number;
 export declare function firstNonWhitespaceChar(doc: Text, line: number): number | null;
 export declare function exitSelectMode(cx: Context): void;
 export declare function enterInsertMode(cx: Context): void;
-export declare function fragments(doc: Text, sel: Selection): string[];
+export declare function fragments(doc: Text, sel: Selection, lineBreak?: string): string[];
 export declare function mapPosAfter(changes: ChangeSet, pos: number): number;

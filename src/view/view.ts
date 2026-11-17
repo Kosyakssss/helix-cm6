@@ -21,7 +21,8 @@ import { helixField, helixOwned, historyField, setHelix, syncNativeSelection, to
 import { hookInsert } from "../auto-pairs";
 import { autoPairsFor, insertDiffers, mayAutoPair } from "../commands/insert";
 import { changeByAndWithSelection } from "../commands/util";
-import { pasteImpl } from "../commands/edit";
+import { deleteSelectionImpl, pasteImpl, yankFragments } from "../commands/edit";
+import { commitHistoryNow } from "../commands/jumps";
 import { exitSelectMode } from "../commands/util";
 import { Context } from "../core/editor";
 import { changesField } from "../changes";
@@ -86,6 +87,16 @@ function endComposition(view: EditorView): void {
   }
   view.focus();
   view.contentDOM.dispatchEvent(new CustomEvent("compositionend"));
+}
+
+function ownsSelection(view: EditorView): boolean {
+  const root = view.root as DocumentOrShadowRoot & { getSelection?: () => Selection | null };
+  const selection = root.getSelection ? root.getSelection() : view.dom.ownerDocument.getSelection();
+  try {
+    return !!selection?.anchorNode && view.contentDOM.contains(selection.anchorNode);
+  } catch {
+    return false;
+  }
 }
 
 function buildDecorations(view: EditorView, env: ViewEnv): DecorationSet {
@@ -397,8 +408,33 @@ export function helixExtension(env: ViewEnv): Extension {
     { decorations: (v) => v.lines },
   );
 
-  const pasteHandler = Prec.highest(
+  const copySelections = (event: ClipboardEvent, view: EditorView, cut: boolean): boolean => {
+    const value = view.state.field(helixField, false);
+    const data = event.clipboardData;
+    if (!value || value.mode === "insert" || !data || !view.hasFocus || !ownsSelection(view)) return false;
+    const cx = new Context(editor, env.hostFor(view), null, null);
+    const state = view.state;
+    let text = yankFragments(cx, state.lineBreak).join(state.lineBreak);
+    for (const filter of state.facet(EditorView.clipboardOutputFilter)) text = filter(text, state);
+    event.preventDefault();
+    data.clearData();
+    data.setData("text/plain", text);
+    if (editor.activePrompt || editor.onNextKeyState) return true;
+    editor.count = null;
+    if (cut && !state.readOnly) {
+      commitHistoryNow(cx.host);
+      deleteSelectionImpl(cx, "delete", false);
+      commitHistoryNow(cx.host);
+    } else {
+      exitSelectMode(cx);
+    }
+    return true;
+  };
+
+  const clipboardHandler = Prec.highest(
     EditorView.domEventHandlers({
+      copy: (event, view) => copySelections(event, view, false),
+      cut: (event, view) => copySelections(event, view, true),
       paste(event, view) {
         const value = view.state.field(helixField, false);
         if (!value || value.mode === "insert") return false;
@@ -452,7 +488,7 @@ export function helixExtension(env: ViewEnv): Extension {
     keyHandler,
     stuckComposition,
     swallowInput,
-    pasteHandler,
+    clipboardHandler,
     autoPairsInput,
     decorations,
     cursorLayers(editor),

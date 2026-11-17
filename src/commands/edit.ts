@@ -204,7 +204,7 @@ function selectionIsLinewise(doc: Text, sel: Selection): boolean {
   });
 }
 
-function deleteSelectionImpl(cx: Context, op: "delete" | "change", yank: boolean): void {
+export function deleteSelectionImpl(cx: Context, op: "delete" | "change", yank: boolean): void {
   const doc = docOf(cx);
   const sel = selOf(cx);
   const onlyWholeLines = selectionIsLinewise(doc, sel);
@@ -248,12 +248,12 @@ function switchCaseImpl(cx: Context, f: (s: string) => string): void {
   exitSelectMode(cx);
 }
 
-function yankFragments(cx: Context): string[] {
+export function yankFragments(cx: Context, lineBreak = "\n"): string[] {
   const doc = docOf(cx);
   const sel = selOf(cx);
-  const values = fragments(doc, sel);
+  const values = fragments(doc, sel, lineBreak);
   if (!cx.editor.finalLineIsLine || cx.editor.wholeLineSelection !== sel) return values;
-  return values.map((value, i) => (sel.ranges[i]!.to() === doc.length && !value.endsWith("\n") ? `${value}\n` : value));
+  return values.map((value, i) => (sel.ranges[i]!.to() === doc.length && !value.endsWith(lineBreak) ? `${value}${lineBreak}` : value));
 }
 
 function yankImpl(cx: Context, register: string): void {
