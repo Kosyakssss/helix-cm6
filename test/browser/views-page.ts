@@ -117,7 +117,7 @@ const snippetView = new EditorView({ parent: place("snippet"), doc: "\n", extens
 helixSnippet(snippetView, "foo(${1:bar}, ${2:baz})$0");
 const mouseView = new EditorView({ parent: place("mouse"), doc: "some words in this line\n", extensions: [helix({ syntax: false, config: "[editor]\nmouse = false\n" })] });
 const noPanelView = new EditorView({ parent: place("nopanel"), doc: "abc\n", extensions: [helix({ syntax: false, panel: false })] });
-const extra = { snippet: snippetView, mouse: mouseView, app: appView, bare: bareView, nopanel: noPanelView, edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4") };
+const extra = { snippet: snippetView, mouse: mouseView, app: appView, bare: bareView, nopanel: noPanelView, edges: edgeView, cell: cellView, ranges: rangesView, command: commandView, final1: finalLine("final1"), final2: finalLine("final2"), final3: finalLine("final3"), final4: finalLine("final4"), clip: hooked("clip", "one\ntwo\nthree"), clipcrlf: new EditorView({ parent: place("clipcrlf"), doc: "one\r\ntwo\r\nthree", extensions: [helix({ syntax: false }), EditorState.lineSeparator.of("\r\n"), EditorView.clipboardOutputFilter.of((text) => text.toUpperCase())] }) };
 
 function panel(name: "a" | "b") {
   const dom = views[name].dom;
@@ -348,6 +348,17 @@ Object.assign(window, {
     helixType(view, keys);
     const value = view.state.field(helixField).selection.primary();
     return { doc: view.state.doc.toString(), head: value.cursor(view.state.doc), anchor: value.anchor, edges: [...edges], entered: [...entered], status: view.state.facet(helixEditor)!.status?.message ?? null };
+  },
+  helixClipboard: async ([type, name, outside]: ["copy" | "cut", "clip" | "clipcrlf", boolean]) => {
+    const view = extra[name];
+    view.focus();
+    if (outside) {
+      view.dom.ownerDocument.getSelection()!.setBaseAndExtent(view.dom.parentElement!, 0, view.contentDOM, 0);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    const event = new ClipboardEvent(type, { clipboardData: new DataTransfer(), bubbles: true, cancelable: true });
+    view.contentDOM.dispatchEvent(event);
+    return [event.clipboardData?.getData("text/plain") ?? null, view.state.sliceDoc()];
   },
   helixOpened: () => [...opened],
   helixStatusOf: (name: keyof typeof extra) => helixStatus(extra[name]),
